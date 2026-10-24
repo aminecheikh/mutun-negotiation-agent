@@ -7,12 +7,15 @@ Price of the main sheet, each round:
   time     anchor -> ceiling on a Boulware curve: (t / T) ** (1 / beta), beta < 1 holds early and concedes late
            (time-dependent tactics, Faratin, Sierra & Jennings 1998)
   pace     until our target, at least a linear step per round (reaching it halfway): visible movement
-  reply    at least what the supplier conceded in its last move (absolute tit-for-tat, same paper): "it gives
-           nothing without a move from you" - and matched moves meet at the midpoint, i.e. the target
+  reply    until our target, at least what the supplier conceded in its last move (absolute tit-for-tat, same
+           paper): "it gives nothing without a move from you" - and matched moves meet at the midpoint, i.e. the
+           target. Never past the midpoint of the current gap: a big drop from an inflated opening is not a
+           step to copy (split-the-difference, Raiffa). Above our target we hold and move on terms instead
   limits   never above the ceiling or its standing price, never below our previous offer
-The main sheet uses the band's target package (payment days, dates, clauses). Up to two more sheets change one
-term each and are re-priced to cost us the same C: worth more to the supplier (its estimated cost of money),
-so its answer shows what it values.
+The main sheet is the cheapest package in C the supplier can still accept at this price: the band's target
+package, its own terms or our last ones (the target package's short payment or pickup only pays near the target
+price). Up to two more sheets change one term each and are re-priced to cost us the same C: worth more to the
+supplier (its estimated cost of money), so its answer shows what it values.
 """
 
 from ....cost import complete_offer, cost_breakdown, must_haves_ok, supplier_value, total_cost
@@ -42,7 +45,7 @@ def plan(
         sheet = complete_offer(case, theirs)
         return OfferPlan(supplier_id, (sheet,), (total_cost(case, sheet, std, supplier),), "no band: echo its terms")
     price = next_price(case, band, events)
-    main = _main_sheet(case, band, theirs, price, std)
+    main = _main_sheet(case, band, theirs, price, std, supplier, _our_last_terms(events))
     c_main = total_cost(case, main, std, supplier)
     levers = tuple(f for f in tactic.levers if f != "unit_price" and f in case["negotiable"])
     fields = list(dict.fromkeys([*levers, *case["negotiable"]]))
@@ -80,18 +83,31 @@ def next_price(case: dict, band, events: list[dict]) -> float:
         if ours[-1] < band.target:  # a visible step every round until our target, even if it waits for us
             pace = (band.target - anchor) / max(horizon * TARGET_BY_SHARE_OF_ROUNDS, 1)
             price = max(price, min(ours[-1] + pace, band.target))
-        if len(theirs) >= 2 and theirs[-2] > theirs[-1]:
-            price = max(price, ours[-1] + TIT_FOR_TAT * (theirs[-2] - theirs[-1]))
+            if len(theirs) >= 2 and theirs[-2] > theirs[-1]:
+                matched = ours[-1] + TIT_FOR_TAT * (theirs[-2] - theirs[-1])
+                price = max(price, min(matched, band.target, (ours[-1] + theirs[-1]) / 2))
     return round(min(price, limit), 2)
 
 
-def _main_sheet(case: dict, band, theirs: dict, price: float, std: dict) -> dict:
-    """The target package at this round's price; its own terms if the target package breaks a must-have."""
-    for base in (band.target_terms, theirs):
-        sheet = complete_offer(case, {**base, "unit_price": price})
-        if must_haves_ok(case, sheet, std):
-            return sheet
-    return complete_offer(case, {**theirs, "unit_price": price})
+def _our_last_terms(events: list[dict]) -> dict | None:
+    mine = [m for m in events if m.get("from") == "buyer" and m.get("term_sheets")]
+    return mine[-1]["term_sheets"][0]["terms"] if mine else None
+
+
+def _main_sheet(case: dict, band, theirs: dict, price: float, std: dict, supplier=None, last=None) -> dict:
+    """The lowest-C sheet at this round's price among the target package, its terms and our last terms, that
+    keeps the must-haves and is worth as much to the supplier as the target package at the target price (what
+    the band found it can accept). Without a supplier estimate: the target package, else its own terms."""
+    bases = [band.target_terms, theirs, *([last] if last and supplier else [])]
+    sheets = [complete_offer(case, {**base, "unit_price": price}) for base in bases]
+    valid = [s for s in sheets if must_haves_ok(case, s, std)]
+    if not valid:
+        return complete_offer(case, {**theirs, "unit_price": price})
+    if supplier is None:
+        return valid[0]
+    bar = supplier_value(case, band.target_terms, supplier)
+    feasible = [s for s in valid if supplier_value(case, s, supplier) >= bar] or valid[:1]
+    return min(feasible, key=lambda s: total_cost(case, s, std, supplier))
 
 
 def reprice(case: dict, sheet: dict, cost: float, std: dict, supplier) -> dict | None:
