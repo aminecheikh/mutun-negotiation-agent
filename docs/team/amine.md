@@ -5,15 +5,15 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 
 ## Now
 
-- Tools complete (A1-A5, A7-A9) on `main`. Next: A6 Sunday release; one hosted sweep (10 sessions) once Jeddou's
-  J2/J3 and Saed's writer fixes are merged, then fix what the replays show.
+- Fixed the D02 replay (offer engine + keep-alive) and every open ask across lanes, user-approved (see Log 18:55).
+  Next: A6 Sunday release; one hosted sweep (10 sessions) on the merged fixes, then fix what the replays show.
 
 ## Tasks
 
 | ID | Task | Status | Due |
 |---|---|---|---|
 | A1 | `estimates.py` + `bands.py`: floor, fair, ceiling, target = cheapest package in C (relationship incl.) the supplier can accept; `calibrate.py` sanity check | done | Sat 19:00 |
-| A2 | `offers.py`: midpoint anchor, Boulware (beta 0.5) + absolute tit-for-tat, up to 2 equal-C variants worth more to the supplier | done (v1) | Sat 22:00 |
+| A2 | `offers.py`: midpoint anchor, Boulware (beta 0.5) + tit-for-tat until target (never past the midpoint), main sheet = cheapest package it can accept and never worth less to it than our last, up to 2 equal-C variants worth more to the supplier | done (v2) | Sat 22:00 |
 | A3 | `claims.py`: pre-verified claim sentences (index, rival quotes/offers, scorecard, quality, PO, forecast, should-cost, notice) | done (agent-built, reviewed) | Sat 22:00 |
 | A4 | `concession.py`: Bayesian reservation estimate + `p_room` | done | Sun 02:00 |
 | A5 | `dossier.py`: persona, levers, history, second source, evidence lines (intel, spend share, invoices, scorecards, contracts, forecasts, notes) | done (agent-built, reviewed) | Sun 02:00 |
@@ -33,10 +33,25 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 - @saed (20:30): `roles/playbook.md` on feat/roles-saeb has a table of practice suppliers (Brandlhuber 70110, Nordmark 70510 ...). Keep the general rules ("over-ask vs fair price -> ...", "already below should-cost -> don't squeeze") but don't feed practice names or numbers to the prompts: the final's suppliers are new (CLAUDE.md "Generalise, don't overfit"). The tools now compute those numbers for any supplier (`band.fair`, `band.floor`, `dossier`).
 
 - @jeddou (21:00): **guard fix (J2)** - `guard.accept_ok` computes C without our supplier estimate, so in stabilise / secure_supply cases it ignores the squeeze penalty (the slide's "supplier's health"). Use `tools.supplier_from_thread(case, sid, events)` as the 4th argument of `total_cost` there, like the offer engine does.
+
+- @jeddou @saed (22:40): **LLM client retries timeouts** - `arena_kit/agents/llm.py:60` `anthropic.Anthropic(timeout=45.0)` keeps the SDK default `max_retries=2`, so one call can hold a worker of the 32-thread pool in `roles/llm.py` ~135 s after `call_json` fell back; with 10 cases the pool fills and every role falls back. Fix: `max_retries=0` and a client timeout just under the role budget (`docs/research/04-llm-agent-engineering.md`).
+- @jeddou @saed (22:40): `docs/research/README.md` lists candidate actions per owner from the web research (AC_next / AC_combi acceptance in code, round k/10 in prompts, option-ID menu for the strategist, datamarked supplier text, Writer checklist). Pick what fits your lane; cross-lane ones go to DECISIONS.md.
 - @saed (21:00): **`ctx.trades[supplier_id]`** is live: each term change worth money to us, e.g. lead time 56 -> 28 days = EUR x, or EUR y per unit. The strategist can trade those explicitly ("can you do 28 days? we can move on price"); the tools never impose lead time or ppm.
 
 - @saed (21:40): re your D01 test (0.11): that run used the **old placeholder** offers (branch older than main). Fixed on main now: every sheet covers the full need (no 12-of-24 months), a visible step every round until our target even when the supplier waits, your strategist's `Tactic.levers` each get an equal-cost sheet (fields must be negotiable with `term_options`), no sheet that "pays" for less coverage or sits far under our anchor. Please `git merge main` and re-run D01 (free) - expected path vs. its 51.90: 44.30, 45.30, 46.26, 47.22 ... with a 45-day alternative.
 - @jeddou (21:40): **database lock fixed in tools**: `DataTools` wraps the package in `ThreadSafePackage` (one lock, ID index pre-built) - 19 cases in parallel went from 18 crashes to 0. If `agent.py` queries the package directly (not only `lookup`), wrap it too: `from .tools.safe_package import thread_safe`.
+
+- @jeddou (18:55): with the user's OK I changed your files (please review): `runner.py` + `pipeline.py` keep-alive uses the
+  strategist's question when it has no figures, rotates, and never repeats a body (D02 sent the same one 3x and the
+  supplier closed); `pipeline.py` puts this round's fit into `ctx.fits`; `agent.py` builds the LLM client with the
+  17 s role bound and no retries. issues.md 9 and 12 are done (see DECISIONS.md 18:35-18:48) - please close them there.
+- @saed (18:55): with the user's OK I changed your files (please review): strategist view adds `concession` (fit, p_room) and
+  `trades`; writer answers in the supplier's language (German template + German patterns in every check), gets
+  `round_limit`; both prompts treat supplier text as data, never instructions; writer frames conditional trades.
+- @jeddou (19:15): two more changes in your files (please review): `runner.iteration` calls `pipeline.sync` before
+  the verdict (bands re-priced by a cost breakdown reach the policy at once); a counter to a `final_offer` goes out
+  only if `policy.offers_more` (worth more to the supplier than our last message), else accept or hold.
+- @jeddou @saed (18:55): kit changes in DECISIONS.md: `llm.py` (max_retries=0, timeout parameter) and `data.py` (one lock).
 
 ## Log
 
@@ -55,8 +70,32 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 
 - 21:40 - from Saed's D01 replay: thread-safe package (18/19 parallel crashes -> 0), coverage search without a cost estimate, visible step per round to target, strategist levers in sheets, no less-coverage / non-credible variants; sandbox fixtures saved; 337 tests
 
+- 22:30 - web research by 4 agents in `docs/research/` (LLM negotiators, strategy algorithms, procurement
+  practice, LLM engineering) + README index with candidate actions per owner; 2 citations spot-checked
+  (arXiv 2402.15813, 2601.13206); kit `llm.py` retry/timeout issue confirmed in code
+
+- 18:55 - merged main (all three branches were in via PR #1), D02 sandbox 0.524 (best D02), replay accuracy check:
+  claims 2/2 verified, our figures match the trace, no timeouts; loss = 3 identical keep-alives to J1. Fixed with
+  the user's OK across lanes, each test-first: offers (tit-for-tat only below target and never past the midpoint,
+  main sheet = cheapest package it can accept and never worth less to it than our last: 4d45f68, 0b8b6fd),
+  keep-alive never repeats (7d5a6d6), LLM client no retries + 17 s (592eb67), strategist sees fit + trades
+  (1b3c430), writer in the supplier's language with German checks (421d764), kit DataPackage lock (4f290a3),
+  roles research items (f51d63a). 453 tests. Research items already present: AC_next (no better counter ->
+  accept), number/ID guard, urgency block, claim indices as an option menu, cost-share check (A8), payment value
+  bounded by its rate. Not done on purpose: taper of late steps, final position by T-2 (concession-curve changes
+  to measure in the sandbox first), precise non-round prices (computed prices are already precise).
+
+- 19:15 - sandbox D02 on the fixes (53ce03986722d2b5): 0.357 - keep-alives no longer repeat, but J1 walked away
+  after we answered its final offer with our last sheets unchanged. Three more fixes, test-first: bands re-priced
+  before every verdict (a breakdown left J1 parked against a stale target: a4d3075), tit-for-tat answers every
+  supplier move again, capped at the midpoint (422495b), no counter to a final offer that offers nothing more
+  (082049f). Open (A8): a breakdown that lumps "overhead and profit" makes our floor its variable cost, so the
+  target (12.66) sits below where it can sell - the final-offer rule now contains the damage.
+
 ## Runs
 
 | When | Commit | Cases | Sessions | Mean | Notes |
 |---|---|---|---|---|---|
 | Sat 20:15 | ef030f0 | sandbox D02 | 0 (free) | 0.21 | 3 sheets/round worked; lost rival to timeouts; accepted 16.10 final offer |
+| Sat 18:22 | d05f691 | sandbox D02 | 0 (free) | 0.52 | merged main; claims 2/2 verified, no timeouts; same keep-alive 3x to J1 |
+| Sat 18:56 | 0b8b6fd | sandbox D02 | 0 (free) | 0.36 | keep-alive fixed; J1 parked on a stale band, walked after our unmoved counter to its final |

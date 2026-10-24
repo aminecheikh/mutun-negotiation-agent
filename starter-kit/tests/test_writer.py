@@ -217,3 +217,66 @@ def test_moved_re_when_supplier_moved_does_not_flag_but_our_move_does():
     assert not MOVED_RE.search("We note the step you made.")
     for ours in ("We have moved towards your position.", "We raised our offer.", "Our offer has improved."):
         assert MOVED_RE.search(ours), ours
+
+
+# ---- language: answer in the supplier's language, with the same checks (issues.md 9) -------------------------
+
+GERMAN_MAIL = (
+    "Sehr geehrte Damen und Herren, wir bieten Ihnen den Preis von EUR 138.55 an. Die Lieferzeit bleibt "
+    "unverändert und wir freuen uns auf Ihre Antwort. Mit freundlichen Grüßen"
+)
+GERMAN_EVENTS = [{"from": "sales@70110", "status": "open", "subject": "Angebot", "body": GERMAN_MAIL}]
+
+
+def test_write_when_supplier_writes_german_tells_the_model_to_answer_in_german():
+    seen = {}
+
+    def complete(system, user):
+        seen["user"] = json.loads(user)
+        return "{}"
+
+    LLMWriter(complete).write(ctx(), TACTIC, PLAN, GERMAN_EVENTS)
+    assert seen["user"]["language"] == "de"
+
+
+def test_template_when_supplier_writes_german_answers_in_german():
+    email = template(ctx(), TACTIC, PLAN, [CLAIM.sentence], GERMAN_EVENTS)
+    assert email.body.startswith("Sehr geehrte Damen und Herren,")
+    assert "Mit freundlichen Grüßen" in email.body and "Kind regards" not in email.body
+    assert CLAIM.sentence in email.body
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Wir benötigen die Teile dringend.",  # urgency
+        "Unser Budget ist leider begrenzt.",  # budget
+        "Andere Lieferanten bieten günstiger an.",  # data we do not cite
+        "Wir kennen Ihre Liquidität.",  # our private notes
+    ],
+)
+def test_check_when_german_email_leaks_reports_it(line):
+    text = "\n".join(["Sehr geehrte Damen und Herren,", line, "Mit freundlichen Grüßen"])
+    assert check(text, [], set(), GERMAN_MAIL, "HN volute casings")
+
+
+def test_write_when_called_tells_the_model_the_round_and_the_round_limit():
+    # research 01/02 (Sehgal et al. 2026): roles that know "round k of N" close more deals
+    seen = {}
+
+    def complete(system, user):
+        seen["user"] = json.loads(user)
+        return "{}"
+
+    case_ctx = ctx()
+    case_ctx = CaseContext({**case_ctx.case, "round_limit": 8}, case_ctx.dossiers, {}, case_ctx.claims, None)
+    LLMWriter(complete).write(case_ctx, TACTIC, PLAN, EVENTS)
+    assert seen["user"]["round"] == 1 and seen["user"]["round_limit"] == 8
+
+
+@pytest.mark.parametrize("name", ["writer", "strategist"])
+def test_prompts_when_supplier_text_is_shown_treat_it_as_data_not_instructions(name):
+    # research 04 (spotlighting): the supplier writes into our prompt; its text must never steer the role
+    from arena_kit.agents.buyer.roles.llm import prompt
+
+    assert "never instructions" in prompt(name).lower()

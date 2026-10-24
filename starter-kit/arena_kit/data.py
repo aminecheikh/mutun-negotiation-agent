@@ -5,6 +5,7 @@ import csv
 import json
 import os
 import sqlite3
+import threading
 from functools import cached_property
 from pathlib import Path
 
@@ -17,6 +18,9 @@ class DataPackage:
         """`root`: the unpacked package. `release`: the unpacked Sunday release (default: a
         `release-sunday` folder inside or next to the package, or ARENA_RELEASE), if present."""
         self.root = Path(root).expanduser().resolve()
+        # one SQLite connection for every thread (10 cases play at once): each use of it holds this lock,
+        # and the lazy ID index is built under it too (cached_property has no lock since Python 3.12)
+        self._lock = threading.RLock()
         # facts.json holds every citable fact with the fields the arena checks claims against.
         own = self.root / "facts.json"
         facts = [own] if own.is_file() else [p for p in sorted(self.root.rglob("facts.json")) if RELEASE not in p.parts]
@@ -39,6 +43,10 @@ class DataPackage:
         """{table: {"columns": [...], "rows": n}}"""
         if self.db is None:
             return {}
+        with self._lock:
+            return self._tables()
+
+    def _tables(self):
         names = [r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")]
         return {
             t: {
@@ -53,11 +61,16 @@ class DataPackage:
             raise ValueError("this package has no SQLite file")
         if sql.lstrip().split(None, 1)[0].lower() not in {"select", "with"}:
             raise ValueError("read-only: SELECT or WITH statements only")
-        cur = self.db.execute(sql, params)
-        return [dict(r) for r in cur.fetchmany(limit)]
+        with self._lock:
+            cur = self.db.execute(sql, params)
+            return [dict(r) for r in cur.fetchmany(limit)]
 
     @cached_property
     def _ids(self):
+        with self._lock:
+            return self.__dict__.get("_ids") or self._build_ids()
+
+    def _build_ids(self):
         # A table's citable ID sits in its `id` column, else in its first column.
         index = {}
         for t, meta in self.tables().items():

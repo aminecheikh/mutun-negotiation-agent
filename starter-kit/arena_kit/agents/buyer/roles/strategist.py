@@ -30,6 +30,7 @@ TERMS = {
 }  # fmt: skip
 COST_BREAKDOWN = "Could you send us a cost breakdown for this part?"
 ATTACHMENT_CHARS = 1500
+MAX_TRADES = 6  # the biggest savings first (tools.levers sorts them); enough to pick 1-2 levers from
 
 
 # ---- shared helpers (pure) ---------------------------------------------------------------------
@@ -165,6 +166,8 @@ def _thread_view(ctx: CaseContext, sid: str, events: list[dict], read: Behaviour
         "our_messages_sent": len(ours),
         "standing": {"term_sheet_id": sheet_id, "terms": terms, "c": None if math.isinf(c) else round(c)},
         "rule_read": asdict(read),
+        "concession": asdict(fit) if (fit := ctx.fits.get(sid)) else None,
+        "trades": [asdict(t) for t in ctx.trades.get(sid, ())[:MAX_TRADES]],
         "supplier_emails": [
             {
                 "status": m.get("status"),

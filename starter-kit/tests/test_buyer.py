@@ -72,3 +72,41 @@ def test_buyer_agent_when_a_role_raises_falls_back_to_naive_move():
     agent = BuyerAgent(tools, PassthroughProfiler(), RuleAnalyst(), Broken(), None)
     decision = agent.decide(CASE, opening())
     assert decision["supplier_id"] == SID and decision["message"].get("term_sheets")
+
+
+# ---- LLM client: a call we stopped waiting for must not hold a pool worker -------------------------------------
+
+
+class FakeAnthropic:
+    """Stands in for the SDK at the system boundary: records how the client was built."""
+
+    built: dict = {}
+
+    def __init__(self, **kwargs):
+        FakeAnthropic.built = kwargs
+
+
+def test_llm_from_env_when_anthropic_never_retries_and_times_out_at_the_given_budget(monkeypatch):
+    import anthropic
+
+    from arena_kit.agents.llm import llm_from_env
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("LLM_MODEL", "claude-test")
+    llm_from_env(timeout_s=17.0)
+    assert FakeAnthropic.built == {"timeout": 17.0, "max_retries": 0}
+
+
+def test_buyer_factory_when_model_set_bounds_the_client_by_the_role_budget(monkeypatch):
+    import anthropic
+
+    from arena_kit.agents.buyer.config import OrchestratorConfig
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("LLM_MODEL", "claude-test")
+    buyer_factory()
+    cfg = OrchestratorConfig.from_env()
+    assert FakeAnthropic.built["max_retries"] == 0
+    assert FakeAnthropic.built["timeout"] <= max(cfg.strategist_timeout_s, cfg.writer_timeout_s)

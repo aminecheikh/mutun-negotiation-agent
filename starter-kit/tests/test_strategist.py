@@ -5,7 +5,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from arena_kit.agents.buyer.contracts import BehaviourRead, Claim, ConcessionFit
+from arena_kit.agents.buyer.contracts import BehaviourRead, Claim, ConcessionFit, Trade
 from arena_kit.agents.buyer.roles import LLMStrategist, RuleAnalyst, RuleStrategist
 from arena_kit.agents.buyer.roles.analyst import wants_from
 from arena_kit.agents.buyer.roles.strategist import negotiable_levers, refined_read, safe
@@ -221,3 +221,32 @@ def test_negotiable_levers_when_every_index_path_rises_drops_index_clause():
     falling = replace(ctx, case={**case, "buyer": {**case["buyer"], "index_paths": {"AS-14404": -0.04}}})
     assert "index_clause" not in negotiable_levers(rising, ["unit_price", "index_clause"])
     assert "index_clause" in negotiable_levers(falling, ["unit_price", "index_clause"])
+
+
+# ---- what the model sees ------------------------------------------------------------------------------------
+
+
+def seen_thread(ctx, threads):
+    seen = {}
+
+    def complete(system, user):
+        seen["user"] = json.loads(user)
+        return "{}"
+
+    LLMStrategist(complete).choose(ctx, threads, rule_read(ctx, threads))
+    return next(t for t in seen["user"]["threads"] if t["supplier_id"] == SID)
+
+
+def test_choose_when_fit_known_shows_where_the_supplier_stops_and_its_room():
+    ctx, threads = setup([supplier(17.4), buyer(), supplier(16.9, n=1)])
+    fit = ConcessionFit(SID, (17.4, 16.9), 16.2, -2.9, True, 0.35)
+    view = seen_thread(replace(ctx, fits={SID: fit}), threads)
+    assert view["concession"]["reservation_estimate"] == 16.2
+    assert view["concession"]["p_room"] == 0.35
+
+
+def test_choose_when_trades_priced_shows_them_with_their_euro_value():
+    ctx, threads = setup([supplier()])
+    trade = Trade("payment_days", 30, 60, 1234.0, 0.21)
+    view = seen_thread(replace(ctx, trades={SID: (trade,)}), threads)
+    assert view["trades"] == [{"field": "payment_days", "theirs": 30, "ours": 60, "eur": 1234.0, "per_unit": 0.21}]

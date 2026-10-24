@@ -157,3 +157,86 @@ def test_plan_when_levers_offered_no_sheet_covers_less_need_or_sits_far_under_ou
     for sheet in plan.term_sheets:
         assert cost_breakdown(case, sheet)["uncovered_need"] <= uncovered
         assert sheet["unit_price"] >= main["unit_price"] * (1 - offers.MAX_ANCHOR_BELOW_FLOOR_PCT / 100)
+
+
+# Sandbox D02 (2026-10-24, session ed152d4335edfbca): an unknown supplier sent its own cost breakdown after round 1
+# and dropped 1.40 from an inflated opening. Matching that step took our price to its own, and the band's target
+# terms (short payment, FCA) at that price cost more than its standing sheet: no sheet could go out, the runner sent
+# the same keep-alive three times and the supplier closed. The breakdown below is the attachment's text.
+D02_J1 = "sup:DEMO-J1"
+D02_BREAKDOWN = (
+    "[Cost breakdown]\nElement | EUR per unit | Share of price\n"
+    "BAR-14021 (material / cost driver) | 5.56 | =B2/B6\nWAGES-METAL (material / cost driver) | 4.39 | =B3/B6\n"
+    "conversion (machine-hour rate x time) | 2.81 | =B4/B6\noverhead and profit | 2.94 | =B5/B6\n"
+    "Unit price | =SUM(B2:B5) | =SUM(C2:C5)"
+)
+D02_STANDING = {"unit_price": 15.7, "payment_days": 30, "lead_time_days": 28, "incoterm": "DAP"}
+
+
+def d02_after_breakdown(tools):
+    case = SANDBOX["case:D02"]
+    opening = {"unit_price": 17.1, "payment_days": 30, "lead_time_days": 28}
+    events = [supplier_msg(D02_J1, opening, 0)]
+    ctx = tools.prepare(case, {D02_J1: events})
+    ours = {"unit_price": 14.9, "payment_days": 60, "lead_time_days": 28, "incoterm": "DAP"}
+    reply = supplier_msg(D02_J1, D02_STANDING, 1)
+    reply["attachments"] = [{"name": "cost-breakdown.xlsx", "text": D02_BREAKDOWN}]
+    events = [*events, buyer_msg(ours), reply]
+    return case, tools.refresh(ctx, {D02_J1: events}), events
+
+
+def test_plan_when_supplier_drops_from_an_inflated_opening_never_meets_its_price(tools):
+    case, ctx, events = d02_after_breakdown(tools)
+    plan = tools.plan_offers(ctx, D02_J1, events, Tactic(D02_J1, "send"), READ)
+    midpoint = (14.9 + D02_STANDING["unit_price"]) / 2  # split the difference at most, never jump to its price
+    assert plan.term_sheets[0]["unit_price"] <= midpoint + 0.005
+
+
+def test_plan_when_above_target_every_sheet_costs_less_than_its_standing_sheet(tools):
+    case, ctx, events = d02_after_breakdown(tools)
+    tactic = Tactic(D02_J1, "send", ("unit_price", "incoterm", "payment_days"))
+    plan = tools.plan_offers(ctx, D02_J1, events, tactic, READ)
+    supplier = tools.supplier_from_thread(case, D02_J1, events)
+    standing_c = total_cost(case, D02_STANDING, None, supplier)
+    assert plan.term_sheets
+    for c in plan.c_values:
+        assert c < standing_c
+
+
+def test_plan_when_supplier_concedes_a_lot_never_concedes_past_the_midpoint(tools):
+    case_id, sid, opening = P01
+    theirs = [138.55, 131.55, 131.55]  # a 7.00 drop that still leaves it above our target
+    ctx, plans = play_rounds(tools, CASES[case_id], sid, opening, theirs)
+    assert theirs[1] > ctx.bands[sid].target
+    ours = [p.term_sheets[0]["unit_price"] for p in plans]
+    assert ours[2] <= (ours[1] + theirs[1]) / 2 + 0.005
+
+
+@pytest.mark.parametrize("case", list(CASES.values()), ids=list(CASES))
+def test_plan_when_rounds_pass_never_takes_back_what_we_offered(tools, case):
+    # research 02 ("never move our offer backwards"): our main sheet is never worth less to the supplier than the
+    # last one, also when its other terms change; only the supplier's own lower price may pull it down. Measured
+    # on its side: in stabilise cases our C falls as our price rises (the relationship charge)
+    base = case["buyer"].get("current_unit_price") or case["buyer"]["fallback_unit_price"]
+    opening = complete_offer(case, {"unit_price": round(base * 1.06, 2)})
+    sid = case["suppliers"][0]
+    theirs = [round(opening["unit_price"] * (1 - 0.01 * i), 2) for i in range(case.get("round_limit", 10))]
+    ctx, plans = play_rounds(tools, case, sid, opening, theirs)
+    supplier = tools.supplier(ctx, sid, opening)
+    previous = None
+    for plan, their_price in zip(plans, [opening["unit_price"], *theirs], strict=False):
+        main = plan.term_sheets[0]
+        worth = supplier_value(case, main, supplier) if supplier else main["unit_price"]  # no estimate: price
+        if previous is not None and main["unit_price"] < their_price:
+            assert worth >= previous - 1e-6
+        previous = worth
+
+
+def test_plan_when_above_target_and_supplier_moves_we_still_move(tools):
+    # brief: "it gives nothing without a move from you". Sandbox D02 (53ce03986722d2b5): holding at 14.90 while J1
+    # came down from 15.70 to 15.30 left it waiting, and it walked after we answered its final offer unmoved
+    case, ctx, events = d02_after_breakdown(tools)
+    events = [*events, buyer_msg({"unit_price": 14.9, "payment_days": 60, "lead_time_days": 28, "incoterm": "DAP"}),
+              supplier_msg(D02_J1, {**D02_STANDING, "unit_price": 15.3}, 2)]  # fmt: skip
+    plan = tools.plan_offers(ctx, D02_J1, events, Tactic(D02_J1, "send"), READ)
+    assert 14.9 < plan.term_sheets[0]["unit_price"] <= (14.9 + 15.3) / 2 + 0.005

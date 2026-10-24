@@ -13,6 +13,7 @@ import re
 from ....play import latest
 from ...llm import ID_RE
 from ..contracts import CaseContext, Email, OfferPlan, Tactic
+from ..observe import detect_language
 from .llm import call_json, prompt
 
 log = logging.getLogger("arena")
@@ -23,7 +24,10 @@ YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 LEAKS = re.compile(
     r"\b(urgent\w*|asap|as soon as possible|immediately|right away|quickly|soon|deadline|budget|"
     r"no (?:other )?alternative|only (?:possible )?supplier|depend(?:ent|s)? on you|"
-    r"(?:switch|move|change) (?:to )?(?:another|a different|other) supplier|last chance|or else)\b",
+    r"(?:switch|move|change) (?:to )?(?:another|a different|other) supplier|last chance|or else|"
+    r"dringend\w*|eilig\w*|so schnell wie möglich|sofort\w*|umgehend\w*|zeitnah\w*|frist\w*|"
+    r"keine (?:andere )?alternative|einzige[nr]? (?:lieferant\w*|anbieter\w*)|(?:auf sie )?angewiesen|"
+    r"(?:zu )?einem anderen (?:lieferanten|anbieter) wechseln|letzte chance)\b",
     re.I,
 )
 # Talk of data we do not cite: the supplier asks for it, we cannot show it, it costs trust (D02, Amine's ask).
@@ -32,7 +36,11 @@ VAGUE_DATA = re.compile(
     r"\b(?:comparable (?:parts?|shafts?|castings?|suppliers?|offers?|quotes?|prices?)|benchmarks?|"
     r"market (?:prices?|levels?|data|rates?)|other suppliers?|competitors?|competing offers?|"
     r"our (?:data|analysis|analyses|records|research|figures|estimates?|calculations?|assessment|cost model)|"
-    r"should[- ]cost|cost picture|price indices|index data)\b",
+    r"should[- ]cost|cost picture|price indices|index data|"
+    r"vergleichbare[nr]? (?:teile\w*|wellen|gussteile\w*|lieferanten|angebote\w*|preise\w*)|marktpreis\w*|"
+    r"marktniveau\w*|andere[nr]? (?:lieferanten|anbieter\w*)|wettbewerber\w*|konkurrenz\w*|"
+    r"unsere[rnm]? (?:daten|analysen?|unterlagen|berechnung\w*|kalkulation\w*|einschätzung\w*|kostenmodell\w*)|"
+    r"preisindizes|indexdaten)\b",
     re.I,
 )
 # What our private notes know about the supplier; saying it embarrasses the person. Allowed only after the
@@ -41,10 +49,16 @@ PRIVATE = re.compile(
     r"\b(?:your (?:bank|banks|liquidity|cash (?:situation|position|problems?)|financial (?:situation|position)|"
     r"credit (?:rating|index)|restructuring|spreadsheet|idle|short[- ]time)|bank is watching|short hours|"
     r"idle (?:capacity|shifts?|machines?)|second shift|pricing committee|bought (?:\w+ )?forward|hedg\w*|"
-    r"share of your turnover|not strategic)\b",
+    r"share of your turnover|not strategic|"
+    r"ihre[rnm]? (?:bank\w*|liquidität|finanzlage|finanziellen? (?:lage|situation)|bonität|umstrukturierung)|"
+    r"kurzarbeit|leerstehende\w* maschinen|zweite\w* schicht|preiskomitee|absicherung\w*|"
+    r"anteil (?:an )?ihre[ms] umsatz\w*|nicht strategisch)\b",
     re.I,
 )
-SIGNATURE = "Kind regards\nHollerau Pumpenwerke, Purchasing"
+SIGNATURES = {
+    "en": "Kind regards\nHollerau Pumpenwerke, Purchasing",
+    "de": "Mit freundlichen Grüßen\nHollerau Pumpenwerke, Einkauf",
+}
 
 # The template's tone per persona: an opening that acknowledges the supplier the way its persona wants.
 OPENINGS = {
@@ -55,7 +69,40 @@ OPENINGS = {
     "price_fighter": "thank you for your offer. We see good potential for more business between us.",
     "unknown": "thank you for your offer.",
 }
-ORDINALS = ("The first package", "The second package", "The third package")
+# The German template: same structure, formal "Sie" (issues.md 9: answer in the supplier's language).
+OPENINGS_DE = {
+    "partner": "vielen Dank für Ihr Angebot und die verlässliche Zusammenarbeit über viele Jahre.",
+    "cash_short": "vielen Dank für Ihr Angebot. Wir haben eine Lösung gesucht, die auch Ihrem Zahlungseingang hilft.",
+    "full_order_book": "vielen Dank für Ihr Angebot. Uns ist eine verlässliche, gut geplante Versorgung wichtig.",
+    "monopolist": "vielen Dank für Ihr Angebot.",
+    "price_fighter": "vielen Dank für Ihr Angebot. Wir sehen gutes Potenzial für mehr gemeinsames Geschäft.",
+    "unknown": "vielen Dank für Ihr Angebot.",
+}
+TEXT = {
+    "en": {
+        "salutation": "Dear Sir or Madam,",
+        "revised": ("your offer", "your revised offer and the step you made"),
+        "many": "Please find our alternative packages attached.",
+        "one": "Please find our proposal attached.",
+        "moved": "We have moved towards your position.",
+        "and": " and ",
+        "single": "It offers {}.",
+        "ordinal": ("The first package", "The second package", "The third package"),
+        "offers": "offers",
+    },
+    "de": {
+        "salutation": "Sehr geehrte Damen und Herren,",
+        "revised": ("Ihr Angebot", "Ihr überarbeitetes Angebot und Ihren Schritt auf uns zu"),
+        "many": "Anbei finden Sie unsere alternativen Pakete.",
+        "one": "Anbei finden Sie unseren Vorschlag.",
+        "moved": "Wir sind Ihnen entgegengekommen.",
+        "and": " und ",
+        "single": "Es bietet {}.",
+        "ordinal": ("Das erste Paket", "Das zweite Paket", "Das dritte Paket"),
+        "offers": "bietet",
+        "question": "Wir freuen uns auf Ihre Rückmeldung zu unserem Vorschlag.",
+    },
+}
 # (field, more, less): how a package differs from the supplier's standing sheet, in words without figures.
 DIFFS = (
     ("payment_days", "a longer payment term", "faster payment for you"),
@@ -67,6 +114,31 @@ DIFFS = (
     ("ppm_commitment", "a looser defect commitment", "a tighter defect commitment"),
     ("chargeback_eur_per_complaint", "a higher chargeback", "a lower chargeback"),
 )
+GERMAN_TRADES = {
+    "a longer payment term": "ein längeres Zahlungsziel",
+    "faster payment for you": "schnellere Zahlung für Sie",
+    "a longer commitment": "eine längere Bindung",
+    "a shorter term": "eine kürzere Laufzeit",
+    "more volume for you": "mehr Volumen für Sie",
+    "a smaller volume": "ein geringeres Volumen",
+    "a later start of the new price": "einen späteren Beginn des neuen Preises",
+    "an earlier start of the new price": "einen früheren Beginn des neuen Preises",
+    "more lead time for you": "mehr Lieferzeit für Sie",
+    "a shorter lead time": "eine kürzere Lieferzeit",
+    "a higher tooling contribution": "einen höheren Werkzeugkostenanteil",
+    "a lower tooling contribution": "einen niedrigeren Werkzeugkostenanteil",
+    "a looser defect commitment": "eine weniger strenge Fehlerquote",
+    "a tighter defect commitment": "eine strengere Fehlerquote",
+    "a higher chargeback": "eine höhere Belastung je Reklamation",
+    "a lower chargeback": "eine niedrigere Belastung je Reklamation",
+    "different delivery terms": "andere Lieferbedingungen",
+    "a price linked to the index": "einen an den Index gekoppelten Preis",
+}
+
+
+def language_of(events: list[dict]) -> str:
+    """'de' when the supplier's last e-mail is German, else 'en' (mixed e-mails get English)."""
+    return "de" if detect_language(str(latest(events).get("body") or "")) == "de" else "en"
 
 
 def describe(sheet: dict, theirs: dict) -> list[str]:
@@ -112,11 +184,13 @@ def movement(plan: OfferPlan, events: list[dict]) -> dict:
     }
 
 
-def package_lines(packages: list[list[str]]) -> list[str]:
-    if len(packages) <= 1:
-        trades = packages[0] if packages else []
-        return [f"It offers {' and '.join(trades)}."] if trades else []
-    return [f"{ORDINALS[i]} offers {' and '.join(t)}." for i, t in enumerate(packages[:3]) if t]
+def package_lines(packages: list[list[str]], language: str = "en") -> list[str]:
+    text = TEXT[language]
+    words = [[GERMAN_TRADES.get(t, t) for t in p] if language == "de" else p for p in packages]
+    if len(words) <= 1:
+        trades = words[0] if words else []
+        return [text["single"].format(text["and"].join(trades))] if trades else []
+    return [f"{text['ordinal'][i]} {text['offers']} {text['and'].join(t)}." for i, t in enumerate(words[:3]) if t]
 
 
 def _numbers(text: str) -> set[str]:
@@ -165,20 +239,24 @@ def template(ctx: CaseContext, tactic: Tactic, plan: OfferPlan, claims: list[str
     dossier = ctx.dossiers.get(tactic.supplier_id)
     persona = dossier.persona if dossier else "unknown"
     moved = movement(plan, events or [])
-    opening = OPENINGS.get(persona, OPENINGS["unknown"])
+    language = language_of(events or [])
+    text, openings = TEXT[language], (OPENINGS_DE if language == "de" else OPENINGS)
+    opening = openings.get(persona, openings["unknown"])
     if moved["supplier_moved"]:
-        opening = opening.replace("your offer", "your revised offer and the step you made", 1)
-    lines = ["Dear Sir or Madam,", "", opening]
+        opening = opening.replace(*text["revised"], 1)
+    lines = [text["salutation"], "", opening]
     if claims:
         lines += ["", *claims]
-    many = len(plan.term_sheets) > 1
-    lines += ["", "Please find our alternative packages attached." if many else "Please find our proposal attached."]
+    lines += ["", text["many"] if len(plan.term_sheets) > 1 else text["one"]]
     if moved["we_moved"]:
-        lines.append("We have moved towards your position.")
-    lines += package_lines(moved["packages"])
-    if tactic.question:
-        lines += ["", tactic.question]
-    lines += ["", SIGNATURE]
+        lines.append(text["moved"])
+    lines += package_lines(moved["packages"], language)
+    question = tactic.question
+    if question and language == "de" and detect_language(question) != "de":
+        question = text["question"]  # the strategist asks in English; no mixed-language e-mail
+    if question:
+        lines += ["", question]
+    lines += ["", SIGNATURES[language]]
     subject = subject_for(ctx, events) if events else f"Re: {ctx.case['title']}"
     return Email(subject=subject, body="\n".join(lines))
 
@@ -186,7 +264,9 @@ def template(ctx: CaseContext, tactic: Tactic, plan: OfferPlan, claims: list[str
 # Claims of our own movement; only allowed when the packages really are above our previous offer.
 MOVED_RE = re.compile(
     r"\b(?:we|our (?:offer|proposal|position|price))(?: have| has| are| is)?(?: now| also| further| again| already)?"
-    r" (?:moved|improved|raised|increased|stepped|coming|come (?:closer|towards))\b",
+    r" (?:moved|improved|raised|increased|stepped|coming|come (?:closer|towards))\b|"
+    r"\bwir sind (?:ihnen )?(?:entgegengekommen|nachgekommen)|"
+    r"\bwir haben (?:unser angebot|unseren vorschlag|unseren preis) (?:verbessert|erhöht|angehoben)",
     re.I,
 )  # "we have moved towards you" - not "we appreciate that you have moved"
 
@@ -216,6 +296,8 @@ class LLMWriter:
                 "case_title": ctx.case["title"],
                 "briefing": ctx.case.get("briefing", ""),
                 "round": sum(m.get("from") == "buyer" for m in events) + 1,
+                "round_limit": ctx.case.get("round_limit", 10),
+                "language": language_of(events),
                 "supplier": {
                     "name": dossier.name if dossier else sid,
                     "persona": dossier.persona if dossier else "unknown",
