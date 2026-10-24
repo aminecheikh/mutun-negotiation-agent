@@ -17,6 +17,8 @@ from ....docs import standard_terms
 from ....play import standing
 from ..contracts import PriceBand
 from . import estimates
+from .signals import SupplierSignals, stated_fair_price
+from .signals import read as read_signals
 
 # only when the case gives no anchor at all: a first ask a little under the opening, as negotiators open
 # below the other side's number; the live concession fit replaces it as soon as the supplier moves
@@ -30,6 +32,7 @@ MAX_COST_TO_PRICE_RATIO = 3.0
 PRICE_STEPS = 40  # price grid per package between its feasible minimum and the ceiling
 MAX_PACKAGES = 300  # option combinations searched per supplier; above that a fixed-seed sample
 MIN_PRICE = 0.01
+BREAKDOWN_UNCERTAINTY = 2  # its own cost breakdown: exact up to rounding and what it chose to show
 # terms whose cost to the supplier we cannot model (supplier_value has no estimate of its overtime for faster
 # delivery or of what a tighter defect commitment costs it): kept at its terms in the target - asking for
 # them is a trade the strategist makes explicitly, not a silent demand that raises its price
@@ -44,16 +47,30 @@ def alternative_cost(case: dict) -> float | None:
     return total_cost(case, alt["terms"])
 
 
-def supplier_estimate(case: dict, package, supplier_id: str, terms: dict, std: dict) -> dict | None:
-    """Our estimate of the supplier for `cost.supplier_value` / `relationship_cost`, or None."""
-    if package is None or len(case["parts"]) != 1:
-        return None
-    cost = estimates.full_cost(package, case["parts"][0], supplier_id)
+def supplier_estimate(case: dict, package, supplier_id: str, terms: dict, std: dict, cost=None) -> dict | None:
+    """Our estimate of the supplier for `cost.supplier_value` / `relationship_cost`, or None. `cost`: a known
+    full cost (its cost breakdown); else estimated from the data."""
+    cost = cost or _data_cost(case, package, supplier_id)
     if cost is None or not _same_scale(cost.value, terms["unit_price"]):
         return None
     standard = {k: v for k, v in closing_terms(case, terms, std).items() if k != "unit_price"}
-    rate = estimates.cost_of_money(package, supplier_id).value
+    rate = estimates.cost_of_money(package, supplier_id).value if package else estimates.OUR_RATE
     return {"full_cost": cost.value, "interest_rate": rate, "standard": standard}
+
+
+def _data_cost(case: dict, package, supplier_id: str):
+    if package is None or len(case["parts"]) != 1:
+        return None
+    return estimates.full_cost(package, case["parts"][0], supplier_id)
+
+
+def cost_estimate(case: dict, package, sid: str, sig: SupplierSignals):
+    """Its own cost breakdown if it sent one, else our estimate from the data."""
+    if sig.breakdown_cost:
+        return estimates.Estimate(
+            sig.breakdown_cost, "its own cost breakdown, sent in the thread", BREAKDOWN_UNCERTAINTY
+        )
+    return _data_cost(case, package, sid)
 
 
 def _same_scale(cost: float, price: float) -> bool:
@@ -61,30 +78,39 @@ def _same_scale(cost: float, price: float) -> bool:
 
 
 def price_bands(case: dict, threads: dict[str, list[dict]], package) -> dict[str, PriceBand]:
-    quotes = {sid: standing(ev)[1] for sid, ev in threads.items()}
+    # its opening quote (first term sheet): bands stay the same when re-priced later in the negotiation
+    quotes = {sid: _first_quote(ev) for sid, ev in threads.items()}
     out = {}
     for sid, events in threads.items():
         terms = quotes[sid]
         if terms.get("unit_price") is not None:  # no bid: no band
             rivals = [t["unit_price"] for s, t in quotes.items() if s != sid and t.get("unit_price") is not None]
-            out[sid] = supplier_band(case, package, sid, terms, standard_terms(events), rivals)
+            sig = read_signals(events, package)
+            out[sid] = supplier_band(case, package, sid, terms, standard_terms(events), rivals, sig)
     return out
 
 
-def supplier_band(case: dict, package, sid: str, terms: dict, std: dict, rivals=()) -> PriceBand:
-    supplier = supplier_estimate(case, package, sid, terms, std)
+def _first_quote(events: list[dict]) -> dict:
+    sheets = (m["term_sheets"][0]["terms"] for m in events if m.get("from") != "buyer" and m.get("term_sheets"))
+    return next(sheets, standing(events)[1])
+
+
+def supplier_band(case: dict, package, sid: str, terms: dict, std: dict, rivals=(), signals=None) -> PriceBand:
+    sig = signals or SupplierSignals()
+    cost = cost_estimate(case, package, sid, sig)
+    supplier = supplier_estimate(case, package, sid, terms, std, cost)
     # what it left out of its term sheet closes on its standard terms (quote PDF), not on our wishes
     stated = {field: std[field] for field in case["negotiable"] if field in std}
     opening = complete_offer(case, {**stated, **terms})
     current = case["buyer"].get("current_unit_price") or terms["unit_price"]
-    fair = estimates.fair_price(package, case["parts"][0], current) if package else None
+    fair = _fair(case, package, current, sig)
     ceiling, c_ceiling = _ceiling(case, opening, std, supplier)
-    floor, lowest_plausible, why = _floor(case, package, sid, supplier)
+    floor, lowest_plausible, why = _floor(package, sid, supplier, cost)
     best = _best_package(case, opening, std, supplier, lowest_plausible, ceiling) if floor else None
     if best is None:
         price, reason = _anchor_without_cost(case, terms["unit_price"], fair, rivals, ceiling)
-        best = complete_offer(case, {**opening, "unit_price": price})
-        why.append(f"target without a cost estimate: {reason}")
+        best = _cheapest_terms_at(case, opening, std, price)
+        why.append(f"target without a cost estimate: {reason}; terms chosen for the lowest C at that price")
     fair_why = f"fair: {fair.source}" if fair else "fair: no cost drivers"
     return PriceBand(
         supplier_id=sid,
@@ -97,6 +123,16 @@ def supplier_band(case: dict, package, sid: str, terms: dict, std: dict, rivals=
         derivation=(*why, fair_why, f"ceiling: {ceiling}"),
         target_terms=best,
     )
+
+
+def _cheapest_terms_at(case: dict, opening: dict, std: dict, price: float) -> dict:
+    """Without a cost estimate we cannot tell what the supplier accepts, but our own C still says which terms
+    matter: full coverage of the need, payment, dates, clauses - searched at the anchor price."""
+    candidates = [complete_offer(case, {**p, "unit_price": price}) for p in _packages(case, opening)]
+    valid = [c for c in candidates if must_haves_ok(case, c, std)] or [
+        complete_offer(case, {**opening, "unit_price": price})
+    ]
+    return min(valid, key=lambda c: total_cost(case, c, std))
 
 
 def _anchor_without_cost(case: dict, opening: float, fair, rivals, ceiling: float) -> tuple[float, str]:
@@ -117,16 +153,24 @@ def _anchor_without_cost(case: dict, opening: float, fair, rivals, ceiling: floa
     return share, f"no anchor in the data: {1 - UNINFORMED_TARGET_SHARE:.0%} under the opening until it moves"
 
 
-def _floor(case: dict, package, sid: str, supplier: dict | None) -> tuple[float | None, float | None, list[str]]:
+def _fair(case: dict, package, current: float, sig: SupplierSignals):
+    """Its own stated cost shares priced with our index data, else the category team's cost drivers."""
+    if package is None:
+        return None
+    if sig.driver_shares and (own := stated_fair_price(package, current, sig.driver_shares)):
+        return own
+    return estimates.fair_price(package, case["parts"][0], current)
+
+
+def _floor(package, sid: str, supplier: dict | None, cost) -> tuple[float | None, float | None, list[str]]:
     """(floor, lowest plausible floor, why): the estimate, and its low end given the estimate's uncertainty -
     the target may aim there, never below."""
     if supplier is None:
         return None, None, ["floor: no cost estimate"]
-    cost = estimates.full_cost(package, case["parts"][0], sid)
-    rate = estimates.cost_of_money(package, sid)
-    why = [f"full cost {cost.value} +-{cost.uncertainty_pct}%: {cost.source}", f"cost of money: {rate.source}"]
+    rate = supplier["interest_rate"]
+    why = [f"full cost {cost.value} +-{cost.uncertainty_pct}%: {cost.source}", f"cost of money: {rate:.0%}"]
     floor = cost.value
-    if estimates.accepts_below_cost(package, sid):
+    if package is not None and estimates.accepts_below_cost(package, sid):
         why.append(f"history: accepted below full cost - floor {BELOW_COST_TOLERANCE:.0%} under it")
         floor = cost.value * (1 - BELOW_COST_TOLERANCE)
     # a wide uncertainty means a weak estimate, not a supplier that goes lower: aim at most 5 % under it

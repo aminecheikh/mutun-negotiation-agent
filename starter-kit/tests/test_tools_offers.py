@@ -102,3 +102,58 @@ def test_plan_when_any_case_is_played_keeps_every_sheet_valid(tools, case):
         previous = main
         supplier = tools.supplier(ctx, sid, opening)
         assert plan.c_values[0] == pytest.approx(total_cost(case, plan.term_sheets[0], None, supplier), rel=1e-6)
+
+
+SANDBOX = {c["case_id"]: c for c in json.loads((Path(__file__).parent / "fixtures/sandbox_cases.json").read_text())}
+D01 = (
+    "case:D01",
+    "sup:DEMO-F1",
+    {"unit_price": 52.9, "payment_days": 30, "contract_months": 12, "effective_date": "2026-12-01"},
+)
+
+
+def test_plan_when_supplier_has_no_data_still_covers_the_whole_need(tools):
+    # a supplier we know nothing about quotes 12 months on a 2-year need: uncovered need is the costliest term
+    case_id, sid, opening = D01
+    ctx, plans = play_rounds(tools, SANDBOX[case_id], sid, opening, [52.9])
+    need_months = 12 * SANDBOX[case_id]["buyer"]["horizon_years"]
+    assert ctx.bands[sid].target_terms["contract_months"] == need_months
+    assert plans[0].term_sheets[0]["contract_months"] == need_months
+
+
+def test_plan_when_supplier_does_not_move_we_still_step_visibly_towards_target(tools):
+    case_id, sid, opening = D01
+    ctx, plans = play_rounds(tools, SANDBOX[case_id], sid, opening, [51.9] * 5)  # it waits for our move
+    band, ours = ctx.bands[sid], [p.term_sheets[0]["unit_price"] for p in plans]
+    pace = (band.target - ours[0]) / ((SANDBOX[case_id].get("round_limit", 10) - 1) / 2)
+    for before, after in zip(ours, ours[1:], strict=False):
+        assert after - before >= min(pace, band.target - before) - 0.011
+
+
+def test_plan_when_strategist_picks_levers_every_lever_moves_in_some_sheet(tools):
+    case_id, sid, opening = D01
+    case = SANDBOX[case_id]
+    events = [supplier_msg(sid, opening, 0)]
+    ctx = tools.prepare(case, {sid: events})
+    levers = ("payment_days", "effective_date")
+    plan = tools.plan_offers(ctx, sid, events, Tactic(sid, "send", levers=levers), READ)
+    for lever in levers:
+        assert len({str(s[lever]) for s in plan.term_sheets}) >= 2, lever
+
+
+def test_plan_when_levers_offered_no_sheet_covers_less_need_or_sits_far_under_our_anchor(tools):
+    # equal C for us is not enough: a shorter contract "paid for" by our uncovered-need cost reveals our fallback,
+    # and a price far under our most aggressive justified price is not credible
+    from arena_kit.cost import cost_breakdown
+
+    case_id, sid, opening = D01
+    case = SANDBOX[case_id]
+    events = [supplier_msg(sid, opening, 0)]
+    ctx = tools.prepare(case, {sid: events})
+    tactic = Tactic(sid, "send", levers=("contract_months", "payment_days"))
+    plan = tools.plan_offers(ctx, sid, events, tactic, READ)
+    main = plan.term_sheets[0]
+    uncovered = cost_breakdown(case, main)["uncovered_need"]
+    for sheet in plan.term_sheets:
+        assert cost_breakdown(case, sheet)["uncovered_need"] <= uncovered
+        assert sheet["unit_price"] >= main["unit_price"] * (1 - offers.MAX_ANCHOR_BELOW_FLOOR_PCT / 100)

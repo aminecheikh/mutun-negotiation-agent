@@ -88,6 +88,17 @@ class OfferPlan:
 
 
 @dataclass(frozen=True)
+class Trade:
+    """One term change against the supplier's terms and what it saves us: what to ask for in a trade."""
+
+    field: str
+    theirs: object  # its current value
+    ours: object  # the value we would ask for
+    eur: float  # C saved over the horizon (> 0)
+    per_unit: float  # the same saving as a price per unit: what the change is worth in a price trade
+
+
+@dataclass(frozen=True)
 class CaseContext:
     """Everything prepared before the first move (no clock running yet)."""
 
@@ -96,6 +107,7 @@ class CaseContext:
     bands: dict[str, PriceBand]
     claims: dict[str, tuple[Claim, ...]]  # per supplier
     c_alternative: float | None
+    trades: dict[str, tuple[Trade, ...]] = field(default_factory=dict)  # per supplier, biggest saving first
 
 
 # ---- roles layer (LLM, owner: roles) -----------------------------------------------------------
