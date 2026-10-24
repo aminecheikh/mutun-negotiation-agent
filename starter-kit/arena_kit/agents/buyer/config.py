@@ -30,6 +30,9 @@ class OrchestratorConfig:
     final_counter_min_moves: int = 2
     final_counter_min_seconds: float = 150.0
     walk_prone_personas: tuple[str, ...] = ("monopolist", "full_order_book")  # dossier personas that walk easily
+    # assumption, not tuned: below a 1-in-5 chance of another >= 1 % step (tools.concession p_room) a rival counts
+    # as done and no longer holds up an accept elsewhere
+    low_room_probability: float = 0.2
     stuck_rounds: int = 3  # rounds of ours after which a supplier that stopped moving counts as stuck
     stuck_improvement: float = 0.001  # "stopped moving": its C fell by less than 0.1 % over its last two replies
     max_claims: int = 3  # api.md: at most 3 checked arguments per message

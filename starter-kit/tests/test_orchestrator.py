@@ -354,3 +354,13 @@ def test_reserve_when_two_threads_cite_the_same_id_only_the_first_keeps_it():
     assert claim in first["body"] and first["refs"] == sorted(known)
     assert claim not in second["body"] and second["refs"] == [] and "proposal attached" in second["body"]
     assert known <= s.burned
+
+
+def test_rival_with_no_room_left_in_its_price_path_does_not_hold_up_an_accept():
+    from arena_kit.agents.buyer.contracts import ConcessionFit
+
+    b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0)]
+    s = session_for(S02, {A: A_COUNTERED, B: b_events})
+    assert policy.verdict(s, s.threads[A]).kind == "park"  # without evidence, B's band target says it may go lower
+    s.threads[B].fit = ConcessionFit(B, (17.5, 17.0), 16.9, 2.9, True, p_room=0.05)
+    assert policy.verdict(s, s.threads[A]).kind == "accept"

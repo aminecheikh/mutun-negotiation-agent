@@ -104,11 +104,13 @@ def best_acceptable(session: CaseSession, idle_only: bool = True) -> ThreadState
 
 
 def reachable_c(session: CaseSession, th: ThreadState) -> float:
-    """Where this thread can plausibly still go, in C: its standing sheet at the price tools estimate it stops
-    at (concession fit), else our band target, else where it is now."""
+    """Where this thread can plausibly still go, in C: where it is now if its price path leaves little room
+    (`p_room`), else its standing sheet at the price tools estimate it stops at, else our band target."""
     if th.status in ("final_offer", "agreed") or not th.standing_terms:
         return th.c
     fit, band = th.fit, session.band(th.supplier_id)
+    if fit is not None and fit.p_room is not None and fit.p_room < session.config.low_room_probability:
+        return th.c  # its own price path says it is (almost) done: tools.concession p_room
     price = fit.reservation_estimate if fit and fit.reservation_estimate else None
     if price is None and band is not None:
         return min(th.c, band.c_target)
