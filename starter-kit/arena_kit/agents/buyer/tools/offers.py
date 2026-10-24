@@ -5,7 +5,8 @@ Price of the main sheet, each round:
            (split-the-difference, Raiffa), so this anchor puts the midpoint on our target; never below the
            plausible cost floor (an impossible ask wastes rounds and trust)
   time     anchor -> ceiling on a Boulware curve: (t / T) ** (1 / beta), beta < 1 holds early and concedes late
-           (time-dependent tactics, Faratin, Sierra & Jennings 1998)
+           (time-dependent tactics, Faratin, Sierra & Jennings 1998); above our target its steps never grow -
+           shrinking steps signal a limit (Tey et al. 2021)
   pace     until our target, at least a linear step per round (reaching it halfway): visible movement
   reply    at least what the supplier conceded in its last move (absolute tit-for-tat, same paper): "it gives
            nothing without a move from you" (the brief) - and matched moves meet at the midpoint, i.e. the target.
@@ -90,6 +91,10 @@ def next_price(case: dict, band, events: list[dict], lowest: float = 0.0) -> flo
     horizon = max(case.get("round_limit", 10) - 1, 1)
     share = min(len(ours) / horizon, 1.0) ** (1 / BOULWARE_BETA)
     price = anchor + (band.ceiling - anchor) * share
+    if len(ours) >= 2 and ours[-1] >= band.target and ours[-1] > ours[-2]:
+        # above our target the curve's late steps grow; shrinking steps signal a limit (Tey et al. 2021, research
+        # 02): never a larger step than our last one. Matching its move and the stand-still step still apply
+        price = min(price, ours[-1] + (ours[-1] - ours[-2]))
     if ours:
         price = max(price, ours[-1])
         if ours[-1] < band.target:  # a visible step every round until our target, even if it waits for us

@@ -317,3 +317,19 @@ def test_plan_when_supplier_offers_a_cheaper_alternative_sends_exactly_that_alte
     events = [*events, buyer_msg({**opening, "unit_price": 128.0}), reply]
     plan = tools.plan_offers(ctx, sid, events, Tactic(sid, "send"), READ)
     assert plan.term_sheets[0] == complete_offer(case, alternative)
+
+
+@pytest.mark.parametrize("case", list(CASES.values()), ids=list(CASES))
+def test_plan_when_above_target_our_steps_never_grow(tools, case):
+    # research 02 (Tey et al. 2021): growing late steps (Boulware) tell the supplier we have more to give - 11 of 19
+    # case files showed them, up to +13 in the last rounds; shrinking steps signal a limit. Above our target, with
+    # a supplier conceding evenly, a step of ours is never larger than our previous one
+    base = case["buyer"].get("current_unit_price") or case["buyer"]["fallback_unit_price"]
+    opening = complete_offer(case, {"unit_price": round(base * 1.06, 2)})
+    sid = case["suppliers"][0]
+    theirs = [round(opening["unit_price"] * (1 - 0.003 * i), 2) for i in range(case.get("round_limit", 10))]
+    ctx, plans = play_rounds(tools, case, sid, opening, theirs)
+    band, ours = ctx.bands[sid], [p.term_sheets[0]["unit_price"] for p in plans]
+    steps = [(b, a - b) for b, a in zip(ours, ours[1:], strict=False)]
+    above = [step for before, step in steps if before >= band.target]
+    assert all(later <= earlier + 0.011 for earlier, later in zip(above, above[1:], strict=False)), above
