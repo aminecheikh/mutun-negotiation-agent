@@ -12,6 +12,7 @@ from arena_kit.agents.buyer import guard, observe, policy
 from arena_kit.agents.buyer.agent import BuyerAgent
 from arena_kit.agents.buyer.config import OrchestratorConfig
 from arena_kit.agents.buyer.contracts import Email, Tactic
+from arena_kit.agents.buyer.pipeline import keepalive_email
 from arena_kit.agents.buyer.telemetry import Telemetry
 from arena_kit.agents.buyer.tools import DataTools
 from arena_kit.data import DataPackage
@@ -364,3 +365,35 @@ def test_rival_with_no_room_left_in_its_price_path_does_not_hold_up_an_accept():
     assert policy.verdict(s, s.threads[A]).kind == "park"  # without evidence, B's band target says it may go lower
     s.threads[B].fit = ConcessionFit(B, (17.5, 17.0), 16.9, 2.9, True, p_room=0.05)
     assert policy.verdict(s, s.threads[A]).kind == "accept"
+
+
+# ---- keep-alive e-mails ---------------------------------------------------------------------------------------
+
+
+def keepalive_thread():
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    return s, s.threads[SID]
+
+
+def test_keepalive_email_when_one_was_already_sent_never_repeats_the_body():
+    # sandbox D02 (ed152d4335edfbca): the same keep-alive went out three times; the supplier saw a stuck system
+    s, th = keepalive_thread()
+    bodies = []
+    for n in range(4):
+        email = keepalive_email(s, th)
+        assert email.body not in bodies
+        bodies.append(email.body)
+        th.events.append({"from": "buyer", "body": email.body, "term_sheets": []})
+        th.events.append(quote(SID, n + 1, 10.0))
+
+
+def test_keepalive_email_when_strategist_asked_a_plain_question_uses_it():
+    s, th = keepalive_thread()
+    question = "Which payment term would let you move on price?"
+    assert question in keepalive_email(s, th, question).body
+
+
+def test_keepalive_email_when_strategist_question_has_figures_drops_it():
+    s, th = keepalive_thread()
+    question = "Could you reach 9.10 if we pay in 14 days?"  # figures in a keep-alive bypass the writer's checks
+    assert "9.10" not in keepalive_email(s, th, question).body

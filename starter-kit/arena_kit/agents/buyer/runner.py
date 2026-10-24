@@ -90,7 +90,8 @@ class ThreadWorker:
             if th.moves_left(s.case) <= 0:
                 self.park(th, policy.Verdict("park", "no sendable counter and no messages left"))
                 return
-            checked = guard.Checked(self._keepalive_message(th), ("no acceptable sheet: question only",))
+            message = self._keepalive_message(th, out.tactic.question)
+            checked = guard.Checked(message, ("no acceptable sheet: question only",))
         self.send(th, checked.message, "counter", verdict=v, out=out, problems=checked.problems)
 
     def park(self, th: ThreadState, v: policy.Verdict) -> None:
@@ -121,8 +122,8 @@ class ThreadWorker:
         ranked = sorted((t for t in self.s.alive() if t.c != float("inf")), key=lambda t: t.c)
         return th in ranked[:2]
 
-    def _keepalive_message(self, th: ThreadState) -> dict:
-        email = keepalive_email(self.s, th)
+    def _keepalive_message(self, th: ThreadState, question: str | None = None) -> dict:
+        email = keepalive_email(self.s, th, question)
         return {"subject": email.subject, "body": email.body, "term_sheets": [], "refs": []}
 
     # ---- the wire ----------------------------------------------------------------------------------

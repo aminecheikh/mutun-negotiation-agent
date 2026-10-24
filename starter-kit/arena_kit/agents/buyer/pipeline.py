@@ -15,6 +15,7 @@ cited once per case across all threads.
 """
 
 import logging
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
@@ -79,14 +80,20 @@ class RoleOutput:
     sheet_problems: tuple[str, ...] = ()
 
 
-def keepalive_email(session: CaseSession, th: ThreadState) -> Email:
-    """A short answer without a term sheet: keeps a parked thread inside its 60 s without conceding anything."""
+def keepalive_email(session: CaseSession, th: ThreadState, question: str | None = None) -> Email:
+    """A short answer without a term sheet: keeps a parked thread inside its 60 s without conceding anything.
+    The strategist's question when it is plain (no figures: a keep-alive skips the writer's number checks) and in
+    the supplier's language, else the case type's, else another one: never a body this thread already got."""
     language = "de" if detect_language(str(latest(th.events).get("body") or "")) == "de" else "en"
     questions = QUESTIONS[language]
-    question = questions.get(str(session.case.get("type")), questions["default"])
+    own = [question.strip()] if question and language == "en" and not re.search(r"\d", question) else []
+    first = questions.get(str(session.case.get("type")), questions["default"])
+    bodies = [KEEPALIVE[language].format(question=q) for q in dict.fromkeys([*own, first, *questions.values()])]
+    sent = {str(m.get("body") or "") for m in th.events if m.get("from") == "buyer"}
+    body = next((b for b in bodies if b not in sent), bodies[0])
     subject = str(latest(th.events).get("subject") or "").strip() or session.case.get("title", "")
     subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
-    return Email(subject=subject[:300], body=KEEPALIVE[language].format(question=question))
+    return Email(subject=subject[:300], body=body)
 
 
 class RolePipeline:
