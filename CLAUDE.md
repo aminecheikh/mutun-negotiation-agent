@@ -107,6 +107,15 @@ uv run arena me                                 # quota left
   (we lost our competition). Every live thread needs a message within 60 s of its supplier's reply.
 - Sandbox D02: concessions of +0.02-0.14 EUR per round on price alone made the supplier say "without any
   movement on your side..."; it offered trades (standard lead time, more volume) that we never used.
+- Sandbox D02 (merged main, 18:22, 0.52): **never send the same e-mail twice.** A supplier's cost breakdown
+  re-priced our target far below our last offer; absolute tit-for-tat then copied its 1.40 drop from an
+  inflated opening up to its own price, no sheet beat its standing one, and the same keep-alive went out 3x
+  ("your email system is stuck") until it closed at its final offer. A big first drop is not a step to copy,
+  and a round with nothing to offer still needs a new question.
+- Sandbox D02 (fixes, 18:56, 0.36): **never answer a final offer without a move.** Holding our price above
+  target while the supplier came down, then repeating our last sheets after its `final_offer`, made it walk
+  away; we closed on the dearer rival. Every supplier move gets one back (capped at the midpoint), a re-priced
+  band must reach the verdict at once, and the one counter to a final offer must offer it more.
 
 ## Conventions
 
