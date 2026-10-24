@@ -7,6 +7,7 @@ from dataclasses import replace
 from ....docs import standard_terms
 from ..contracts import BehaviourRead, CaseContext, ConcessionFit, OfferPlan, Tactic
 from . import bands, claims, concession, dossier, levers, offers, signals
+from .safe_package import thread_safe
 
 
 def opening_terms(events: list[dict]) -> dict:
@@ -17,7 +18,7 @@ def opening_terms(events: list[dict]) -> dict:
 
 class DataTools:
     def __init__(self, package=None):
-        self.package = package  # arena_kit.data.DataPackage, or None (tests, no data)
+        self.package = thread_safe(package)  # DataPackage behind a lock (parallel cases), or None
 
     def prepare(self, case: dict, threads: dict[str, list[dict]]) -> CaseContext:
         return CaseContext(

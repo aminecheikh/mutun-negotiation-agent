@@ -35,6 +35,9 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 - @jeddou (21:00): **guard fix (J2)** - `guard.accept_ok` computes C without our supplier estimate, so in stabilise / secure_supply cases it ignores the squeeze penalty (the slide's "supplier's health"). Use `tools.supplier_from_thread(case, sid, events)` as the 4th argument of `total_cost` there, like the offer engine does.
 - @saed (21:00): **`ctx.trades[supplier_id]`** is live: each term change worth money to us, e.g. lead time 56 -> 28 days = EUR x, or EUR y per unit. The strategist can trade those explicitly ("can you do 28 days? we can move on price"); the tools never impose lead time or ppm.
 
+- @saed (21:40): re your D01 test (0.11): that run used the **old placeholder** offers (branch older than main). Fixed on main now: every sheet covers the full need (no 12-of-24 months), a visible step every round until our target even when the supplier waits, your strategist's `Tactic.levers` each get an equal-cost sheet (fields must be negotiable with `term_options`), no sheet that "pays" for less coverage or sits far under our anchor. Please `git merge main` and re-run D01 (free) - expected path vs. its 51.90: 44.30, 45.30, 46.26, 47.22 ... with a 45-day alternative.
+- @jeddou (21:40): **database lock fixed in tools**: `DataTools` wraps the package in `ThreadSafePackage` (one lock, ID index pre-built) - 19 cases in parallel went from 18 crashes to 0. If `agent.py` queries the package directly (not only `lookup`), wrap it too: `from .tools.safe_package import thread_safe`.
+
 ## Log
 
 - 16:30 - scaffold in place (placeholders in every tools module, tests in `tests/test_buyer.py`)
@@ -49,6 +52,8 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 - 20:15 - sandbox D02 with tools v1 (free): 0.21; supplier raised its price because our sheets imposed a 35-day lead time it never offered -> fields it left out now keep its standard terms; unmodelled-cost terms held - b455de8. Rest of the loss: J2/J3, writer (see asks)
 
 - 21:00 - A8 signals.py (supplier-stated cost shares, cost breakdown -> floor, `refresh` re-prices) + levers.py (`ctx.trades`): every term on Tacto's "Why every term costs money" slide is now priced; 332 tests
+
+- 21:40 - from Saed's D01 replay: thread-safe package (18/19 parallel crashes -> 0), coverage search without a cost estimate, visible step per round to target, strategist levers in sheets, no less-coverage / non-credible variants; sandbox fixtures saved; 337 tests
 
 ## Runs
 

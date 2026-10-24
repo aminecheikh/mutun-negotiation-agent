@@ -109,8 +109,8 @@ def supplier_band(case: dict, package, sid: str, terms: dict, std: dict, rivals=
     best = _best_package(case, opening, std, supplier, lowest_plausible, ceiling) if floor else None
     if best is None:
         price, reason = _anchor_without_cost(case, terms["unit_price"], fair, rivals, ceiling)
-        best = complete_offer(case, {**opening, "unit_price": price})
-        why.append(f"target without a cost estimate: {reason}")
+        best = _cheapest_terms_at(case, opening, std, price)
+        why.append(f"target without a cost estimate: {reason}; terms chosen for the lowest C at that price")
     fair_why = f"fair: {fair.source}" if fair else "fair: no cost drivers"
     return PriceBand(
         supplier_id=sid,
@@ -123,6 +123,16 @@ def supplier_band(case: dict, package, sid: str, terms: dict, std: dict, rivals=
         derivation=(*why, fair_why, f"ceiling: {ceiling}"),
         target_terms=best,
     )
+
+
+def _cheapest_terms_at(case: dict, opening: dict, std: dict, price: float) -> dict:
+    """Without a cost estimate we cannot tell what the supplier accepts, but our own C still says which terms
+    matter: full coverage of the need, payment, dates, clauses - searched at the anchor price."""
+    candidates = [complete_offer(case, {**p, "unit_price": price}) for p in _packages(case, opening)]
+    valid = [c for c in candidates if must_haves_ok(case, c, std)] or [
+        complete_offer(case, {**opening, "unit_price": price})
+    ]
+    return min(valid, key=lambda c: total_cost(case, c, std))
 
 
 def _anchor_without_cost(case: dict, opening: float, fair, rivals, ceiling: float) -> tuple[float, str]:
