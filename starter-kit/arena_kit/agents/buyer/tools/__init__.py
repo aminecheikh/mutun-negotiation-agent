@@ -36,7 +36,8 @@ class DataTools:
         return bands.supplier_estimate(ctx.case, self.package, supplier_id, terms, std or {})
 
     def fit_concessions(self, ctx: CaseContext, supplier_id: str, events: list[dict]) -> ConcessionFit:
-        return concession.fit(supplier_id, events)
+        band = ctx.bands.get(supplier_id)
+        return concession.fit(supplier_id, events, band.floor if band else None, ctx.case.get("round_limit", 10))
 
     def plan_offers(
         self, ctx: CaseContext, supplier_id: str, events: list[dict], tactic: Tactic, read: BehaviourRead

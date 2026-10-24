@@ -20,3 +20,6 @@ decision - why`. Changing `contracts.py` always needs an entry here.
   documents, never from practice outcomes; estimates are priors the live negotiation corrects; every module is
   tested for properties on all 19 case files and mutated copies. Rules in CLAUDE.md. - The final uses suppliers,
   parts and situations practice never shows; 10 scored practice cases are too few to fit anything.
+- 2026-10-24 20:10 - Amine - `ConcessionFit` gains `p_room: float | None = None`: probability the supplier can still go
+  >= 1 % below its last price (Bayesian fit of its own price path, `tools/concession.py`). For the analyst (p_more)
+  and the accept/walk policy; None until it has moved once.
