@@ -43,6 +43,7 @@ class V2Config:
     analyst_tool_turns: int = 1  # tool rounds before a specialist must report (its numbers come precomputed)
     negotiator_tool_turns: int = 1
     max_tool_calls_per_turn: int = 8
+    tool_turn_min_s: float = 14.0  # a tool turn needs a second model call: skip it with less time than this left
     analyst_slots: int = 32  # concurrent specialist calls across all cases (rate-limit guard)
     negotiator_slots: int = 16  # negotiators have their own slots: specialists can never starve them
     tool_result_chars: int = 6000  # one tool result is cut here (context and latency)

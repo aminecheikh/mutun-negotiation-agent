@@ -12,6 +12,9 @@ what we decided in each earlier round, why, which packages we sent, which data w
 supplier's answers. A negotiation is one conversation, not separate rounds: judge the latest message against
 everything said before it.
 
+Your report is read by another agent under a 60-second clock: be concise. Every text field at most two
+sentences, every list at most four items, no repetition of the input, no preamble.
+
 # How a negotiation works (the arena's rules)
 
 - Round 0: every supplier sends its quote e-mail with a quote PDF. The PDF lists the offered terms and **its

@@ -44,7 +44,7 @@ def test_tool_loop_runs_the_tools_then_answers_with_the_schema():
     model = ScriptedModel({"deal": {"ok": True}}, tool_calls={"deal": [("echo", {"x": 1}), ("boom", {})]})
     llm = LLM(model, V2Config(analyst_model="m"))
     tools = Tools()
-    r = llm.run(AgentCall("deal", A.system_prompt("deal"), "go", time.monotonic() + 5, {"type": "object"}, tools, 2))
+    r = llm.run(AgentCall("deal", A.system_prompt("deal"), "go", time.monotonic() + 30, {"type": "object"}, tools, 2))
     assert r.ok and r.data == {"ok": True} and r.tool_calls == ["echo", "boom"]
     results = model.requests[1]["messages"][-1]["content"]
     assert [x["is_error"] for x in results] == [False, True] and "bad argument" in results[1]["content"]
@@ -53,12 +53,19 @@ def test_tool_loop_runs_the_tools_then_answers_with_the_schema():
 def test_the_last_turn_cannot_call_tools_and_late_calls_return_nothing():
     model = ScriptedModel({"reader": {"ok": 1}}, tool_calls={"reader": [("echo", {})]})
     llm = LLM(model, V2Config(analyst_model="m"))
-    r = llm.run(AgentCall("reader", A.system_prompt("reader"), "go", time.monotonic() + 5, None, Tools(), 1))
+    r = llm.run(AgentCall("reader", A.system_prompt("reader"), "go", time.monotonic() + 30, None, Tools(), 1))
     assert r.ok and model.requests[-1]["tool_choice"] == {"type": "none"}
     slow = LLM(ScriptedModel({"reader": {"ok": 1}}, delay={"reader": 0.5}), V2Config(analyst_model="m"))
     t0 = time.monotonic()
     results = slow.run_many([AgentCall("reader", A.system_prompt("reader"), "go", time.monotonic() + 0.3)])
     assert not results["reader"].ok and time.monotonic() - t0 < 1.5
+
+
+def test_a_tool_turn_is_skipped_when_there_is_no_time_for_a_second_call():
+    model = ScriptedModel({"deal": {"ok": 1}}, tool_calls={"deal": [("echo", {})]})
+    llm = LLM(model, V2Config(analyst_model="m", tool_turn_min_s=14.0))
+    r = llm.run(AgentCall("deal", A.system_prompt("deal"), "go", time.monotonic() + 8, None, Tools(), 1))
+    assert r.ok and len(model.requests) == 1 and model.requests[0]["tool_choice"] == {"type": "none"}
 
 
 def test_a_refusal_or_broken_json_is_an_error_not_a_crash():

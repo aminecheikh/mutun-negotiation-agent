@@ -143,7 +143,8 @@ class LLM:
             left = call.deadline - time.monotonic()
             if left < MIN_CALL_S:
                 raise LateError(f"{left:.1f}s left before turn {turn + 1}")
-            final = turn >= call.tool_turns or not schemas
+            # a tool turn costs a second model call (10-15 s live): with less time than that, answer directly
+            final = turn >= call.tool_turns or not schemas or left < cfg.tool_turn_min_s
             blocks, stop, usage = self.transport(
                 model=model,
                 system=call.system,
