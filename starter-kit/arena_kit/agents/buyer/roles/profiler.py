@@ -120,7 +120,7 @@ class LLMProfiler:
         self.live: dict[str, dict] = {}  # (supplier, evidence) -> profile, for this process
 
     def profile(self, dossier: Dossier, base: dict | None = None) -> dict | None:
-        raw = call_json(self.complete, self.system, _user(dossier, base), self.timeout_s)
+        raw = call_json(self.complete, self.system, _user(dossier, base), self.timeout_s, name="profiler")
         return validated(raw, dossier)
 
     def refine(self, case: dict, dossier: Dossier) -> Dossier:

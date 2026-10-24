@@ -1,8 +1,12 @@
+import os
 import socket
 import threading
 import time
 
 import pytest
+
+# fake model calls in tests must not fill runs/llm; tests/test_llm_log.py points it at a temp folder
+os.environ.setdefault("BUYER_LLM_LOG_DIR", "off")
 
 
 class Clock:

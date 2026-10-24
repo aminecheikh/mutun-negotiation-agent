@@ -4,14 +4,22 @@ None and the role falls back to its rule-based move: a slow model must never cos
 `call_json_with_tools` is the same contract with tool calling: the model may call our deterministic tools
 (roles/toolbox.py) for a bounded number of rounds before it answers, all inside one deadline. The transport is
 `converse(system, messages, tools, final, timeout_s) -> (content_blocks, stop_reason)`; `converse_from_env` builds
-it for the Anthropic API (no retries, per-call timeout = time left). Other providers keep the single call."""
+it for the Anthropic API (no retries, per-call timeout = time left). Other providers keep the single call.
 
+Every call leaves a JSON record of what the model was given and what it answered (`BUYER_LLM_LOG_DIR`, default
+runs/llm, "off" to disable): runs/llm/<date>/<time>-<role>-<id>.json with the user payload, the raw reply, the
+tools it called, seconds and outcome; each distinct system prompt once under runs/llm/prompts/. Logging never
+breaks a call."""
+
+import hashlib
 import json
 import logging
 import os
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from datetime import datetime
 from pathlib import Path
 
 from ...llm import parse
@@ -30,16 +38,51 @@ def prompt(name: str) -> str:
     return (PROMPTS / f"{name}.md").read_text(encoding="utf-8")
 
 
-def call_json(complete, system: str, user: str, timeout_s: float) -> dict | None:
+def record(role: str, system: str, user: str, reply: str | None, seconds: float, outcome: str, tools=()) -> None:
+    """Write one call's record under BUYER_LLM_LOG_DIR (see the module docstring). Never raises."""
+    root = os.environ.get("BUYER_LLM_LOG_DIR", "runs/llm")
+    if root.lower() == "off":
+        return
+    try:
+        base, now = Path(root), datetime.now()
+        digest = hashlib.sha256(system.encode("utf-8")).hexdigest()[:12]
+        prompt_file = base / "prompts" / f"{role}-{digest}.md"
+        if not prompt_file.exists():
+            prompt_file.parent.mkdir(parents=True, exist_ok=True)
+            prompt_file.write_text(system, encoding="utf-8")
+        try:
+            payload = json.loads(user)
+        except (TypeError, ValueError):
+            payload = user
+        entry = {
+            "ts": now.isoformat(timespec="milliseconds"), "role": role, "outcome": outcome,
+            "seconds": round(seconds, 2), "system_prompt": str(prompt_file.relative_to(base)),
+            "user": payload, "reply": reply, "tools_called": list(tools),
+        }  # fmt: skip
+        day = base / now.strftime("%Y-%m-%d")
+        day.mkdir(parents=True, exist_ok=True)
+        name = f"{now.strftime('%H%M%S.%f')}-{role}-{uuid.uuid4().hex[:6]}.json"
+        (day / name).write_text(json.dumps(entry, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    except Exception as e:  # a full disk or a read-only folder must never cost a move
+        log.warning("LLM record failed: %s", e)
+
+
+def call_json(complete, system: str, user: str, timeout_s: float, name: str = "llm") -> dict | None:
     if complete is None:
         return None
+    t0, text, outcome = time.monotonic(), None, "ok"
     future = _POOL.submit(complete, system, user)
     try:
-        return parse(future.result(timeout=timeout_s))
+        text = future.result(timeout=timeout_s)
+        return parse(text)
     except FutureTimeout:
+        outcome = "timeout"
         log.warning("LLM call over %.0fs - using the fallback", timeout_s)
     except Exception as e:  # provider error or unparsable reply
+        outcome = f"error: {e}"[:200]
         log.warning("LLM call failed (%s) - using the fallback", e)
+    finally:
+        record(name, system, user, text, time.monotonic() - t0, outcome)
     return None
 
 
@@ -94,7 +137,7 @@ def _run_tools(toolbox, uses) -> list[dict]:
 
 
 def call_json_with_tools(
-    converse, system: str, user: str, toolbox, timeout_s: float, rounds: int = TOOL_ROUNDS
+    converse, system: str, user: str, toolbox, timeout_s: float, rounds: int = TOOL_ROUNDS, name: str = "llm"
 ) -> dict | None:
     """Like `call_json`, but the model may call `toolbox` tools for up to `rounds` turns first. One deadline covers
     every model call and every tool run; a late answer returns None and the role uses its fallback."""
@@ -117,11 +160,17 @@ def call_json_with_tools(
             messages.append({"role": "user", "content": _run_tools(toolbox, uses)})
         return ""
 
+    t0, text, outcome = time.monotonic(), None, "ok"
     future = _POOL.submit(loop)
     try:
-        return parse(future.result(timeout=timeout_s))
+        text = future.result(timeout=timeout_s)
+        return parse(text)
     except FutureTimeout:
+        outcome = "timeout"
         log.warning("LLM tool loop over %.0fs - using the fallback", timeout_s)
     except Exception as e:  # provider error, late answer or unparsable reply
+        outcome = f"error: {e}"[:200]
         log.warning("LLM tool loop failed (%s) - using the fallback", e)
+    finally:
+        record(name, system, user, text, time.monotonic() - t0, outcome, getattr(toolbox, "calls", ()))
     return None

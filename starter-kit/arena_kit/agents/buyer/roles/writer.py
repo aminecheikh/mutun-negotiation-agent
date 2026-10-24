@@ -316,7 +316,7 @@ class LLMWriter:
             default=str,
         )
         self.last_problems, self.last_used_model = [], False
-        reply = call_json(self.complete, self.system, user, TIMEOUT_S)
+        reply = call_json(self.complete, self.system, user, TIMEOUT_S, name="writer")
         if not isinstance(reply, dict) or not isinstance(reply.get("body"), str) or not reply["body"].strip():
             return fallback
         body = reply["body"].strip()

@@ -371,9 +371,9 @@ class LLMStrategist:
         toolbox = None
         if self.converse is not None:
             toolbox = self._toolbox(ctx, threads, reads)
-            reply = call_json_with_tools(self.converse, self.system, user, toolbox, self.timeout_s)
+            reply = call_json_with_tools(self.converse, self.system, user, toolbox, self.timeout_s, name="strategist")
         else:
-            reply = call_json(self.complete, self.system, user, self.timeout_s)
+            reply = call_json(self.complete, self.system, user, self.timeout_s, name="strategist")
         if toolbox is not None and toolbox.calls:
             log.info("strategist called tools: %s", ", ".join(toolbox.calls))
         if not isinstance(reply, dict) or not isinstance(reply.get("tactic"), dict):
