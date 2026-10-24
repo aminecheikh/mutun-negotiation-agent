@@ -55,6 +55,10 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 
 - 21:40 - from Saed's D01 replay: thread-safe package (18/19 parallel crashes -> 0), coverage search without a cost estimate, visible step per round to target, strategist levers in sheets, no less-coverage / non-credible variants; sandbox fixtures saved; 337 tests
 
+- 22:30 - web research by 4 agents in `docs/research/` (LLM negotiators, strategy algorithms, procurement
+  practice, LLM engineering) + README index with candidate actions per owner; 2 citations spot-checked
+  (arXiv 2402.15813, 2601.13206); kit `llm.py` retry/timeout issue confirmed in code
+
 ## Runs
 
 | When | Commit | Cases | Sessions | Mean | Notes |

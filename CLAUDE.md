@@ -20,6 +20,8 @@ Read `brief/brief.md` and `brief/api.md` for the rules; `docs/ROADMAP.md` for pl
 - `starter-kit/scripts/` - ops: `harvest.py` saves ended sessions and writes a readable digest.
 - `starter-kit/runs/` - session dumps, logs and `ledger.jsonl` of every arena run (gitignored).
 - `docs/team/` - per-person tracking files and `DECISIONS.md` (see Team protocol below).
+- `docs/research/` - web research (LLM negotiators, strategy algorithms, procurement practice, LLM engineering)
+  with sourced takeaways per module; start at its `README.md` before changing strategy, prompts or constants.
 - `.claude/hooks/` - `session_start.py` (who you work with, their tasks, others' asks) and
   `after_arena_run.py` (logs every `arena play|run`, harvests foreground runs).
 - `data/` (repo) and `starter-kit/data/package` (from `uv run arena data`) - the same data package.
