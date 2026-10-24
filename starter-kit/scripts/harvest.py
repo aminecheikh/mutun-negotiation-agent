@@ -21,9 +21,9 @@ def fetch(client: ArenaClient, summary: dict) -> dict:
     """The full session (with trace) and its back office, cached on disk once the session has ended."""
     path = RUNS / f"{summary['case_id'].replace(':', '_')}_{summary['session_id']}.json"
     if path.exists():
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     record = {"session": client.session(summary["session_id"]), "backoffice": client.backoffice(summary["session_id"])}
-    path.write_text(json.dumps(record, indent=1, ensure_ascii=False, default=str))
+    path.write_text(json.dumps(record, indent=1, ensure_ascii=False, default=str), encoding="utf-8")
     return record
 
 

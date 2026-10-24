@@ -1,0 +1,347 @@
+"""The orchestrator's deterministic parts: acceptability, verdicts, walk-away, tactic clamping, the guard, the
+data-package lock, and the rule that agent code never reads the live feed. No network, no LLM."""
+
+import copy
+import json
+import re
+import threading
+from pathlib import Path
+
+import pytest
+
+from arena_kit.agents.buyer import guard, observe, policy
+from arena_kit.agents.buyer.agent import BuyerAgent, LockedPackage
+from arena_kit.agents.buyer.config import OrchestratorConfig
+from arena_kit.agents.buyer.contracts import Email, Tactic
+from arena_kit.agents.buyer.telemetry import Telemetry
+from arena_kit.agents.buyer.tools import DataTools
+from arena_kit.data import DataPackage
+
+KIT = Path(__file__).parents[1]
+DATA = KIT.parent / "data"
+S01 = json.loads((KIT / "arena_kit/sim_cases/S01.json").read_text(encoding="utf-8"))  # one supplier
+S02 = json.loads((KIT / "arena_kit/sim_cases/S02.json").read_text(encoding="utf-8"))  # RFQ, two suppliers
+A, B = S02["suppliers"]
+SID = S01["suppliers"][0]
+
+
+def quote(sid: str, n: int, price: float, status: str = "open", days: int = 30) -> dict:
+    sheet = {"term_sheet_id": f"offer:{sid[4:]}-{n}", "terms": {"unit_price": price, "payment_days": days}}
+    return {"from": f"sales@{sid[4:]}", "status": status, "term_sheets": [sheet], "attachments": [], "body": "Offer."}
+
+
+def rfq_quote(sid: str, n: int, price: float, status: str = "open") -> dict:
+    msg = quote(sid, n, price, status)
+    msg["term_sheets"][0]["terms"]["lead_time_days"] = 42
+    return msg
+
+
+def ours(price: float, days: int = 30, extra: dict | None = None) -> dict:
+    terms = {"unit_price": price, "payment_days": days, **(extra or {})}
+    return {"from": "buyer", "subject": "Re", "body": "Our proposal.", "term_sheets": [{"terms": terms}], "refs": []}
+
+
+# A thread whose supplier went final, got our one counter, and went final again: no further counter is allowed.
+A_COUNTERED = [
+    rfq_quote(A, 0, 17.2),
+    ours(15.0, extra={"lead_time_days": 42}),
+    rfq_quote(A, 1, 16.7, "final_offer"),
+    ours(15.5, extra={"lead_time_days": 42}),
+    rfq_quote(A, 2, 16.6, "final_offer"),
+]
+
+
+def session_for(case: dict, threads: dict, **config):
+    agent = BuyerAgent(DataTools(), None, None, None, None, None, OrchestratorConfig(**config), Telemetry("off"))
+    return agent.open_case(case, threads)
+
+
+def with_alternative(case: dict, price: float) -> dict:
+    out = copy.deepcopy(case)
+    out["buyer"]["alternative"] = {"kind": "quote", "ref": None, "terms": {"unit_price": price, "payment_days": 30}}
+    return out
+
+
+# ---- acceptability and verdicts ------------------------------------------------------------------------
+
+
+def test_verdict_when_only_the_opening_quote_exists_never_accepts():
+    s = session_for(S01, {SID: [quote(SID, 0, 17.4)]})
+    v = policy.verdict(s, s.threads[SID])
+    assert v.kind == "counter" and not v.accept_permitted
+
+
+def test_acceptable_when_final_offer_is_dearer_than_its_own_opening_refuses_it():
+    # sandbox D02: a final offer at 16.10 was accepted although the same supplier had opened at 16.00
+    s = session_for(S01, {SID: [quote(SID, 0, 17.4), ours(15.0), quote(SID, 1, 17.6, "final_offer")]})
+    th = s.threads[SID]
+    assert not policy.acceptable(s, th)
+    assert policy.verdict(s, th).kind != "accept"
+
+
+def test_verdict_when_supplier_agreed_to_our_sheet_accepts():
+    s = session_for(S01, {SID: [quote(SID, 0, 17.4), ours(16.5), quote(SID, 1, 16.5, "agreed")]})
+    v = policy.verdict(s, s.threads[SID])
+    assert v.kind == "accept" and "agreed" in v.reason
+
+
+def test_verdict_when_rival_can_still_go_lower_parks_the_final_offer():
+    s = session_for(
+        S02,
+        {
+            A: A_COUNTERED,
+            B: [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0)],
+        },
+    )
+    v = policy.verdict(s, s.threads[A])
+    assert policy.acceptable(s, s.threads[A])
+    assert v.kind == "park" and "plausibly" in v.reason
+
+
+def test_verdict_when_rival_is_at_its_final_offer_too_accepts_the_cheaper():
+    s = session_for(
+        S02,
+        {
+            A: A_COUNTERED,
+            B: [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0, "final_offer")],
+        },
+    )
+    assert policy.verdict(s, s.threads[A]).kind == "accept"
+    assert policy.best_acceptable(s) is s.threads[A]
+
+
+def test_counter_after_final_offer_when_far_above_target_is_allowed_once():
+    case = with_alternative(S01, 17.0)
+    events = [quote(SID, 0, 17.4), ours(15.0), quote(SID, 1, 16.9, "final_offer")]
+    s = session_for(case, {SID: events})
+    first = policy.verdict(s, s.threads[SID])
+    assert first.kind == "counter" and first.accept_permitted and "final offer" in first.reason
+    s = session_for(case, {SID: events + [ours(15.5), quote(SID, 2, 16.9, "final_offer")]})
+    assert s.threads[SID].final_countered
+    assert policy.verdict(s, s.threads[SID]).kind == "accept"
+
+
+def test_walk_reason_when_alternative_beats_a_stuck_supplier_walks():
+    s = session_for(
+        with_alternative(S01, 15.0), {SID: [quote(SID, 0, 17.4), ours(14.5), quote(SID, 1, 16.9, "final_offer")]}
+    )
+    assert policy.walk_reason(s) is not None
+
+
+def test_walk_reason_when_an_acceptable_sheet_exists_never_walks():
+    s = session_for(with_alternative(S01, 17.3), {SID: [quote(SID, 0, 17.4), ours(15.0), quote(SID, 1, 16.0)]})
+    assert policy.acceptable(s, s.threads[SID]) and policy.walk_reason(s) is None
+
+
+def test_walk_reason_without_alternative_only_when_nothing_can_move():
+    moving = session_for(S01, {SID: [quote(SID, 0, 17.4), ours(14.0), quote(SID, 1, 17.6)]})
+    assert policy.walk_reason(moving) is None
+    dead = session_for(S01, {SID: [quote(SID, 0, 17.4), ours(14.0), quote(SID, 1, 17.6, "final_offer")]})
+    assert policy.walk_reason(dead) == "nothing acceptable and no thread can move"
+
+
+def test_coerce_tactic_keeps_the_strategist_inside_its_permissions():
+    s = session_for(S01, {SID: [quote(SID, 0, 17.4), ours(15.0), quote(SID, 1, 16.9)]})
+    th = s.threads[SID]
+    v = policy.Verdict("counter", "negotiate", accept_permitted=False)
+    t = policy.coerce_tactic(
+        s, th, Tactic(SID, "accept", ("unit_price", "bogus", "payment_days"), (0, 5, 0, True)), v, 2
+    )
+    assert t.action == "send" and t.claims == (0,) and t.levers == ("unit_price", "payment_days")
+    walked = policy.coerce_tactic(s, th, Tactic(SID, "walk_away"), v, 0)
+    assert walked.action == "send" and th.walk_hint
+    other = policy.coerce_tactic(
+        s, th, Tactic("sup:other", "accept", claims=(0,)), policy.Verdict("counter", "x", True), 2
+    )
+    assert other.supplier_id == SID and other.action == "send" and other.claims == ()
+
+
+# ---- guard ---------------------------------------------------------------------------------------------
+
+
+def test_check_sheets_drops_sheets_we_would_not_want_accepted():
+    case = copy.deepcopy(S01)
+    case["buyer"]["must_haves"] = [{"field": "payment_days", "op": ">=", "value": 30}]
+    s = session_for(case, {SID: [quote(SID, 0, 17.4), ours(15.0), quote(SID, 1, 16.5)]})
+    th = s.threads[SID]
+    sheets = [
+        {"unit_price": 16.0, "payment_days": 60},  # fine
+        {"unit_price": 15.0, "payment_days": 14},  # breaks the must-have
+        {"unit_price": 16.8, "payment_days": 30},  # dearer than its own standing sheet
+    ]
+    kept, problems = guard.check_sheets(s, th, sheets)
+    assert kept == [{"unit_price": 16.0, "payment_days": 60}] and len(problems) == 2
+    assert guard.check_sheets(s, th, [{"unit_price": 0, "payment_days": 30}]) == ([], ["sheet dropped: no valid price"])
+    assert len(guard.check_sheets(s, th, sheets + [{"unit_price": 15.9, "payment_days": 60}])[0]) == 1  # max 3 read
+
+
+def test_normalise_sheet_keeps_the_suppliers_standard_value_and_snaps_others():
+    s = session_for(S01, {SID: [quote(SID, 0, 17.4)]})
+    th = s.threads[SID]
+    th.std = {"payment_days": 21}  # its quote PDF: a standard term outside our options (the arena allows it)
+    assert guard.normalise_sheet(s, th, {"unit_price": 16.004, "payment_days": 21}) == {
+        "unit_price": 16.0,
+        "payment_days": 21,
+    }
+    assert guard.normalise_sheet(s, th, {"unit_price": 16.0, "payment_days": 20})["payment_days"] == 14
+
+
+def test_clean_body_removes_unknown_and_duplicate_ids_extra_arguments_and_leaks():
+    s = session_for(S01, {SID: [quote(SID, 0, 17.4)]})
+    known = {f"idx:PPI-C2431@202{y}-08" for y in (5, 6)} | {"sc:70270@2026Q3", "po:1-10", "po:2-10"}
+    known |= {"fc:320050@2026-09", "cost:320050"}
+    s.set_lookup(lambda ref: ref in known)
+    s.burned = {"sc:70270@2026Q3"}
+    body = (
+        "Dear Sir or Madam,\n\nthank you for your offer. "
+        "Bars rose 12.3% from 2025-08 to 2026-08 (idx:PPI-C2431@2025-08, idx:PPI-C2431@2026-08). "
+        "Your on-time delivery was 84.6% (sc:70270@2026Q3). "
+        "We cite a fact that does not exist (idx:FAKE@2026-08). "
+        "Your orders were at 15.50 and 15.60 (po:1-10, po:2-10). "
+        "Our forecast is up 9.4% (fc:320050@2026-09). "
+        "Our cost estimate is EUR 14.10 (cost:320050). "
+        "Wir brauchen das dringend. "
+        "We look forward to your answer."
+    )
+    text, cited, problems = guard.clean_body(s, s.threads[SID], body)
+    assert "idx:FAKE" not in text and "sc:70270" not in text and "dringend" not in text
+    assert "We look forward to your answer." in text and "thank you for your offer." in text
+    # three usable arguments go out (index, orders, forecast); the fourth (cost) is cut by the per-message limit
+    assert cited == {"idx:PPI-C2431@2025-08", "idx:PPI-C2431@2026-08", "po:1-10", "po:2-10", "fc:320050@2026-09"}
+    assert "cost:320050" not in text
+    assert any("already cited" in p for p in problems) and any("unknown ID" in p for p in problems)
+    assert any("more than 3 arguments" in p for p in problems) and any("leak" in p for p in problems)
+
+
+def test_clean_body_allows_a_rival_offer_once_per_supplier_but_never_its_own():
+    s = session_for(S02, {A: [rfq_quote(A, 0, 17.2)], B: [rfq_quote(B, 0, 17.5)]})
+    rival, own = f"offer:{A[4:]}-0", f"offer:{B[4:]}-0"
+    body = f"We hold an offer at EUR 17.20 ({rival}). Your offer stands at EUR 17.50 ({own}). Please review it."
+    text, cited, _ = guard.clean_body(s, s.threads[B], body)
+    assert rival in text and own not in text and cited == {rival}
+    s.threads[B].cited_offers.add(rival)
+    assert rival not in guard.clean_body(s, s.threads[B], body)[0]
+
+
+def test_build_message_when_the_body_is_cut_too_short_returns_none():
+    s = session_for(S01, {SID: [quote(SID, 0, 17.4)]})
+    email = Email("Re: x", "Wir brauchen das dringend.")
+    assert guard.build_message(s, s.threads[SID], [{"unit_price": 16.0, "payment_days": 30}], email) is None
+
+
+def test_observe_rebuild_derives_burned_ids_offers_and_language():
+    events = [
+        quote(SID, 0, 17.4),
+        {**ours(16.0), "body": "Prices fell -3.7% (idx:PPI-D351@2025-08, idx:PPI-D351@2026-08)."},
+    ]
+    events.append({**quote(SID, 1, 17.0), "body": "Guten Tag, wir prüfen Ihr Angebot und das Zahlungsziel mit Ihnen."})
+    s = session_for(S01, {SID: events})
+    assert s.burned == {"idx:PPI-D351@2025-08", "idx:PPI-D351@2026-08"}
+    assert s.offers == {f"offer:{SID[4:]}-0", f"offer:{SID[4:]}-1"}
+    assert s.threads[SID].c_history[0] > s.threads[SID].c_history[1]
+    assert observe.detect_language(events[-1]["body"]) == "de"
+    assert observe.detect_language("Dear Sir, thank you for your offer and the payment terms.") == "en"
+
+
+# ---- infrastructure ------------------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not (DATA / "world.sqlite").exists(), reason="data package not present")
+def test_locked_package_when_queried_from_many_threads_never_fails():
+    package = LockedPackage(DataPackage(DATA))
+    package.lookup("")  # warm the ID index as cli.py does
+    errors = []
+
+    def hammer(i: int) -> None:
+        try:
+            for _ in range(25):
+                rows = package.query("SELECT id FROM suppliers WHERE id LIKE ? LIMIT 5", (f"sup:70{i % 7}%",))
+                assert isinstance(rows, list)
+                package.lookup("sup:70110")
+        except Exception as e:  # noqa: BLE001 - the test collects every failure
+            errors.append(repr(e))
+
+    workers = [threading.Thread(target=hammer, args=(i,)) for i in range(16)]
+    for w in workers:
+        w.start()
+    for w in workers:
+        w.join()
+    assert errors == []
+    assert package.facts is package._package.facts  # plain attributes pass through
+
+
+def test_agent_code_never_reads_the_live_feed():
+    # brief §7: reading /v1/events, /screen, /leaderboard or /results during the final disqualifies
+    forbidden = re.compile(r"leaderboard|/events|/screen|/results")
+    roots = [KIT / "arena_kit/agents/buyer", KIT / "scripts"]
+    hits = [
+        f"{p.relative_to(KIT)}:{n}"
+        for root in roots
+        for p in root.rglob("*.py")
+        for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1)
+        if forbidden.search(line)
+    ]
+    assert hits == []
+
+
+# ---- competing sheets and the arbiter ------------------------------------------------------------------
+
+
+class FakeTable:
+    session_id = "fake"
+
+    def __init__(self):
+        self.closed = []
+
+    def close(self, supplier_id, message):
+        self.closed.append((supplier_id, message["action"]))
+        return {"ended": True, "deal": message["action"]["type"] == "accept"}
+
+    def result(self):
+        return {"ended": True, "deal": False}
+
+
+def test_verdict_when_a_cheaper_acceptable_sheet_exists_never_accepts_the_dearer():
+    a_events = [rfq_quote(A, 0, 17.2), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(A, 1, 16.0, "agreed")]
+    b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 16.4, "agreed")]
+    s = session_for(S02, {A: a_events, B: b_events})
+    v = policy.verdict(s, s.threads[B])
+    assert v.kind == "park" and A in v.reason  # B agreed, but A's acceptable sheet is cheaper
+    assert policy.verdict(s, s.threads[A]).kind == "accept"
+
+
+def test_verdict_when_dearer_thread_can_still_beat_the_cheaper_keeps_negotiating():
+    from arena_kit.agents.buyer.contracts import ConcessionFit
+
+    b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 16.0)]
+    s = session_for(S02, {A: A_COUNTERED, B: b_events})
+    s.threads[B].c = s.threads[A].c * 1.001  # B just above A
+    s.threads[B].fit = ConcessionFit(B, (17.5, 16.0), 14.0, 8.6, False)  # its path says it can go far lower
+    v = policy.verdict(s, s.threads[B])
+    assert v.kind == "counter" and not v.accept_permitted
+
+
+def test_arbiter_when_every_thread_waits_in_the_freeze_accepts_the_best_sheet():
+    import time as _time
+
+    from arena_kit.agents.buyer.arbiter import Arbiter
+
+    s = session_for(S01, {SID: [quote(SID, 0, 17.4), ours(15.0), quote(SID, 1, 16.9)]}, close_margin_s=10, freeze_s=100)
+    s.table, s.deadline = FakeTable(), (lambda: _time.time() + 50)  # inside the freeze, outside the close margin
+    assert policy.acceptable(s, s.threads[SID])
+    Arbiter(s).step()
+    assert s.table.closed == [(SID, {"type": "accept", "term_sheet_id": s.threads[SID].standing_id})]
+    assert s.ended and "negotiating" in s.end_reason
+
+
+def test_arbiter_when_nothing_beats_the_alternative_walks_once():
+    from arena_kit.agents.buyer.arbiter import Arbiter
+
+    s = session_for(
+        with_alternative(S01, 15.0), {SID: [quote(SID, 0, 17.4), ours(14.5), quote(SID, 1, 16.9, "final_offer")]}
+    )
+    s.table = FakeTable()
+    arbiter = Arbiter(s)
+    arbiter.step()
+    arbiter.step()
+    assert s.table.closed == [(SID, {"type": "walk_away"})] and s.ended
