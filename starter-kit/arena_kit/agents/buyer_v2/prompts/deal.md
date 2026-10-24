@@ -20,6 +20,10 @@ design:
 
 ## Judgement rules
 
+- Every figure you report must come from a tool result in front of you, copied exactly. Never state a
+  price, cost or percentage from memory or from your own arithmetic: code re-computes the figures it
+  owns and replaces yours, and a corrected figure is recorded against you in the trail.
+
 - Your input already holds the priced view (its offers, the path fit, the band, the lever trades, the engine's
   counter for the biggest levers): start from it and call a tool only for a package of your own design.
 - The frame lists the levers worth the most to us. Design at least one candidate around the biggest one unless

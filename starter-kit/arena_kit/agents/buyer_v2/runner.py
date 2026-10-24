@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from ...client import ArenaError
+from ...docs import read_document
 from ...play import ENDED, fetch_documents, quota_used_up
 from . import facts as F
 from . import guard
@@ -239,14 +240,30 @@ class CaseRun:
         if reply is not None and "result" in reply:
             self.finish(reply["result"], "the arena ended the case")
             return
-        reply = fetch_documents(self.table, reply)
-        with self.lock:
+        with self.lock:  # record the reply first: the thread can be decided while its documents still download
             th.events.append({**message, "from": "buyer"})
             th.events.append(reply)
             th.received_at = received
             th.slowest_s = max(th.slowest_s, received - asked_at)
             th.errors = 0
         self.notify()
+        self.fetch_bounded(reply, received + self.cfg.attachment_budget_s)
+
+    def fetch_bounded(self, message: dict, deadline: float) -> None:
+        """The text of the reply's attachments, as far as the deadline allows. Every arena call is paced at 9/s
+        across all cases, so a reply with several documents can take longer than the whole move; what does not
+        arrive in time is left for a later round (the agents see it as not readable)."""
+        for att in message.get("attachments") or []:
+            if att.get("attachment_id") is None or "text" in att:
+                continue
+            if time.monotonic() >= deadline:
+                log.info("%s: attachment %s left for a later round (download budget spent)",
+                         self.case.get("case_id"), att.get("name"))  # fmt: skip
+                return
+            try:
+                att["text"] = read_document(att["name"], self.table.attachment(att["attachment_id"]))
+            except Exception as e:  # a document we cannot read must never cost the round
+                log.warning("%s: could not read %s: %s", self.case.get("case_id"), att.get("name"), e)
 
     def _repair(self, th: ThreadRun, message: dict) -> dict:
         """After a 422: re-check every sheet with snapping forced; with none left, the bridge counter."""
@@ -300,7 +317,9 @@ class CaseRun:
             return "ended"
         if not t or not t.get("messages"):
             return "failed"
-        events = [fetch_documents(self.table, m) for m in t["messages"]]
+        events = list(t["messages"])
+        for m in events[-2:]:  # only the newest messages' documents, and only while the budget lasts
+            self.fetch_bounded(m, time.monotonic() + self.cfg.attachment_budget_s)
         ours = [m for m in events if m.get("from") == "buyer" and m.get("term_sheets")]
         timeouts = list(t.get("timeouts") or [])
         for _ in timeouts:  # each timeout used a round: the arena repeated our last offer
@@ -475,9 +494,10 @@ def play_case(table, case_id: str, agent: V2Agent, deadline=None) -> dict:
     opened = time.monotonic()  # the suppliers' quotes are in: their 60 s run from here, downloads included
     if getattr(table, "done", None):  # resumed a case that had already ended
         return table.done
-    for events in threads.values():
-        for m in events:
-            fetch_documents(table, m)
+    opening = [m for events in threads.values() for m in events if m.get("attachments")]
+    if opening:  # in parallel: the client paces the calls anyway, and every thread's clock is already running
+        with ThreadPoolExecutor(max_workers=min(4, len(opening))) as pool:
+            list(pool.map(lambda m: fetch_documents(table, m), opening))
     run = CaseRun(agent, table, case, threads, deadline, received_at=opened)
     result = run.play()
     agent.trail.case(

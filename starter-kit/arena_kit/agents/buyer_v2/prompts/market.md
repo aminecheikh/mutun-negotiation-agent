@@ -22,6 +22,10 @@ first turn revealed):
 
 ## Judgement rules
 
+- Every figure you report must come from a tool result in front of you, copied exactly. Never state a
+  price, cost or percentage from memory or from your own arithmetic: code re-computes the figures it
+  owns and replaces yours, and a corrected figure is recorded against you in the trail.
+
 - Your input already holds the band, the cost drivers, the should-cost and the verified arguments: start from
   them and call a tool only for something more (an index it names, a document, past prices).
 - What changed suppliers' calculations in our replays: index changes, should-cost estimates, notice periods and

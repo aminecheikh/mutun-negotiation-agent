@@ -191,6 +191,10 @@ class Brain:
             if role not in reports and A.SPECS[role].static and role in notes:
                 reports[role] = notes[role]  # last known profile or market view
         f = F.thread_facts(state, sid, events)  # cheap; the analysts did not change it, but stay exact
+        # a figure a specialist stated is never taken as fact: code owns every number it can compute
+        corrections = A.check_numbers(state, f, reports)
+        if corrections:
+            log.info("%s/%s: corrected agent figures: %s", state.case.get("case_id"), sid, "; ".join(corrections))
         # through the pool like the specialists: even a transport that ignores its timeout cannot hold the move
         answer = self.llm.run_many([AgentCall(
             role="negotiator", system=A.system_prompt("negotiator"),
@@ -201,6 +205,8 @@ class Brain:
             tool_turns=cfg.negotiator_tool_turns, context=context,
         )])["negotiator"]  # fmt: skip
         status["negotiator"] = {"ok": answer.ok, "s": answer.seconds, "tools": answer.tool_calls, "error": answer.error}
+        if corrections:
+            status["corrected_figures"] = corrections
         if not answer.ok:
             move = self._fallback(state, sid, threads, f, f"negotiator: {answer.error}", status, reports)
         else:

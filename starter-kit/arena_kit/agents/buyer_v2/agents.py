@@ -414,6 +414,57 @@ def analyst_input(role: str, state: F.CaseState, f: F.ThreadFacts, events: list[
     return "\n\n".join(x for x in [brief, now, memory, pre, extra + thread, task] if x)
 
 
+CHECKED_FIELDS = {
+    # report field -> (how code computes it, tolerance as a share of the computed value)
+    "market": {
+        "fair_price": ("band.fair", 0.01),
+        "floor_estimate": ("band.floor", 0.01),
+        "credible_lowest_price": ("credibility.lowest_price", 0.01),
+        "ambitious_target_price": ("band.target", 0.01),
+    },
+    "deal": {"standing_c": ("standing.c", 0.005)},
+}
+
+
+def _computed(state: F.CaseState, f: F.ThreadFacts, path: str):
+    band = getattr(state.ctx, "bands", {}).get(f.supplier_id)
+    cred = getattr(state.ctx, "credibility", {}).get(f.supplier_id)
+    source = {"band": band, "credibility": cred, "standing": f.standing}
+    head, field = path.split(".")
+    obj = source.get(head)
+    value = getattr(obj, field, None) if obj is not None else None
+    return None if isinstance(value, float) and math.isinf(value) else value
+
+
+def check_numbers(state: F.CaseState, f: F.ThreadFacts, reports: dict) -> list[str]:
+    """Replace every reported figure code can compute with the computed one. Returns the corrections made."""
+    notes: list[str] = []
+    for role, fields in CHECKED_FIELDS.items():
+        report = reports.get(role)
+        if not isinstance(report, dict):
+            continue
+        for field, (path, tol) in fields.items():
+            if field not in report:
+                continue
+            said, truth = report.get(field), _computed(state, f, path)
+            if not isinstance(said, int | float) or isinstance(said, bool):
+                continue
+            if truth is None:
+                report[field] = None
+                notes.append(f"{role}.{field}: {said} is not computable from the data - dropped")
+            elif abs(said - truth) > max(abs(truth) * tol, 0.01):
+                report[field] = round(truth, 4)
+                notes.append(f"{role}.{field}: {said} corrected to {round(truth, 4)} ({path})")
+    # booleans the code owns outright
+    deal = reports.get("deal")
+    if isinstance(deal, dict):
+        for field, truth in (("accepted_our_offer", f.accepted_ours), ("standing_acceptable", f.acceptable)):
+            if isinstance(deal.get(field), bool) and deal[field] != truth:
+                deal[field] = truth
+                notes.append(f"deal.{field}: corrected to {truth}")
+    return notes
+
+
 def negotiator_input(state: F.CaseState, f: F.ThreadFacts, events: list[dict], reports: dict, pre: str = "") -> str:
     parts = [
         case_brief(state, f.supplier_id),

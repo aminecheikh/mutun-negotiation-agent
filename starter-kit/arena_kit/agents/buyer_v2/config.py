@@ -60,6 +60,9 @@ class V2Config:
     last_call_s: float = 30.0  # nothing acceptable this close to the cap: walk away (no deal = alternative)
     round_margin_s: float = 15.0  # ... or the slowest round so far plus this, if longer
     poll_s: float = 0.25  # how often a waiting worker or the coordinator re-checks
+    # the arena client paces every call (9/s across all cases): a reply's attachments are downloaded under
+    # this budget and never before the decision, so a slow download cannot eat the 60 s move limit
+    attachment_budget_s: float = 8.0
     # ---- logging ---------------------------------------------------------------------------------------
     log_dir: str = ""  # default: BUYER_LOG_DIR or "runs"; "off" disables
 

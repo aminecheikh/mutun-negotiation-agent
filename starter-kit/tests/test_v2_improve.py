@@ -149,6 +149,56 @@ def test_the_models_json_record_carries_the_precomputed_block(tmp_path, monkeypa
     assert recs and "TOOL RESULTS ALREADY FETCHED" in recs[0]["user"]
 
 
+# ---- hallucination: a figure an agent states is never taken as fact -------------------------------------------
+
+
+def test_invented_specialist_figures_are_replaced_by_the_computed_ones():
+    events = [quote(SID, 0, 17.4), ours({"unit_price": 16.0, "payment_days": 30}), quote(SID, 1, 17.0)]
+    st = state_for(S01, {SID: events})
+    f = F.thread_facts(st, SID, events)
+    band = st.ctx.bands[SID]
+    reports = {
+        "market": {"fair_price": 999.0, "floor_estimate": band.floor, "credible_lowest_price": 1.0,
+                   "ambitious_target_price": None},
+        "deal": {"standing_c": 12345.0, "accepted_our_offer": True, "standing_acceptable": False},
+    }  # fmt: skip
+    notes = A.check_numbers(st, f, reports)
+    # fair is either computed (then the invented 999 is replaced) or unknown (then it is dropped, never trusted)
+    assert reports["market"]["fair_price"] == (round(band.fair, 4) if band.fair else None)
+    assert reports["market"]["floor_estimate"] == band.floor, "a figure that already matches is left alone"
+    assert reports["market"]["credible_lowest_price"] == round(st.ctx.credibility[SID].lowest_price, 4)
+    assert reports["deal"]["standing_c"] == round(f.standing.c, 4)
+    assert reports["deal"]["accepted_our_offer"] is False and reports["deal"]["standing_acceptable"] is f.acceptable
+    assert len(notes) >= 4 and all("corrected" in n or "dropped" in n for n in notes)
+
+
+def test_a_figure_code_cannot_compute_is_dropped_not_trusted():
+    events = [quote(SID, 0, 17.4)]
+    st = state_for(S01, {SID: events})
+    f = F.thread_facts(st, SID, events)
+    st.ctx = st.ctx.__class__(**{**st.ctx.__dict__, "bands": {}, "credibility": {}})
+    reports = {"market": {"fair_price": 42.0}}
+    notes = A.check_numbers(st, f, reports)
+    assert reports["market"]["fair_price"] is None and "not computable" in notes[0]
+
+
+def test_corrections_are_recorded_in_the_trail(tmp_path, monkeypatch):
+    from arena_kit.agents.buyer_v2.trail import Trail
+
+    def wrong_market(messages):
+        from v2_support import MARKET
+
+        return {**MARKET, "fair_price": 999.0}
+
+    model = scripted(answers={"market": wrong_market})
+    cfg = V2Config(log_dir="off", analyst_model="m", negotiator_model="m")
+    brain = Brain(DataTools(), LLM(model, cfg), cfg, None, Trail("off"))
+    events = [quote(SID, 0, 17.4)]
+    st = brain.open_case(S01, {SID: events})
+    move = brain.decide(st, SID, {SID: events}, time.monotonic())
+    assert any("fair_price" in c for c in move.detail["agents"].get("corrected_figures", []))
+
+
 # ---- e-mails: our enquiry's figures -------------------------------------------------------------------------------
 
 
