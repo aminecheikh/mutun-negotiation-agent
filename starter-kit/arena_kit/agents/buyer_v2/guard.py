@@ -99,8 +99,7 @@ def check_counter(state: CaseState, f: ThreadFacts, proposed: list[dict]) -> Che
     kept: list[dict] = []
     cap = f.standing.price if f.standing else None
     cap_c = f.standing.c if f.standing else math.inf
-    cred = getattr(state.ctx, "credibility", {}).get(sid)
-    floor = cred.lowest_price if cred is not None and cred.lowest_price else None
+    floor = F.credible_floor(state, sid, cap)
     for n, raw in enumerate(proposed[:6], 1):
         sheet = normalise(state, raw, f)
         if sheet is None:

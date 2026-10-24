@@ -281,11 +281,12 @@ def pace_guidance(state: F.CaseState, f: F.ThreadFacts) -> str:
                 f"- Its quote {price}; fair price by its cost drivers {fair}; our target package price "
                 f"{band.target} ({(band.target / price - 1) * 100:+.1f} %); floor estimate {band.floor}."
             )
-        if cred is not None and price:
-            lines.append(
-                f"- Lowest credible price {cred.lowest_price} ({(cred.lowest_price / price - 1) * 100:+.1f} %):"
-                f" {cred.reason}."
-            )
+        floor_now = F.credible_floor(state, sid, price)
+        if floor_now is not None and price:
+            why = cred.reason if cred is not None else ""
+            if cred is not None and floor_now != cred.lowest_price:
+                why = f"our cost evidence contradicts its own quote, so the no-evidence rule applies ({why})"
+            lines.append(f"- Lowest credible price {floor_now} ({(floor_now / price - 1) * 100:+.1f} %): {why}.")
         if not F.floor_is_credible(state, sid, price):
             lines.append(
                 f"- CAUTION: our cost floor ({band.floor if band else None}) is ABOVE its own quote ({price}), so it"

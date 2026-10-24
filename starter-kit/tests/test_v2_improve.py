@@ -166,6 +166,37 @@ def test_a_floor_above_the_quote_is_not_treated_as_evidence_where_we_are_told_to
     assert "CAUTION" in A.decision_frame(st, f)
 
 
+def test_the_enforced_floor_follows_the_no_evidence_rule_when_the_evidence_contradicts_the_quote():
+    """P05: floor 36.87 over a quote of 36.00 held our anchor at 35.03; it agreed at once and we scored 0.09."""
+    import copy
+
+    from arena_kit.agents.buyer.tools.credibility import NO_EVIDENCE_GAP_PCT
+
+    case = copy.deepcopy(S01)
+    case["buyer"]["category_goal"] = "leverage"
+    st = state_for(case, {SID: [quote(SID, 0, 17.4)]})
+    band, cred = st.ctx.bands[SID], st.ctx.credibility[SID]
+    st.ctx = st.ctx.__class__(**{
+        **st.ctx.__dict__,
+        "bands": {SID: band.__class__(**{**band.__dict__, "floor": 20.0})},
+        "credibility": {SID: cred.__class__(**{**cred.__dict__, "lowest_price": 17.2})},
+    })  # fmt: skip
+    expected = round(17.4 * (1 - NO_EVIDENCE_GAP_PCT / 100), 2)
+    assert F.credible_floor(st, SID, 17.4) == expected < 17.2
+    f = F.thread_facts(st, SID, [quote(SID, 0, 17.4)])
+    kept = guard.check_counter(st, f, [{"unit_price": expected, "payment_days": 30}]).sheets
+    assert kept and kept[0]["unit_price"] == expected, "the broken floor must not raise our anchor any more"
+
+
+def test_a_credible_floor_is_still_enforced():
+    st = state_for(S01, {SID: [quote(SID, 0, 17.4)]})
+    floor = F.credible_floor(st, SID, 17.4)
+    assert floor == st.ctx.credibility[SID].lowest_price
+    f = F.thread_facts(st, SID, [quote(SID, 0, 17.4)])
+    kept = guard.check_counter(st, f, [{"unit_price": round(floor * 0.7, 2), "payment_days": 30}]).sheets
+    assert kept and kept[0]["unit_price"] >= floor
+
+
 def test_a_squeezed_supplier_in_a_relationship_case_keeps_its_floor():
     import copy
 

@@ -106,6 +106,20 @@ def floor_is_credible(state: CaseState, supplier_id: str, quote: float | None) -
     return band.floor <= quote
 
 
+def credible_floor(state: CaseState, supplier_id: str, quote: float | None) -> float | None:
+    """The lowest price we may offer this supplier: `tools/credibility`, unless its cost evidence contradicts the
+    supplier's own quote, in which case the no-evidence rule applies instead."""
+    cred = getattr(state.ctx, "credibility", {}).get(supplier_id)
+    floor = cred.lowest_price if cred is not None and cred.lowest_price else None
+    if floor is None or quote is None:
+        return floor
+    if floor_is_credible(state, supplier_id, quote):
+        return floor
+    from ..buyer.tools.credibility import NO_EVIDENCE_GAP_PCT
+
+    return round(min(floor, quote * (1 - NO_EVIDENCE_GAP_PCT / 100)), 2)
+
+
 def alternative_cost(case: dict) -> float | None:
     alt = case.get("buyer", {}).get("alternative") or {}
     if alt.get("kind") in (None, "none") or not (alt.get("terms") or {}).get("unit_price"):
