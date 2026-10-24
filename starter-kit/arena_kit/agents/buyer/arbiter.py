@@ -10,6 +10,7 @@ import time
 
 from ...client import ArenaError
 from . import guard, policy
+from .recovery import ended, refresh_thread
 from .state import CaseSession, ThreadState
 from .telemetry import Telemetry
 
@@ -26,7 +27,7 @@ class Arbiter:
     def begin_send(self, th: ThreadState) -> bool:
         """Mark a POST as in flight; False if the case has ended (the worker must not send)."""
         with self.s.lock:
-            if self.s.ended or not th.alive:
+            if self.s.ended or not th.alive or th.in_flight or th.needs_refresh:
                 return False
             th.in_flight = True
             return True
@@ -45,7 +46,9 @@ class Arbiter:
         with s.lock:
             if s.ended or th.in_flight or not guard.accept_ok(s, th):
                 return False
-            best = policy.best_acceptable(s, idle_only=False)
+            left = s.seconds_left()
+            last_call = left is not None and left <= s.config.last_call_s
+            best = policy.best_acceptable(s, idle_only=last_call)
             if best is not None and best is not th and best.c < th.c:
                 log.info("%s: accept of %s deferred - %s is cheaper", s.case["case_id"], th.supplier_id,
                          best.supplier_id)  # fmt: skip
@@ -58,21 +61,37 @@ class Arbiter:
         with s.lock:
             if s.ended:
                 return False
+            # A worker can publish a better reply between the walk verdict and this lock acquisition.
+            best = policy.best_acceptable(s, idle_only=False)
+            if best is not None:
+                return self.try_accept(best, "acceptable reply arrived before walk") if not best.in_flight else False
             target = next((t for t in s.threads.values() if t.alive), next(iter(s.threads.values())))
             return self._close(target, {"action": {"type": "walk_away"}}, f"walk: {reason}")
 
     def _close(self, th: ThreadState, message: dict, reason: str) -> bool:
-        """Send the closing action (caller holds the lock). A 409 means the arena already ended the case."""
+        """Send the closing action under the lock; reconcile conflicts before deciding whether the case ended."""
         s = self.s
         try:
             result = s.table.close(th.supplier_id, message)
         except ArenaError as e:
-            if e.status == 409:
-                result = self.result_or_none() or {"deal": False, "end_reason": str(e.detail)}
-                s.finish(result, f"already ended ({e.detail})")
-                return True
+            if e.status in (409, 422):
+                th.needs_refresh = True
+                try:
+                    refresh_thread(s, th, e)
+                except Exception:
+                    log.exception("%s: could not reconcile rejected close", s.case["case_id"])
+                return s.ended
             log.warning("%s: closing action refused (%s): %s", s.case["case_id"], e.status, e.detail)
             return False
+        except Exception:
+            # The response can be lost after the server closed. Read state before deciding again.
+            th.needs_refresh = True
+            log.exception("%s: closing response lost", s.case["case_id"])
+            try:
+                refresh_thread(s, th)
+            except Exception:
+                log.exception("%s: could not reconcile uncertain close", s.case["case_id"])
+            return s.ended
         log.info("%s: %s (C %s)", s.case["case_id"], reason, None if th.c == float("inf") else round(th.c))
         self.telemetry.round(
             case_id=s.case.get("case_id"), supplier_id=th.supplier_id, kind="close", reason=reason,
@@ -99,7 +118,7 @@ class Arbiter:
             if not alive:
                 if not any(t.in_flight for t in s.threads.values()):
                     result = self.result_or_none()
-                    if result and result.get("ended"):
+                    if ended(result):
                         s.finish(result, "every thread ended")
                     else:  # threads we gave up on are still open on the arena: close the case ourselves
                         self._close_abandoned()

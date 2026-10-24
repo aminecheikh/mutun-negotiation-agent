@@ -4,6 +4,7 @@ Pure functions over the data package. Every estimate carries its value, the sour
 prompts and the pitch) and an uncertainty. Method and sources: docs/team/amine-estimation-plan.md.
 """
 
+import math
 from dataclasses import dataclass
 
 OUR_RATE = 0.08  # company.md: Hollerau's cost of capital, the default for a supplier
@@ -70,36 +71,75 @@ def _country(package, supplier_id: str) -> str | None:
 def full_cost(package, part_id: str, supplier_id: str) -> Estimate | None:
     """The supplier's full cost per price unit: its own should-cost, else another should-cost scaled to its
     country, else the lowest recent market price minus a typical margin."""
-    rows = package.query("SELECT id, supplier_id, unit_cost, cost_base FROM should_cost WHERE part_id = ?", (part_id,))
+    # data/README.md and brief/api.md: the case uses the part's price_unit. A row may
+    # use another lot size; compare economics only after converting to that basis.
+    units = package.query("SELECT price_unit FROM parts WHERE id = ?", (part_id,))
+    target_unit = units[0]["price_unit"] if units else None
+    if not _positive(target_unit):
+        return None
+    rows = package.query(
+        "SELECT id, supplier_id, unit_cost, cost_base, price_unit FROM should_cost WHERE part_id = ? "
+        "ORDER BY CASE WHEN supplier_id = ? THEN 0 WHEN supplier_id IS NULL OR supplier_id = '' "
+        "THEN 1 ELSE 2 END, estimate_date DESC, id",
+        (part_id, supplier_id),
+    )
+    rows = [
+        {**r, "unit_cost": value}
+        for r in rows
+        if (value := _in_price_unit(r["unit_cost"], r["price_unit"], target_unit)) is not None
+    ]
     own = [r for r in rows if r["supplier_id"] == supplier_id]
     if own:
         r = own[0]
-        return Estimate(r["unit_cost"], f"should-cost of {supplier_id}'s plant ({r['id']})", OWN_PLANT_UNCERTAINTY)
+        source = f"should-cost of {supplier_id}'s plant ({r['id']}), per {target_unit:g} part units"
+        return Estimate(r["unit_cost"], source, OWN_PLANT_UNCERTAINTY)
     known = _country(package, supplier_id)
     country = known or "DE"
     if rows:
         r = next((r for r in rows if not r["supplier_id"]), rows[0])
         factor = COUNTRY_FACTOR.get(country, 1.0) / COUNTRY_FACTOR.get(r["cost_base"], 1.0)
         where = f"for {country}" if known else "(country unknown, assumed DE)"
-        source = f"{r['id']} ({r['cost_base']} base) x {factor:.2f} {where}"
+        source = f"{r['id']} ({r['cost_base']} base) x {factor:.2f} {where}, per {target_unit:g} part units"
         return Estimate(round(r["unit_cost"] * factor, 2), source, SCALED_UNCERTAINTY)
-    return _cost_from_prices(package, part_id, supplier_id)
+    return _cost_from_prices(package, part_id, supplier_id, target_unit)
 
 
-def _cost_from_prices(package, part_id: str, supplier_id: str) -> Estimate | None:
+def _positive(value) -> bool:
+    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value) and value > 0
+
+
+def _in_price_unit(price, source_unit, target_unit) -> float | None:
+    if not all(_positive(v) for v in (price, source_unit, target_unit)):
+        return None
+    value = price * (target_unit / source_unit)
+    return value if _positive(value) else None
+
+
+def _cost_from_prices(package, part_id: str, supplier_id: str, target_unit: float) -> Estimate | None:
     """The lowest recent price minus a typical margin: this supplier's own prices first - another supplier's
     price says little about this one's cost - else any supplier's."""
     prices = package.query(
-        "SELECT supplier_id, price FROM price_conditions WHERE part_id = ? AND valid_from >= ? "
-        "UNION ALL SELECT supplier_id, unit_price FROM quotes WHERE part_id = ? AND quote_date >= ?",
+        "SELECT supplier_id, price, price_unit, currency FROM price_conditions WHERE part_id = ? AND valid_from >= ? "
+        "UNION ALL SELECT supplier_id, unit_price, price_unit, currency FROM quotes "
+        "WHERE part_id = ? AND quote_date >= ?",
         (part_id, PRICES_SINCE, part_id, PRICES_SINCE),
     )
-    own = [p["price"] for p in prices if p["price"] and p["supplier_id"] == supplier_id]
-    values = own or [p["price"] for p in prices if p["price"]]
+    # The arena values EUR. Without a verified exchange rate, foreign prices are
+    # not comparable evidence; do not treat them as cheap EUR quotes.
+    comparable = [
+        (p["supplier_id"], value)
+        for p in prices
+        if p["currency"] == "EUR" and (value := _in_price_unit(p["price"], p["price_unit"], target_unit)) is not None
+    ]
+    own = [value for sid, value in comparable if sid == supplier_id]
+    values = own or [value for _, value in comparable]
     if not values:
         return None
     lowest, whose = min(values), "its own" if own else "any supplier's"
-    source = f"lowest of {whose} prices since {PRICES_SINCE} ({lowest}) minus {TYPICAL_MARGIN:.0%} margin"
+    source = (
+        f"lowest of {whose} EUR prices since {PRICES_SINCE} ({lowest:g} per {target_unit:g} part units) "
+        f"minus {TYPICAL_MARGIN:.0%} assumed margin"
+    )
     return Estimate(round(lowest * (1 - TYPICAL_MARGIN), 2), source, PRICE_UNCERTAINTY)
 
 

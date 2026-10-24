@@ -2,6 +2,7 @@
 case facts, the rules' dossier whenever anything goes wrong."""
 
 import json
+from dataclasses import replace
 
 from arena_kit.agents.buyer.contracts import Dossier
 from arena_kit.agents.buyer.roles import LLMProfiler
@@ -86,3 +87,23 @@ def test_precomputed_cache_is_valid_for_every_supplier():
     for sid, p in cache.items():
         assert p["persona"] in {"cash_short", "full_order_book", "monopolist", "partner", "price_fighter", "unknown"}
         assert all(t["id"] for t in p["traits"]), sid
+
+
+def test_sunday_evidence_bypasses_old_profile_and_falls_back_to_current_rules():
+    fresh = replace(
+        DOSSIER,
+        persona="cash_short",
+        evidence=(
+            "release fact news:NEW: bank is watching; liquidity constrained",
+            *DOSSIER.evidence,
+        ),
+    )
+    calls = []
+
+    def complete(system, user):
+        calls.append(user)
+        return "unavailable"
+
+    profiler = LLMProfiler(complete, cache={SID: validated(GOOD, DOSSIER)})
+    assert profiler.refine({}, fresh) == fresh
+    assert len(calls) == 1 and "news:NEW" in calls[0]

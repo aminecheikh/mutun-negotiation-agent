@@ -19,6 +19,7 @@ from arena_kit.agents.buyer.roles import LLMWriter, PassthroughProfiler, RuleAna
 from arena_kit.agents.buyer.runner import play_case, play_final
 from arena_kit.agents.buyer.telemetry import Telemetry
 from arena_kit.agents.buyer.tools import DataTools
+from arena_kit.client import ArenaError
 from arena_kit.play import RemoteTable
 
 
@@ -158,3 +159,68 @@ def test_case_when_a_thread_keeps_failing_the_runner_gives_up_and_closes_the_cas
     result = play_case(table, "case:S01", agent)
     assert result["ended"]  # the session is closed (walked away), not left open on the arena
     assert state.sessions[table.session_id]["status"] == "ended"
+
+
+def test_final_polling_recovers_after_transient_server_failure(live_sim, tmp_path, monkeypatch):
+    client, state = live_sim(rehearsal=(0, 5, 1))
+    real_cases = client.cases
+    calls = 0
+
+    def flaky(set_):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ArenaError(503, "temporary outage")
+        return real_cases(set_)
+
+    monkeypatch.setattr(client, "cases", flaky)
+    out = play_final(
+        client,
+        lambda: make_agent(tmp_path, close_margin_s=2, freeze_s=3, last_call_s=1, round_margin_s=0.1),
+        waves=2,
+        poll=0.1,
+    )
+    assert len(out) == 6 and all(isinstance(r, dict) and r.get("ended") for r in out.values())
+    assert all(s["status"] == "ended" for s in state.sessions.values())
+
+
+def test_lost_post_response_recovers_without_sending_that_move_twice(live_sim, tmp_path):
+    import httpx
+
+    client, state = live_sim()
+
+    class LostReply(RemoteTable):
+        lost = False
+
+        def send(self, supplier_id, message):
+            reply = super().send(supplier_id, message)
+            if not self.lost:
+                self.lost = True
+                raise httpx.ReadError("response lost after processing")
+            return reply
+
+    table = LostReply(client)
+    result = play_case(table, "case:S01", make_agent(tmp_path))
+    assert result["ended"] and table.lost
+    assert state.sessions[table.session_id]["status"] == "ended"
+    assert all(th["late"] == [] for th in sim_threads(state, table).values())
+
+
+def test_sweep_records_each_session_and_comparison(live_sim, tmp_path, monkeypatch):
+    import runpy
+    import sys
+
+    client, state = live_sim()
+    script = Path(__file__).parents[1] / "scripts/sweep.py"
+    data = Path(__file__).parents[2] / "data"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ARENA_URL", str(client.http.base_url).removesuffix("/v1/"))
+    monkeypatch.setenv("ARENA_API_KEY", client.http.headers["X-API-Key"])
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.setattr(sys, "argv", [str(script), "--set", "sandbox", "--label", "smoke", "--data", str(data)])
+    with pytest.raises(SystemExit) as exit_info:
+        runpy.run_path(str(script), run_name="__main__")
+    assert exit_info.value.code == 0
+    report = json.loads((tmp_path / "runs/sweep-smoke/report.json").read_text(encoding="utf-8"))
+    assert len(report["results"]) == len(report["sessions"]) == 3
+    assert all(s["status"] == "ended" for s in state.sessions.values())

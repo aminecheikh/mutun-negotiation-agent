@@ -35,14 +35,14 @@ ATTACHMENT_CHARS = 1500
 # ---- shared helpers (pure) ---------------------------------------------------------------------
 
 
-def standing_c(ctx: CaseContext, events: list[dict]) -> float:
-    """C of the supplier's standing sheet with its standard terms; inf if it has none or cannot be priced."""
+def standing_c(ctx: CaseContext, events: list[dict], supplier_id: str) -> float:
+    """C on the same supplier estimate as tools/arbiter, including relationship cost."""
     _, terms = standing(events)
     if not terms:
         return math.inf
     try:
-        return total_cost(ctx.case, terms, standard_terms(events))
-    except (KeyError, TypeError, ValueError):
+        return total_cost(ctx.case, terms, standard_terms(events), ctx.supplier_estimates.get(supplier_id))
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
         return math.inf
 
 
@@ -90,7 +90,7 @@ def negotiable_levers(ctx: CaseContext, levers) -> tuple[str, ...]:
 def accept_ready(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
     """The deterministic accept policy, used by the rule and as a floor under the model."""
     status = latest(events).get("status")
-    c = standing_c(ctx, events)
+    c = standing_c(ctx, events, sid)
     band = ctx.bands.get(sid)
     alt = ctx.c_alternative if ctx.c_alternative is not None else math.inf
     if status == "agreed" or moves_left(ctx.case, events) <= 0:
@@ -106,7 +106,7 @@ def walk_allowed(ctx: CaseContext, threads: dict[str, list[dict]]) -> bool:
     """Only when the alternative is cheaper than everything on the table and nobody is moving any more."""
     if ctx.c_alternative is None:
         return False
-    cheaper = all(standing_c(ctx, ev) > ctx.c_alternative for ev in threads.values())
+    cheaper = all(standing_c(ctx, ev, sid) > ctx.c_alternative for sid, ev in threads.items())
     stuck = all(latest(ev).get("status") == "final_offer" or moves_left(ctx.case, ev) <= 1 for ev in threads.values())
     return cheaper and stuck
 
@@ -120,7 +120,7 @@ class RuleStrategist:
     alternative."""
 
     def choose(self, ctx: CaseContext, threads: dict[str, list[dict]], reads: dict[str, BehaviourRead]) -> Tactic:
-        sid = min(threads, key=lambda s: standing_c(ctx, threads[s]))
+        sid = min(threads, key=lambda s: standing_c(ctx, threads[s], s))
         events = threads[sid]
         if accept_ready(ctx, sid, events):
             status, left = latest(events).get("status"), moves_left(ctx.case, events)
@@ -153,7 +153,7 @@ def _clip(x, default: float) -> float:
 def _thread_view(ctx: CaseContext, sid: str, events: list[dict], read: BehaviourRead, used: set[str]) -> dict:
     dossier, band = ctx.dossiers.get(sid), ctx.bands.get(sid)
     sheet_id, terms = standing(events)
-    c = standing_c(ctx, events)
+    c = standing_c(ctx, events, sid)
     theirs = [m for m in events if m.get("from") != "buyer"][-3:]
     ours = [m for m in events if m.get("from") == "buyer"]
     return {

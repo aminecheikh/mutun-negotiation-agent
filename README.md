@@ -1,3 +1,71 @@
+# Team Mutun: autonomous procurement buyer
+
+Our buyer negotiates every supplier thread in parallel. Amine's tools compute prices, total cost,
+trade-offs and verified claims; Saed's roles interpret supplier evidence and write the emails;
+Jeddou's orchestrator controls timing, allowable actions and the final accept/walk decision.
+All offers are checked against must-haves, opening cost and the alternative before sending or accepting.
+
+## Run our agent
+
+From `starter-kit/`, with Python 3.12 and `uv` installed:
+
+```bash
+uv sync --all-extras
+```
+
+Copy `.env.example` to `.env` and configure the variable names below. Never commit its values.
+
+| Variable | Purpose |
+|---|---|
+| `ARENA_URL`, `ARENA_API_KEY` | Hosted arena URL and the team's key |
+| `ARENA_DATA` | Data folder; `../data` for this checkout, `data/package` after download |
+| `LLM_PROVIDER`, `LLM_MODEL` | Provider and a model available to your account |
+| `ANTHROPIC_API_KEY` | Required for `LLM_PROVIDER=anthropic` |
+| `LLM_BASE_URL`, `LLM_API_KEY` | Endpoint/key for a compatible provider |
+| `LLM_EFFORT` | Optional provider effort setting |
+| `BUYER_LOG_DIR` | Optional decision-log directory (default `runs`) |
+| `BUYER_SERIALISED_SESSION` | Experimental send gate; leave `0` unless hosted measurements support changing it |
+
+When `LLM_MODEL` is unset, the buyer uses deterministic roles. The local rehearsal always uses
+deterministic roles and its own simulator key, regardless of your environment.
+
+```bash
+uv run pytest -q
+uv run ruff check .
+uv run ruff format --check .
+uv run python scripts/rehearse.py --data ../data
+uv run python scripts/sweep.py --set sandbox --label smoke --data ../data
+```
+
+The rehearsal starts and stops a local server automatically, plays two waves, and records closure,
+timeouts and claim results. Sandbox requires the arena key but consumes no practice quota.
+For practice, `scripts/sweep.py --set practice --label v1` first reports quota requirements without
+starting sessions; add `--execute` when ready. Compare runs with `--baseline runs/sweep-v1/report.json`.
+Logs and session snapshots stay under `starter-kit/runs/` (gitignored).
+
+After the Sunday data download, on the final machine:
+
+```bash
+uv run arena data
+uv run python scripts/preflight.py --sunday --require-llm
+uv run arena run --set final --agent buyer --parallel 10 -v
+```
+
+Start exactly one final runner before the scheduled start. On PowerShell, capture its output with
+`2>&1 | Tee-Object -FilePath runs/final.log` after creating `runs`. Restart the same command only if
+the original runner has stopped; it resumes the team's existing sessions.
+
+On this Windows checkout, the existing Python 3.12 environment can run commands directly when `uv`
+is not on PATH: `.\.venv\Scripts\python.exe -m pytest -q` and
+`.\.venv\Scripts\python.exe scripts/rehearse.py --data ../data`.
+
+See [the independent review](docs/orchestrator-review.md) for verified fixes and remaining limits,
+[open issues](docs/issues.md), and [team ownership](docs/team/README.md).
+
+---
+
+The original challenge material follows.
+
 <p align="center">
   <img src=".github/assets/readme-banner.png" alt="Tacto Negotiation Arena. Your agent. Our suppliers. Real money." width="100%">
 </p>

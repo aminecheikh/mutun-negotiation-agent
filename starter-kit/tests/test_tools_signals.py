@@ -99,6 +99,8 @@ def test_refresh_when_a_cost_breakdown_arrives_moves_the_floor_to_its_real_cost(
     breakdown = "\n".join(rows)
     sheet = {"name": "cost-breakdown.xlsx", "type": "xlsx", "text": breakdown}
     later = [*events, {"from": "buyer"}, {**events[0], "attachments": [sheet]}]
-    band = tools.refresh(ctx, {"sup:70110": later}).bands["sup:70110"]
+    refreshed = tools.refresh(ctx, {"sup:70110": later})
+    band = refreshed.bands["sup:70110"]
+    assert refreshed.supplier_estimates["sup:70110"]["full_cost"] == 110.0
     assert band.floor == pytest.approx(110.0 * (1 - bands.BELOW_COST_TOLERANCE)) != ctx.bands["sup:70110"].floor
     assert ctx.trades["sup:70110"] == tools.refresh(ctx, {"sup:70110": events}).trades["sup:70110"]

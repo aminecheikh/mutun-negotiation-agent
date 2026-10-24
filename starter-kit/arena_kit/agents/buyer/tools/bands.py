@@ -159,6 +159,8 @@ def _fair(case: dict, package, current: float, sig: SupplierSignals):
         return None
     if sig.driver_shares and (own := stated_fair_price(package, current, sig.driver_shares)):
         return own
+    if len(case["parts"]) != 1:
+        return None  # a bundle's aggregate cost shares cannot be inferred from its first part
     return estimates.fair_price(package, case["parts"][0], current)
 
 

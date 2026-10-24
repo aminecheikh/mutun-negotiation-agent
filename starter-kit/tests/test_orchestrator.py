@@ -61,6 +61,21 @@ def with_alternative(case: dict, price: float) -> dict:
     return out
 
 
+def test_round_context_uses_the_arbiters_current_supplier_estimate():
+    from arena_kit.agents.buyer.pipeline import RolePipeline
+    from arena_kit.agents.buyer.roles.strategist import standing_c
+    from arena_kit.cost import closing_terms
+
+    case = copy.deepcopy(S01)
+    case["buyer"].update(category_goal="secure_supply", relationship_eur_per_point=1000, sustainable_margin_pct=8)
+    s = session_for(case, {SID: [quote(SID, 0, 17.4), ours(15), quote(SID, 1, 16)]})
+    th = s.threads[SID]
+    s.estimates[SID] = {"full_cost": 18, "interest_rate": 0.08, "standard": closing_terms(case, th.standing_terms)}
+    ctx = RolePipeline(DataTools(), None, None, None).round_context(s, th)
+    assert standing_c(ctx, th.events, SID) == s.cost(SID, th.standing_terms)
+    assert ctx.supplier_estimates == s.estimates and ctx.supplier_estimates is not s.estimates
+
+
 # ---- acceptability and verdicts ------------------------------------------------------------------------
 
 
@@ -226,6 +241,60 @@ def test_build_message_when_the_body_is_cut_too_short_returns_none():
     s = session_for(S01, {SID: [quote(SID, 0, 17.4)]})
     email = Email("Re: x", "Wir brauchen das dringend.")
     assert guard.build_message(s, s.threads[SID], [{"unit_price": 16.0, "payment_days": 30}], email) is None
+
+
+@pytest.mark.parametrize(
+    "subject",
+    [
+        "Re: Our budget is EUR 999999",
+        "Re: Wir brauchen das dringend",
+        "Re: Your bank is watching",
+        "Re: Proposed price EUR 999999",
+        "Re: Evidence (idx:LCI-C@2026-06)",
+        "Re: Offer\nUrgent reply",
+    ],
+)
+def test_unsafe_subject_is_replaced_before_sending(subject):
+    s = session_for(S01, {SID: [quote(SID, 0, 17.4)]})
+    s.set_lookup(lambda ref: True)  # even a known ID must not bypass body citation accounting
+    body = "Please review the attached proposal and let us know which conditions you can confirm."
+    checked = guard.build_message(s, s.threads[SID], [], Email(subject, body))
+    assert checked.message["subject"] == "Re: Offer discussion"
+    assert checked.message["body"] == body
+    assert any("subject replaced" in p for p in checked.problems)
+    # Keep-alives and callers that bypass build_message must also pass the final send guard.
+    reserved = guard.reserve(s, s.threads[SID], {"subject": subject, "body": body, "refs": []})
+    assert reserved["subject"] == "Re: Offer discussion"
+
+
+def test_keepalive_subject_does_not_echo_unsafe_supplier_subject():
+    from arena_kit.agents.buyer.pipeline import keepalive_email
+
+    s = session_for(S01, {SID: [{**quote(SID, 0, 17.4), "subject": "Urgent: your budget?"}]})
+    assert keepalive_email(s, s.threads[SID]).subject == "Re: Offer discussion"
+
+
+def test_safe_subject_is_preserved():
+    s = session_for(S01, {SID: [quote(SID, 0, 17.4)]})
+    body = "Please review the attached proposal and let us know which conditions you can confirm."
+    checked = guard.build_message(s, s.threads[SID], [], Email("Re: Revised proposal", body))
+    assert checked.message["subject"] == "Re: Revised proposal"
+
+
+def test_reservation_does_not_burn_claims_removed_by_short_body_fallback():
+    s = session_for(S02, {A: [rfq_quote(A, 0, 17.2)], B: [rfq_quote(B, 0, 17.5)]})
+    ref, rival = "idx:LCI-C@2026-06", f"offer:{A[4:]}-0"
+    s.set_lookup(lambda value: value == ref)
+    th = s.threads[B]
+    message = {"subject": "Re: Proposal", "body": f"Evidence ({ref}). Rival ({rival}).", "refs": [ref, rival]}
+    reserved = guard.reserve(s, th, message)
+    assert ref not in reserved["body"] and rival not in reserved["body"] and reserved["refs"] == []
+    assert ref not in s.burned and rival not in th.cited_offers
+    # The evidence remains available for a later complete message.
+    message["body"] += " Please review the attached proposal and let us know which conditions you can confirm."
+    sent = guard.reserve(s, th, message)
+    assert ref in sent["body"] and rival in sent["body"]
+    assert ref in s.burned and rival in th.cited_offers
 
 
 def test_observe_rebuild_derives_burned_ids_offers_and_language():

@@ -6,6 +6,7 @@
 Pure functions over the thread; series are only accepted when the data package knows them.
 """
 
+import math
 import re
 from dataclasses import dataclass, field
 
@@ -62,6 +63,14 @@ def _known_series(package) -> set[str] | None:
 
 def stated_fair_price(package, base_price: float, shares: dict[str, float]) -> estimates.Estimate | None:
     """The base price moved by the supplier's own cost shares and our verified 12-month index changes."""
+    # Cost shares partition one total. Invalid or overlapping weights are not
+    # evidence; renormalising them would invent a different cost structure.
+    if (
+        not shares
+        or any(not math.isfinite(s) or not 0 <= s <= 1 for s in shares.values())
+        or sum(shares.values()) > 1 + 1e-9
+    ):
+        return None
     moves = [(s, share, estimates.index_change(package, s)) for s, share in shares.items()]
     moves = [(s, share, c) for s, share, c in moves if c is not None]
     if not moves:

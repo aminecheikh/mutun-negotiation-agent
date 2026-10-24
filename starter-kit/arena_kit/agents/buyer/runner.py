@@ -10,20 +10,41 @@ arbiter alone accepts or walks, under the case lock.
     play_final(client, new_agent, waves)          the Live Final in waves (kit play_waves semantics)
 """
 
+import copy
 import functools
 import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
+
+import httpx
 
 from ...client import ArenaError
 from ...play import fetch_documents, quota_used_up
 from . import guard, observe, policy
 from .arbiter import Arbiter
 from .pipeline import keepalive_email
+from .recovery import refresh_thread
 from .state import CaseSession, ThreadState
 
 log = logging.getLogger("arena")
+_DOCUMENTS = ThreadPoolExecutor(max_workers=32, thread_name_prefix="buyer-document")
+
+
+def enrich_documents(table, message: dict, timeout: float) -> dict:
+    """Bound attachment enrichment; a late download only mutates its own private copy."""
+    if timeout <= 0 or not message.get("attachments"):
+        return message
+    future = _DOCUMENTS.submit(fetch_documents, table, copy.deepcopy(message))
+    try:
+        return future.result(timeout=max(0.0, timeout))
+    except FutureTimeout:
+        future.cancel()
+        log.warning("attachment processing over %.1fs; continuing with structured terms", timeout)
+    except Exception:
+        log.exception("attachment unavailable; continuing with structured terms")
+    return message
 
 
 class ThreadWorker:
@@ -57,6 +78,9 @@ class ThreadWorker:
 
     def iteration(self, th: ThreadState) -> None:
         s, cfg = self.s, self.s.config
+        if th.needs_refresh:
+            refresh_thread(s, th)
+            return
         deadline = th.received_at + cfg.move_budget_s
         with s.lock:  # a consistent view of every thread (others are rebuilt under this lock)
             v = policy.verdict(s, th)
@@ -81,7 +105,7 @@ class ThreadWorker:
         if out.plan is not None and out.email is not None:
             checked = guard.build_message(s, th, out.plan.term_sheets, out.email)
             if checked is None:  # the guard cut the writer's e-mail too short: the template, same sheets
-                email = self.agent.pipeline.rule_email(s, th, out.tactic, out.plan)
+                email = self.agent.pipeline.rule_email(s, th, out.tactic, out.plan, out.context)
                 checked = guard.build_message(s, th, out.plan.term_sheets, email)
         if checked is None:
             # nothing we would be content to offer this round: their standing sheet beats our next step
@@ -99,6 +123,8 @@ class ThreadWorker:
         s, cfg = self.s, self.s.config
         self._log_round(th, "park", verdict=v)
         while not s.ended and th.alive and th.awaiting_us:
+            if th.needs_refresh:
+                return
             with s.lock:
                 current = policy.verdict(s, th)
             if current.kind in ("accept", "counter"):
@@ -130,14 +156,18 @@ class ThreadWorker:
     def send(self, th: ThreadState, message: dict, kind: str, verdict=None, out=None, problems=()) -> None:
         s = self.s
         with s.lock:  # reserve this message's data IDs atomically: parallel threads must not cite the same one
-            message = guard.reserve(s, th, message)
             if not self.arbiter.begin_send(th):
                 return
+            message = guard.reserve(s, th, message)
         asked_at = th.received_at
+        wire_started = time.monotonic()
         delivered, reply = True, None
         try:
             try:
                 with s.gate(asked_at):
+                    if s.ended:  # another worker may have closed while this thread waited at the gate
+                        return
+                    wire_started = time.monotonic()
                     reply = s.table.send(th.supplier_id, message)
             except ArenaError as e:
                 if e.status == 422:  # invalid message, nothing happened, no round used: repair once
@@ -145,34 +175,54 @@ class ThreadWorker:
                     message = guard.hard_repair(s, th, message)
                     try:
                         with s.gate(asked_at):
+                            if s.ended:
+                                return
                             reply = s.table.send(th.supplier_id, message)
                     except ArenaError as e2:
                         if e2.status != 409:
                             raise
-                        delivered, reply = False, s.table.missed(th.supplier_id, e2)
+                        th.needs_refresh = True
+                        refresh_thread(s, th, e2)
+                        return
                 elif e.status == 409:  # late, thread ended, round limit or case ended: read what happened
-                    delivered, reply = False, s.table.missed(th.supplier_id, e)
+                    th.needs_refresh = True
+                    refresh_thread(s, th, e)
+                    return
                 else:
                     raise
-        finally:
-            self.arbiter.end_send(th)
-        if "result" in reply:
-            s.finish(reply["result"], "the arena ended the case")
-            self._log_round(th, kind, verdict=verdict, out=out, message=message, problems=problems, ended=True)
-            return
-        received = time.monotonic()
-        reply = fetch_documents(s.table, reply)
-        with s.lock:
-            if delivered:
+            if "result" in reply:
+                s.finish(reply["result"], "the arena ended the case")
+                self._log_round(th, kind, verdict=verdict, out=out, message=message, problems=problems, ended=True)
+                return
+            received = time.monotonic()
+            try:
+                reply = enrich_documents(s.table, reply, s.config.document_timeout_s)
+            except Exception:
+                # The move already happened. Losing its history would repeat a concession or a claim.
+                log.exception(
+                    "%s/%s: attachment unavailable; keeping the acknowledged reply", s.case["case_id"], th.supplier_id
+                )
+            with s.lock:
                 th.events.append({**message, "from": "buyer"})
-            th.events.append(reply)
-            th.received_at = received
-            th.slowest_round_s = max(th.slowest_round_s, received - asked_at)
-            observe.rebuild(s, th)
-            s.offers |= {ts["term_sheet_id"] for ts in reply.get("term_sheets") or [] if ts.get("term_sheet_id")}
-        claims = observe.report_claims(s, th, message, reply) if delivered else {}
-        self._log_round(th, kind, verdict=verdict, out=out, message=message, problems=problems, reply=reply,
-                        delivered=delivered, claims=claims, round_s=round(received - asked_at, 1))  # fmt: skip
+                th.events.append(reply)
+                th.received_at = received
+                th.slowest_round_s = max(th.slowest_round_s, received - asked_at)
+                observe.rebuild(s, th)
+                s.c_open = policy.opening_cost(s)  # compare opening and current offer using the same new estimate
+                s.offers |= {ts["term_sheet_id"] for ts in reply.get("term_sheets") or [] if ts.get("term_sheet_id")}
+            claims = observe.report_claims(s, th, message, reply)
+            self._log_round(th, kind, verdict=verdict, out=out, message=message, problems=problems, reply=reply,
+                            delivered=delivered, claims=claims, round_s=round(received - asked_at, 1),
+                            decision_s=round(wire_started - asked_at, 3),
+                            supplier_s=round(received - wire_started, 3),
+                            documents_s=round(time.monotonic() - received, 3))  # fmt: skip
+        except Exception:
+            # After exhausted HTTP retries the server may have processed the move. Never blindly resend it.
+            th.needs_refresh = True
+            raise
+        finally:
+            # Publishing history and derived state precedes becoming idle: the arbiter cannot see stale terms.
+            self.arbiter.end_send(th)
         s.notify()
 
     def _log_round(self, th: ThreadState, kind: str, verdict=None, out=None, message=None, reply=None, **extra):
@@ -180,6 +230,7 @@ class ThreadWorker:
         sheets = [ts.get("terms") for ts in (message or {}).get("term_sheets") or []]
         self.agent.telemetry.round(
             case_id=s.case.get("case_id"),
+            session_id=getattr(s.table, "session_id", None),
             supplier_id=th.supplier_id,
             kind=kind,
             round=th.our_rounds,
@@ -212,12 +263,20 @@ class ThreadWorker:
 # ---- entry points ---------------------------------------------------------------------------------------
 
 
-def _fetch_all(table, threads: dict[str, list[dict]]) -> None:
-    messages = [m for events in threads.values() for m in events if m.get("attachments")]
+def _fetch_all(table, threads: dict[str, list[dict]], timeout: float) -> None:
+    messages = [(events, i) for events in threads.values() for i, m in enumerate(events) if m.get("attachments")]
     if not messages:
         return
+    expires = time.monotonic() + timeout  # one budget for the whole opening/resume, not per historical document
     with ThreadPoolExecutor(max_workers=min(8, len(messages))) as pool:
-        list(pool.map(lambda m: fetch_documents(table, m), messages))
+        enriched = list(
+            pool.map(
+                lambda item: enrich_documents(table, item[0][item[1]], expires - time.monotonic()),
+                messages,
+            )
+        )
+    for (events, i), message in zip(messages, enriched, strict=True):
+        events[i] = message
 
 
 def play_case(table, case_id: str, agent, deadline=None) -> dict:
@@ -227,9 +286,14 @@ def play_case(table, case_id: str, agent, deadline=None) -> dict:
     if getattr(table, "done", None):  # resumed a case that had already ended
         return table.done
     opened = time.monotonic()
-    resumed = any(m.get("from") == "buyer" for events in threads.values() for m in events)
-    _fetch_all(table, threads)
+    resumed = getattr(table, "resumed", False) or any(
+        m.get("from") == "buyer" for events in threads.values() for m in events
+    )
+    _fetch_all(table, threads, agent.config.document_timeout_s)
     session = agent.open_case(case, threads, table, deadline, received_at=opened, resumed=resumed)
+    if resumed:
+        for th in session.threads.values():
+            th.needs_refresh = True  # recover remaining clock and timeout rounds, not just the e-mails
     arbiter = Arbiter(session, agent.telemetry)
     worker = ThreadWorker(agent, session, arbiter)
     pool = ThreadPoolExecutor(max_workers=max(1, len(session.threads)), thread_name_prefix="buyer-thread")
@@ -292,9 +356,17 @@ def play_final(client, new_agent, waves: int = 5, parallel: int = 10, poll: floa
             try:
                 cases = client.cases("final")
             except ArenaError as e:
+                if e.status in (429, 500, 502, 503, 504):
+                    log.warning("wave polling temporarily unavailable (%s); retrying", e.status)
+                    time.sleep(poll)
+                    continue
                 if e.status != 403:  # 403: no wave has started yet
                     raise
                 cases = []
+            except httpx.TransportError:
+                log.warning("wave polling connection interrupted; retrying")
+                time.sleep(poll)
+                continue
             for case in cases:
                 if not case.get("open"):
                     if case["wave"] not in closed:

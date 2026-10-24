@@ -24,8 +24,10 @@ class DataPackage:
         release = release or os.environ.get("ARENA_RELEASE")
         candidates = [Path(release).expanduser()] if release else [self.root / RELEASE, self.root.parent / RELEASE]
         self.release = next((p.resolve() for p in candidates if (p / "facts.json").is_file()), None)
+        self.release_facts = {}
         if self.release:  # new IDs only: nothing in the package changes
-            self.facts |= json.loads((self.release / "facts.json").read_text(encoding="utf-8"))
+            self.release_facts = json.loads((self.release / "facts.json").read_text(encoding="utf-8"))
+            self.facts |= self.release_facts
         dbs = sorted(self.root.rglob("*.sqlite")) + sorted(self.root.rglob("*.db"))
         if not dbs and not facts:
             raise FileNotFoundError(f"no facts.json or .sqlite under {self.root}")

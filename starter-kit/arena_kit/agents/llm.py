@@ -51,13 +51,17 @@ Reply with ONE JSON object and nothing else:
   120 words, no placeholders."""
 
 
-def llm_from_env():
-    """LLM_PROVIDER=anthropic (Anthropic SDK) or openai (any OpenAI-compatible endpoint)."""
+def llm_from_env(*, timeout_s: float = 45.0, max_retries: int = 2):
+    """Build a provider client; deadline-sensitive callers can shorten requests and disable SDK retries.
+
+    LLM_PROVIDER=anthropic (Anthropic SDK) or openai (any OpenAI-compatible endpoint).
+    max_retries applies to the SDK; the compatible HTTP path does not retry.
+    """
     provider, model = os.environ.get("LLM_PROVIDER", "openai"), os.environ["LLM_MODEL"]
     if provider == "anthropic":
         import anthropic
 
-        client = anthropic.Anthropic(timeout=45.0)
+        client = anthropic.Anthropic(timeout=timeout_s, max_retries=max_retries)
         extra = {"output_config": {"effort": e}} if (e := os.environ.get("LLM_EFFORT")) else {}
 
         def complete(system, user):
@@ -79,7 +83,7 @@ def llm_from_env():
             "model": model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }
-        r = httpx.post(f"{base}/chat/completions", json=body, headers=headers, timeout=45.0)
+        r = httpx.post(f"{base}/chat/completions", json=body, headers=headers, timeout=timeout_s)
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
 

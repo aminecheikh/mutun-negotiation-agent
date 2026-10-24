@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from arena_kit.agents.buyer.contracts import BehaviourRead, Tactic
+from arena_kit.agents.buyer.contracts import BehaviourRead, PriceBand, Tactic
 from arena_kit.agents.buyer.tools import DataTools, offers
 from arena_kit.cost import complete_offer, must_haves_ok, supplier_value, total_cost
 from arena_kit.data import DataPackage
@@ -66,6 +66,18 @@ def test_plan_when_supplier_concedes_matches_its_step_at_least(tools):
     _, plans = play_rounds(tools, CASES[case_id], sid, opening, [138.55, 136.55, 136.55])
     ours = [p.term_sheets[0]["unit_price"] for p in plans]
     assert ours[2] - ours[1] >= 2.0 - 0.011  # it moved 2.00 between our 2nd and 3rd offer
+
+
+def test_price_cut_with_changed_terms_does_not_buy_an_automatic_matching_concession():
+    band = PriceBand("sup:unseen", 80, None, 90, 120, 90000, 120000)
+    opening = supplier_msg("sup:unseen", {"unit_price": 140, "payment_days": 60}, 0)
+    ours = buyer_msg({"unit_price": 85, "payment_days": 60})
+    flat = supplier_msg("sup:unseen", {"unit_price": 140, "payment_days": 60}, 1)
+    paid_cut = supplier_msg("sup:unseen", {"unit_price": 120, "payment_days": 10}, 1)
+    genuine_cut = supplier_msg("sup:unseen", {"unit_price": 120, "payment_days": 60}, 1)
+    baseline = offers.next_price({"round_limit": 10}, band, [opening, ours, flat])
+    assert offers.next_price({"round_limit": 10}, band, [opening, ours, paid_cut]) == baseline
+    assert offers.next_price({"round_limit": 10}, band, [opening, ours, genuine_cut]) > baseline
 
 
 def test_plan_when_alternatives_offered_they_cost_us_the_same_and_are_worth_more_to_it(tools):

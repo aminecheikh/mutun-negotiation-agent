@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from ...cost import must_haves_ok, total_cost
+from ...play import latest
 from .contracts import Tactic
 from .state import CaseSession, ThreadState
 
@@ -46,8 +47,11 @@ def acceptable(session: CaseSession, th: ThreadState) -> bool:
 
 def standing_ok(session: CaseSession, th: ThreadState) -> bool:
     """The acceptability test on the standing sheet alone, whether or not we still work the thread."""
-    if not th.standing_id or math.isinf(th.c):
+    if not th.standing_id or not math.isfinite(th.c) or th.needs_refresh:
         return False
+    known_terms = set(th.standing_terms) | set(th.std) | set(session.case.get("fixed_terms") or {})
+    if set(latest(th.events).get("missing_fields") or ()) - known_terms:
+        return False  # a failed quote download must not silently substitute the buyer's desired terms
     if not must_haves_ok(session.case, th.standing_terms, th.std):
         return False
     if not th.c < session.c_open:

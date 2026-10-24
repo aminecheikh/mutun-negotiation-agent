@@ -143,7 +143,7 @@ class BuyerAgent:
                 return _accept(th)
             if out.plan is not None and out.email is not None:
                 checked = guard.build_message(s, th, out.plan.term_sheets, out.email) or guard.build_message(
-                    s, th, out.plan.term_sheets, self.pipeline.rule_email(s, th, out.tactic, out.plan)
+                    s, th, out.plan.term_sheets, self.pipeline.rule_email(s, th, out.tactic, out.plan, out.context)
                 )
                 if checked is not None:
                     return {"supplier_id": th.supplier_id, "message": checked.message}
@@ -204,9 +204,11 @@ def buyer_factory(package=None):
     profiles + live reads of case facts, Saed). Per case: the strategist (S2+S3 in one call) and the writer.
     Without LLM_MODEL every role runs on its rule twin (no LLM calls at all)."""
     safe = thread_safe(package)
-    complete = llm_from_env() if os.environ.get("LLM_MODEL") else None
-    tools = DataTools(safe)
     config, telemetry = OrchestratorConfig.from_env(), Telemetry()
+    complete = (
+        llm_from_env(timeout_s=config.llm_request_timeout_s, max_retries=0) if os.environ.get("LLM_MODEL") else None
+    )
+    tools = DataTools(safe)
     profiler = LLMProfiler(complete)
 
     def new_agent() -> BuyerAgent:
