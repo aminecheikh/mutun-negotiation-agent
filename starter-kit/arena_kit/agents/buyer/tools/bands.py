@@ -30,6 +30,10 @@ MAX_COST_TO_PRICE_RATIO = 3.0
 PRICE_STEPS = 40  # price grid per package between its feasible minimum and the ceiling
 MAX_PACKAGES = 300  # option combinations searched per supplier; above that a fixed-seed sample
 MIN_PRICE = 0.01
+# terms whose cost to the supplier we cannot model (supplier_value has no estimate of its overtime for faster
+# delivery or of what a tighter defect commitment costs it): kept at its terms in the target - asking for
+# them is a trade the strategist makes explicitly, not a silent demand that raises its price
+HOLD_AT_STANDARD = ("lead_time_days", "ppm_commitment")
 
 
 def alternative_cost(case: dict) -> float | None:
@@ -69,7 +73,9 @@ def price_bands(case: dict, threads: dict[str, list[dict]], package) -> dict[str
 
 def supplier_band(case: dict, package, sid: str, terms: dict, std: dict, rivals=()) -> PriceBand:
     supplier = supplier_estimate(case, package, sid, terms, std)
-    opening = complete_offer(case, terms)
+    # what it left out of its term sheet closes on its standard terms (quote PDF), not on our wishes
+    stated = {field: std[field] for field in case["negotiable"] if field in std}
+    opening = complete_offer(case, {**stated, **terms})
     current = case["buyer"].get("current_unit_price") or terms["unit_price"]
     fair = estimates.fair_price(package, case["parts"][0], current) if package else None
     ceiling, c_ceiling = _ceiling(case, opening, std, supplier)
@@ -142,7 +148,11 @@ def _ceiling(case: dict, opening: dict, std: dict, supplier: dict | None) -> tup
 def _packages(case: dict, opening: dict):
     """The case's allowed option combinations for the negotiable fields (price set later): all of them, or a
     fixed-seed sample of MAX_PACKAGES in which every option of every field appears at least once."""
-    fields = [f for f in case["negotiable"] if f != "unit_price" and case.get("term_options", {}).get(f)]
+    fields = [
+        f
+        for f in case["negotiable"]
+        if f != "unit_price" and f not in HOLD_AT_STANDARD and case.get("term_options", {}).get(f)
+    ]
     options = [case["term_options"][f] for f in fields]
     if math.prod(len(o) for o in options) <= MAX_PACKAGES:
         combos = list(itertools.product(*options))

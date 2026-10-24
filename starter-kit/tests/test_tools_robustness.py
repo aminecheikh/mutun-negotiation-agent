@@ -104,4 +104,8 @@ def test_bands_when_options_exceed_the_search_cap_still_consider_late_options(pa
     packages = list(bands._packages(case, complete_offer(case, {"unit_price": 130.0})))
     assert len(packages) <= bands.MAX_PACKAGES
     for field, allowed in case["term_options"].items():
-        assert {str(p[field]) for p in packages} == {str(o) for o in allowed}, field
+        seen = {str(p[field]) for p in packages}
+        if field in bands.HOLD_AT_STANDARD:  # kept at the supplier's terms, never searched
+            assert len(seen) == 1, field
+        else:
+            assert seen == {str(o) for o in allowed}, field

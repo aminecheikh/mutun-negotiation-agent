@@ -102,3 +102,12 @@ def test_price_bands_when_there_is_no_anchor_at_all_says_so(package):
     case["buyer"]["fallback_unit_price"] = 150.0  # above the opening: no anchor
     band = bands.price_bands(case, thread("sup:99999", P01_OPENING), package)["sup:99999"]
     assert band.target < 138.55 and any("no anchor" in d for d in band.derivation)
+
+
+def test_supplier_band_when_supplier_leaves_lead_time_out_keeps_its_standard_not_our_wish(package):
+    case = json.loads(json.dumps(CASES["case:P01"]))
+    case["negotiable"] = [*case["negotiable"], "lead_time_days"]
+    case["term_options"]["lead_time_days"] = [28, 35, 42, 56]
+    case["fixed_terms"].pop("lead_time_days", None)
+    band = bands.supplier_band(case, package, "sup:70110", P01_OPENING, {"lead_time_days": 42})
+    assert band.target_terms["lead_time_days"] == 42  # its cost of faster delivery is unknown to us: ask, don't impose
