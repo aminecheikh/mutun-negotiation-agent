@@ -210,3 +210,23 @@ def test_plan_when_supplier_concedes_a_lot_never_concedes_past_the_midpoint(tool
     assert theirs[1] > ctx.bands[sid].target
     ours = [p.term_sheets[0]["unit_price"] for p in plans]
     assert ours[2] <= (ours[1] + theirs[1]) / 2 + 0.005
+
+
+@pytest.mark.parametrize("case", list(CASES.values()), ids=list(CASES))
+def test_plan_when_rounds_pass_never_takes_back_what_we_offered(tools, case):
+    # research 02 ("never move our offer backwards"): our main sheet is never worth less to the supplier than the
+    # last one, also when its other terms change; only the supplier's own lower price may pull it down. Measured
+    # on its side: in stabilise cases our C falls as our price rises (the relationship charge)
+    base = case["buyer"].get("current_unit_price") or case["buyer"]["fallback_unit_price"]
+    opening = complete_offer(case, {"unit_price": round(base * 1.06, 2)})
+    sid = case["suppliers"][0]
+    theirs = [round(opening["unit_price"] * (1 - 0.01 * i), 2) for i in range(case.get("round_limit", 10))]
+    ctx, plans = play_rounds(tools, case, sid, opening, theirs)
+    supplier = tools.supplier(ctx, sid, opening)
+    previous = None
+    for plan, their_price in zip(plans, [opening["unit_price"], *theirs], strict=False):
+        main = plan.term_sheets[0]
+        worth = supplier_value(case, main, supplier) if supplier else main["unit_price"]  # no estimate: price
+        if previous is not None and main["unit_price"] < their_price:
+            assert worth >= previous - 1e-6
+        previous = worth

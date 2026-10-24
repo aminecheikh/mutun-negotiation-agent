@@ -97,7 +97,8 @@ def _our_last_terms(events: list[dict]) -> dict | None:
 def _main_sheet(case: dict, band, theirs: dict, price: float, std: dict, supplier=None, last=None) -> dict:
     """The lowest-C sheet at this round's price among the target package, its terms and our last terms, that
     keeps the must-haves and is worth as much to the supplier as the target package at the target price (what
-    the band found it can accept). Without a supplier estimate: the target package, else its own terms."""
+    the band found it can accept) and as our last sheet (never take back what we offered). Without a supplier
+    estimate: the target package, else its own terms."""
     bases = [band.target_terms, theirs, *([last] if last and supplier else [])]
     sheets = [complete_offer(case, {**base, "unit_price": price}) for base in bases]
     valid = [s for s in sheets if must_haves_ok(case, s, std)]
@@ -105,7 +106,7 @@ def _main_sheet(case: dict, band, theirs: dict, price: float, std: dict, supplie
         return complete_offer(case, {**theirs, "unit_price": price})
     if supplier is None:
         return valid[0]
-    bar = supplier_value(case, band.target_terms, supplier)
+    bar = max(supplier_value(case, band.target_terms, supplier), supplier_value(case, last, supplier) if last else 0)
     feasible = [s for s in valid if supplier_value(case, s, supplier) >= bar] or valid[:1]
     return min(feasible, key=lambda s: total_cost(case, s, std, supplier))
 
