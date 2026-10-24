@@ -557,3 +557,14 @@ def test_stuck_when_we_sent_no_sheets_is_not_the_supplier_standing_still():
         th.events += [ours(8.0 + n * 0.1), quote(SID, n, 10.0)]
     observe.rebuild(s, th)
     assert policy.stuck(s, th)  # three real offers it did not answer: now it is standing still
+
+
+def test_keepalive_message_when_supplier_agreed_resends_the_sheet_it_agreed_to():
+    # organisers: treat each supplier as its own conversation and submit an offer to each. P05 (d353d958b3a96e12)
+    # held two agreed suppliers with keep-alives that carried no sheet (ours were no cheaper than what they agreed to)
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    th.events += [ours(8.5), quote(SID, 1, 8.5, "agreed")]
+    observe.rebuild(s, th)
+    message = keepalive_message(s, th)
+    assert [ts["terms"]["unit_price"] for ts in message["term_sheets"]] == [8.5]

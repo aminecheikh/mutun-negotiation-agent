@@ -106,13 +106,16 @@ def keepalive_email(session: CaseSession, th: ThreadState, question: str | None 
 
 
 def keepalive_message(session: CaseSession, th: ThreadState, question: str | None = None) -> dict:
-    """A keep-alive that still carries an offer: our last sheets again, where the guard still lets them go out
-    and the supplier has not given its last word (pushing after a final offer makes it walk). A message without a
-    package gets "without movement from your side" (practice replays)."""
+    """A keep-alive that still carries an offer - the organisers' rule is an offer to every supplier: our last
+    sheets again where the guard still lets them go out, or the sheet it agreed to. Not after its final offer
+    (pushing then makes it walk). A message without a package gets "without movement from your side"."""
     sheets: list[dict] = []
     ours = [m for m in th.events if m.get("from") == "buyer" and m.get("term_sheets")]
-    if th.status == "open" and ours:
+    if th.status in ("open", "agreed") and ours:
         sheets, _ = guard.check_sheets(session, th, [ts.get("terms", ts) for ts in ours[-1]["term_sheets"]])
+    if not sheets and th.status == "agreed" and policy.standing_ok(session, th):
+        # it agreed to our sheet: every supplier gets an offer (organisers), so that sheet stands, unchanged
+        sheets = [complete_offer(session.case, th.standing_terms)]
     email = keepalive_email(session, th, question, with_offer=bool(sheets))
     return {"subject": email.subject, "body": email.body, "term_sheets": [{"terms": t} for t in sheets], "refs": []}
 
