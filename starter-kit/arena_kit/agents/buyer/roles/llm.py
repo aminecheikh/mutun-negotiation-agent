@@ -31,7 +31,10 @@ PROMPTS = Path(__file__).parent / "prompts"
 _POOL = ThreadPoolExecutor(max_workers=32, thread_name_prefix="llm")
 TOOL_ROUNDS = 1  # tool turns before the model must answer: each one is a full model call (~4-7 s)
 MAX_CALLS_PER_TURN = 6  # tool calls executed per turn; more get an error result
-FINAL_ANSWER_S = 4.0  # less time than this left after a tool turn: no point in another call, fall back
+# Saed's bench: a strategist answer takes up to ~6 s (p90 6.1 s). A tool turn is a full model call too, so it is
+# only started when an answer still fits after it; with less time left the model answers at once, without tools
+FINAL_ANSWER_S = 7.0
+ANSWER_NOW = "Answer now with the one JSON object described in the instructions - no tool calls, no other text."
 
 
 def prompt(name: str) -> str:
@@ -160,7 +163,12 @@ def call_json_with_tools(
             left = deadline - time.monotonic()
             if left <= (FINAL_ANSWER_S if turn else 0.0):
                 raise TimeoutError(f"{left:.1f}s left for the answer")
-            final = turn == rounds
+            final = turn == rounds or left < 2 * FINAL_ANSWER_S  # no room for a tool turn and an answer: answer now
+            if final and turn:  # the answer turn after tool results: ask for the JSON explicitly (3 prose replies)
+                messages[-1] = {
+                    **messages[-1],
+                    "content": [*messages[-1]["content"], {"type": "text", "text": ANSWER_NOW}],
+                }
             blocks, stop = converse(system, messages, toolbox.schemas, final, left)
             uses = [b for b in blocks if getattr(b, "type", None) == "tool_use"]
             if final or not uses or stop != "tool_use":

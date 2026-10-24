@@ -34,7 +34,9 @@ from .toolbox import StrategistToolbox
 
 log = logging.getLogger("arena")
 TIMEOUT_S = 15.0  # the writer takes up to 15 s after this; the move limit is 60 s
-TOOLS_TIMEOUT_S = 22.0  # with tool calling: one tool turn is a second model call (config.strategist_timeout_s)
+# with tool calling one tool turn is a second model call; the loop must end before the orchestrator stops waiting
+# (config.strategist_timeout_s, 17 s) - at 22 s, 4 calls in sweep e848872 ran past it and fell back to the rules
+TOOLS_TIMEOUT_S = OrchestratorConfig().strategist_timeout_s - 1.0
 TERMS = {
     "unit_price", "payment_days", "volume_per_year", "contract_months", "effective_date", "lead_time_days",
     "incoterm", "index_clause", "tooling_eur", "ppm_commitment", "chargeback_eur_per_complaint",
