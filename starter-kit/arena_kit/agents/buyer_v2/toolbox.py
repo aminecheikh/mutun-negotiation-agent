@@ -10,7 +10,7 @@ Three groups (each agent gets the subset its job needs, see agents.py):
                 the cost C of any package, the supplier's offers priced, and the offer engine's counter proposals
 
 Numbers come from code: an agent asks a tool instead of doing arithmetic. Tools never write, never send and never
-reach the arena; the live feed (events, screen, leaderboard) is not reachable from here by design.
+reach the arena; nothing here touches the arena's live feed, by design.
 """
 
 import json

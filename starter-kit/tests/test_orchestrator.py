@@ -270,7 +270,7 @@ def test_buyer_factory_shares_one_thread_safe_package_and_live_supplier_estimate
 def test_agent_code_never_reads_the_live_feed():
     # brief §7: reading /v1/events, /screen, /leaderboard or /results during the final disqualifies
     forbidden = re.compile(r"leaderboard|/events|/screen|/results")
-    roots = [KIT / "arena_kit/agents/buyer", KIT / "scripts"]
+    roots = [KIT / "arena_kit/agents/buyer", KIT / "arena_kit/agents/buyer_v2", KIT / "scripts"]
     hits = [
         f"{p.relative_to(KIT)}:{n}"
         for root in roots
