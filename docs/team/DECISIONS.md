@@ -14,3 +14,12 @@ decision - why`. Changing `contracts.py` always needs an entry here.
   measured latency (S6 / J4).
 - 2026-10-24 16:30 - team - `Tools.prepare(case, threads)` gets the opening threads: bands need the opening
   quotes and the quote PDFs' standard terms.
+- 2026-10-24 18:40 - Amine - `PriceBand` gains `target_terms: dict` (default empty): the whole target package, not
+  only its price - the offer engine and the accept policy need payment days, dates and clauses, not just a number.
+- 2026-10-24 19:10 - team (Amine) - Generalise, don't overfit: logic and constants come from mechanisms and
+  documents, never from practice outcomes; estimates are priors the live negotiation corrects; every module is
+  tested for properties on all 19 case files and mutated copies. Rules in CLAUDE.md. - The final uses suppliers,
+  parts and situations practice never shows; 10 scored practice cases are too few to fit anything.
+- 2026-10-24 20:10 - Amine - `ConcessionFit` gains `p_room: float | None = None`: probability the supplier can still go
+  >= 1 % below its last price (Bayesian fit of its own price path, `tools/concession.py`). For the analyst (p_more)
+  and the accept/walk policy; None until it has moved once.

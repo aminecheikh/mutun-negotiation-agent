@@ -62,6 +62,7 @@ class PriceBand:
     c_target: float
     c_ceiling: float
     derivation: tuple[str, ...] = ()  # how each number was found, in words
+    target_terms: dict = field(default_factory=dict)  # the whole target package (every negotiable field)
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ class ConcessionFit:
     reservation_estimate: float | None  # where its concessions converge
     last_step_pct: float | None
     shrinking: bool  # each concession smaller than the one before
+    p_room: float | None = None  # probability it can still go >= 1 % below its last price (None: no evidence)
 
 
 @dataclass(frozen=True)
