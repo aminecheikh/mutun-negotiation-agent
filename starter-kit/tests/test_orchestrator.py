@@ -4,13 +4,12 @@ data-package lock, and the rule that agent code never reads the live feed. No ne
 import copy
 import json
 import re
-import threading
 from pathlib import Path
 
 import pytest
 
 from arena_kit.agents.buyer import guard, observe, policy
-from arena_kit.agents.buyer.agent import BuyerAgent, LockedPackage
+from arena_kit.agents.buyer.agent import BuyerAgent
 from arena_kit.agents.buyer.config import OrchestratorConfig
 from arena_kit.agents.buyer.contracts import Email, Tactic
 from arena_kit.agents.buyer.telemetry import Telemetry
@@ -247,27 +246,22 @@ def test_observe_rebuild_derives_burned_ids_offers_and_language():
 
 
 @pytest.mark.skipif(not (DATA / "world.sqlite").exists(), reason="data package not present")
-def test_locked_package_when_queried_from_many_threads_never_fails():
-    package = LockedPackage(DataPackage(DATA))
-    package.lookup("")  # warm the ID index as cli.py does
-    errors = []
+def test_buyer_factory_shares_one_thread_safe_package_and_live_supplier_estimates():
+    from arena_kit.agents.buyer.agent import buyer_factory
+    from arena_kit.agents.buyer.tools.safe_package import ThreadSafePackage
 
-    def hammer(i: int) -> None:
-        try:
-            for _ in range(25):
-                rows = package.query("SELECT id FROM suppliers WHERE id LIKE ? LIMIT 5", (f"sup:70{i % 7}%",))
-                assert isinstance(rows, list)
-                package.lookup("sup:70110")
-        except Exception as e:  # noqa: BLE001 - the test collects every failure
-            errors.append(repr(e))
-
-    workers = [threading.Thread(target=hammer, args=(i,)) for i in range(16)]
-    for w in workers:
-        w.start()
-    for w in workers:
-        w.join()
-    assert errors == []
-    assert package.facts is package._package.facts  # plain attributes pass through
+    agent = buyer_factory(DataPackage(DATA))()
+    assert isinstance(agent.package, ThreadSafePackage)
+    assert agent.tools.package is agent.package  # one lock for the tools and the orchestrator, not two
+    case = json.loads((Path(__file__).parent / "fixtures/practice_cases.json").read_text(encoding="utf-8"))[0]
+    sid = case["suppliers"][0]
+    quote_terms = {f: (case.get("term_options", {}).get(f) or [None])[0] for f in case["negotiable"]}
+    quote_terms["unit_price"] = case["buyer"]["current_unit_price"] * 1.1
+    events = [{"from": f"sales@{sid[4:]}", "status": "open", "attachments": [], "body": "Quote.",
+               "term_sheets": [{"term_sheet_id": f"offer:{sid[4:]}-0", "terms": quote_terms}]}]  # fmt: skip
+    s = agent.open_case(case, {sid: events})
+    expected = agent.tools.supplier_from_thread(case, sid, events)
+    assert s.estimates[sid] == expected  # the orchestrator prices C with the tools' own estimate
 
 
 def test_agent_code_never_reads_the_live_feed():

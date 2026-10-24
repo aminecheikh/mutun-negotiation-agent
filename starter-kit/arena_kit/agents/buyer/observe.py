@@ -59,6 +59,11 @@ def rebuild(session: CaseSession, th: ThreadState) -> None:
     last = latest(events)
     sheet_id, terms = standing(events)
     th.std = standard_terms(events)
+    if session.estimator is not None:
+        try:
+            session.estimates[th.supplier_id] = session.estimator(th.supplier_id, events)
+        except Exception:  # an estimate is a refinement: without it C leaves the relationship charge out
+            log.exception("%s: supplier estimate failed", th.supplier_id)
     th.status = str(last.get("status") or "open")
     th.standing_id, th.standing_terms = sheet_id, dict(terms)
     th.alive = th.status not in ENDED

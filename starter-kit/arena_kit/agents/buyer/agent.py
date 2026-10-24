@@ -10,11 +10,10 @@ write, the orchestrator decides what is permitted and when to close.
 Every stage has a deterministic fallback; no exception, slow model or missing data costs a case.
 """
 
-import functools
 import logging
 import os
-import threading
 import time
+from dataclasses import replace
 
 from ...docs import standard_terms
 from ...play import live_threads
@@ -27,30 +26,9 @@ from .roles import LLMWriter, PassthroughProfiler, RuleAnalyst, RuleStrategist
 from .state import CaseSession, NoGate, SendGate, ThreadState
 from .telemetry import Telemetry
 from .tools import DataTools
+from .tools.safe_package import thread_safe
 
 log = logging.getLogger("arena")
-
-
-class LockedPackage:
-    """The data package behind one lock. `DataPackage` shares a single sqlite connection; under ten parallel
-    cases it returned `None` from `fetchone()` (Saed's bench, 17:15). Every method call is serialised; plain
-    attributes (`facts`, `root`, `release`) pass through. Queries take milliseconds, so the lock costs nothing."""
-
-    def __init__(self, package):
-        self._package = package
-        self._lock = threading.RLock()
-
-    def __getattr__(self, name):
-        value = getattr(self._package, name)
-        if not callable(value):
-            return value
-
-        @functools.wraps(value)
-        def locked(*args, **kwargs):
-            with self._lock:
-                return value(*args, **kwargs)
-
-        return locked
 
 
 class BuyerAgent:
@@ -59,12 +37,12 @@ class BuyerAgent:
         self.config = config or OrchestratorConfig.from_env()
         self.telemetry = telemetry or Telemetry()
         self.pipeline = RolePipeline(tools, analyst or RuleAnalyst(), strategist or RuleStrategist(), writer)
-        self._prepared: tuple[str, CaseContext, dict] | None = None  # cache for decide(): one case per agent
+        self._prepared: tuple[str, CaseContext] | None = None  # prepared once per case (decide() calls open_case often)
 
     # ---- preparing a case ----------------------------------------------------------------------------
 
-    def prepare(self, case: dict, threads: dict[str, list[dict]]) -> tuple[CaseContext, dict]:
-        """The tools' case context (dossiers refined by the profiler) and our estimate of each supplier."""
+    def prepare(self, case: dict, threads: dict[str, list[dict]]) -> CaseContext:
+        """The tools' case context with the dossiers refined by the profiler (every other field kept as is)."""
         try:
             ctx = self.tools.prepare(case, threads)
         except Exception:
@@ -77,23 +55,24 @@ class BuyerAgent:
             except Exception:
                 log.exception("%s: profiler failed for %s - dossier unchanged", case["case_id"], sid)
                 dossiers[sid] = dossier
-        ctx = CaseContext(ctx.case, dossiers, ctx.bands, ctx.claims, ctx.c_alternative)
-        estimates = {sid: self._estimate(ctx, sid, events) for sid, events in threads.items()}
-        return ctx, estimates
+        return replace(ctx, dossiers=dossiers)
 
-    def _estimate(self, ctx: CaseContext, sid: str, events: list[dict]) -> dict | None:
-        """The same supplier estimate the bands used (opening terms, standard terms), so our C and the band's
-        C are on one scale. None without data: C then leaves the relationship charge out (logged)."""
+    def estimator(self, case: dict, ctx: CaseContext):
+        """(supplier_id, events) -> our estimate of the supplier, the same one the tools price with: its quote and
+        standard terms, and its own cost breakdown once it has sent one. None without data (C then leaves the
+        relationship charge out, which matters only in stabilise / secure_supply cases)."""
+        if hasattr(self.tools, "supplier_from_thread"):
+            return lambda sid, events: self.tools.supplier_from_thread(case, sid, events)
         if not hasattr(self.tools, "supplier"):
             return None
-        quote = next((m for m in events if m.get("from") != "buyer" and m.get("term_sheets")), None)
-        if quote is None:
-            return None
-        try:
+
+        def from_quote(sid: str, events: list[dict]) -> dict | None:
+            quote = next((m for m in events if m.get("from") != "buyer" and m.get("term_sheets")), None)
+            if quote is None:
+                return None
             return self.tools.supplier(ctx, sid, quote["term_sheets"][0]["terms"], standard_terms(events))
-        except Exception:
-            log.exception("%s: supplier estimate failed", sid)
-            return None
+
+        return from_quote
 
     def _lookup(self, ref: str) -> bool:
         try:
@@ -103,21 +82,21 @@ class BuyerAgent:
 
     def open_case(self, case, threads, table=None, deadline=None, received_at=None, resumed=False) -> CaseSession:
         if self._prepared and self._prepared[0] == case["case_id"]:
-            ctx, estimates = self._prepared[1], self._prepared[2]
+            ctx = self._prepared[1]
         else:
-            ctx, estimates = self.prepare(case, threads)
-            self._prepared = (case["case_id"], ctx, estimates)
+            ctx = self.prepare(case, threads)
+            self._prepared = (case["case_id"], ctx)
         now = received_at if received_at is not None else time.monotonic()
         states = {sid: ThreadState(sid, list(events), now, rule_only_once=resumed) for sid, events in threads.items()}
         session = CaseSession(
-            case=case, ctx=ctx, threads=states, config=self.config, table=table, estimates=estimates,
-            deadline=deadline, gate=SendGate() if self.config.serialised_session else NoGate(),
+            case=case, ctx=ctx, threads=states, config=self.config, table=table, deadline=deadline,
+            estimator=self.estimator(case, ctx), gate=SendGate() if self.config.serialised_session else NoGate(),
         )  # fmt: skip
         session.set_lookup(self._lookup)
         observe.rebuild_case(session)
         session.c_open = policy.opening_cost(session)
         if case.get("buyer", {}).get("category_goal") in ("stabilise", "secure_supply"):
-            blind = [sid for sid, est in estimates.items() if est is None]
+            blind = [sid for sid in threads if session.estimates.get(sid) is None]
             if blind:
                 log.warning("%s: no supplier estimate for %s - C leaves the relationship charge out",
                             case["case_id"], blind)  # fmt: skip
@@ -209,22 +188,23 @@ def _summary(decision: dict) -> str:
 
 
 def buyer_factory(package=None):
-    """`--agent buyer`: one BuyerAgent per case, sharing the data package (behind a lock), the LLM client and
-    the telemetry. Without LLM_MODEL every role runs on its rule twin (no LLM calls at all). The strategist is
-    Saed's LLMStrategist when the roles package provides it, else the rule strategist."""
-    locked = LockedPackage(package) if package is not None else None
+    """`--agent buyer`: one BuyerAgent per case, sharing the data package (behind the tools' lock: one SQLite
+    connection, up to 10 cases in parallel), the LLM client and the telemetry. Without LLM_MODEL every role runs on
+    its rule twin (no LLM calls at all). The strategist is Saed's LLMStrategist when the roles package provides it,
+    else the rule strategist."""
+    safe = thread_safe(package)
     complete = llm_from_env() if os.environ.get("LLM_MODEL") else None
-    tools = DataTools(locked)
+    tools = DataTools(safe)
     config, telemetry = OrchestratorConfig.from_env(), Telemetry()
     llm_strategist = getattr(roles, "LLMStrategist", None)
 
     def new_agent() -> BuyerAgent:
         strategist = llm_strategist(complete) if llm_strategist else RuleStrategist()
         return BuyerAgent(
-            tools, PassthroughProfiler(), RuleAnalyst(), strategist, LLMWriter(complete), locked, config, telemetry
+            tools, PassthroughProfiler(), RuleAnalyst(), strategist, LLMWriter(complete), safe, config, telemetry
         )
 
     return new_agent
 
 
-__all__ = ["BuyerAgent", "LockedPackage", "buyer_factory"]
+__all__ = ["BuyerAgent", "buyer_factory"]

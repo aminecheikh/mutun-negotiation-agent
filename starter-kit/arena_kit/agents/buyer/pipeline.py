@@ -107,6 +107,10 @@ class RolePipeline:
                 ctx = self.tools.refresh(ctx, {s: t.events for s, t in session.threads.items()})
             except Exception:
                 log.exception("%s: tools.refresh failed - using the prepared claims", th.supplier_id)
+            if ctx.bands is not session.ctx.bands:  # re-priced after a cost breakdown: the policy uses them too
+                keep = {"bands": ctx.bands, **({"trades": ctx.trades} if hasattr(ctx, "trades") else {})}
+                with session.lock:
+                    session.ctx = replace(session.ctx, **keep)
         sid = th.supplier_id
         usable = tuple(
             c

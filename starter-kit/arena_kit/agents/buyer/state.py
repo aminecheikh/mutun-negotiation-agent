@@ -99,6 +99,9 @@ class CaseSession:
     config: OrchestratorConfig
     table: object | None = None  # play.RemoteTable; None in single-decision mode (BuyerAgent.decide)
     estimates: dict[str, dict | None] = field(default_factory=dict)  # supplier estimate per thread (tools)
+    # (supplier_id, events) -> our estimate of the supplier for the relationship charge; re-run on every reply so
+    # a cost breakdown the supplier sends replaces the data-based estimate (tools.supplier_from_thread)
+    estimator: Callable[[str, list[dict]], dict | None] | None = None
     c_open: float = math.inf  # the cheapest opening sheet that keeps the must-haves, in our C
     deadline: Callable[[], float | None] | None = None  # the wave's cap as time.time(), or None (practice)
     burned: set[str] = field(default_factory=set)  # data IDs already cited in this case (each counts once)
