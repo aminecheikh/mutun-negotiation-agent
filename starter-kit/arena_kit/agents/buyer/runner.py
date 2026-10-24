@@ -177,6 +177,8 @@ class ThreadWorker:
             th.slowest_round_s = max(th.slowest_round_s, received - asked_at)
             observe.rebuild(s, th)
             s.offers |= {ts["term_sheet_id"] for ts in reply.get("term_sheets") or [] if ts.get("term_sheet_id")}
+        if th.status == "agreed":  # it took our offer: close now, before the offer goes stale (P05: 46 s, 422)
+            self.arbiter.try_accept(th, "supplier agreed to our sheet: taken at once")
         claims = observe.report_claims(s, th, message, reply) if delivered else {}
         self._log_round(th, kind, verdict=verdict, out=out, message=message, problems=problems, reply=reply,
                         delivered=delivered, claims=claims, round_s=round(received - asked_at, 1))  # fmt: skip

@@ -568,3 +568,35 @@ def test_keepalive_message_when_supplier_agreed_resends_the_sheet_it_agreed_to()
     observe.rebuild(s, th)
     message = keepalive_message(s, th)
     assert [ts["terms"]["unit_price"] for ts in message["term_sheets"]] == [8.5]
+
+
+class AgreeingTable:
+    """The arena at the system boundary: the supplier agrees to our sheet; the accept succeeds."""
+
+    def __init__(self):
+        self.closed = []
+
+    def send(self, supplier_id, message):
+        sheet = {"term_sheet_id": f"offer:{supplier_id[4:]}-9", "terms": message["term_sheets"][0]["terms"]}
+        return {"from": "sales", "status": "agreed", "term_sheets": [sheet], "attachments": [], "body": "Agreed."}
+
+    def close(self, supplier_id, message):
+        self.closed.append(message["action"])
+        return {"ended": True, "deal": True}
+
+    def result(self):
+        return {"ended": True, "deal": True}
+
+
+def test_send_when_the_supplier_agrees_accepts_at_once():
+    # P05 (d353d958b3a96e12): the accept of an agreement went out 46 s after the reply and the offer was stale
+    # (422); the user: when a supplier agrees to our offer, take it - right away
+    from arena_kit.agents.buyer.runner import ThreadWorker
+
+    agent = BuyerAgent(DataTools(), None, None, None, None, None, OrchestratorConfig(), Telemetry("off"))
+    s = agent.open_case(S01, {SID: [quote(SID, 0, 10.0)]})
+    s.table = AgreeingTable()
+    th = s.threads[SID]
+    message = {"subject": "Re", "body": "Our proposal.", "term_sheets": [{"terms": {"unit_price": 9.0}}], "refs": []}
+    ThreadWorker(agent, s, Arbiter(s)).send(th, message, "counter")
+    assert s.ended and s.table.closed == [{"type": "accept", "term_sheet_id": f"offer:{SID[4:]}-9"}]
