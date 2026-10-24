@@ -436,3 +436,13 @@ def test_verdict_when_a_cost_breakdown_arrives_judges_against_the_repriced_band(
     agent.pipeline.sync(s, th)
     assert s.band(J1).c_target < th.c * 0.95  # its own cost says it can go well below its standing sheet
     assert policy.verdict(s, th).kind == "counter"
+
+
+def test_offers_more_when_counter_to_a_final_offer_repeats_our_sheets_is_false():
+    # D02 (53ce03986722d2b5): our one counter to J1's final offer repeated our last sheets; it walked away
+    last = {"unit_price": 15.0, "payment_days": 30, "lead_time_days": 42}
+    s = session_for(S02, {A: [rfq_quote(A, 0, 17.2), ours(15.0, extra={"lead_time_days": 42}),
+                             rfq_quote(A, 1, 16.7, "final_offer")], B: [rfq_quote(B, 0, 18.0)]})  # fmt: skip
+    th = s.threads[A]
+    assert not policy.offers_more(s, th, [last])
+    assert policy.offers_more(s, th, [{**last, "unit_price": 15.4}])

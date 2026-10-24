@@ -15,6 +15,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
 from ...client import ArenaError
 from ...play import fetch_documents, quota_used_up
@@ -79,6 +80,8 @@ class ThreadWorker:
             self.park(th, policy.Verdict("park", "strategist accept deferred: a cheaper sheet is on the table"))
             return
         checked = None
+        if th.status == "final_offer" and out.plan is not None and not policy.offers_more(s, th, out.plan.term_sheets):
+            out = replace(out, plan=None, email=None)  # nothing more to offer: take its final offer, or wait
         if out.plan is not None and out.email is not None:
             checked = guard.build_message(s, th, out.plan.term_sheets, out.email)
             if checked is None:  # the guard cut the writer's e-mail too short: the template, same sheets
@@ -87,6 +90,9 @@ class ThreadWorker:
         if checked is None:
             # nothing we would be content to offer this round: their standing sheet beats our next step
             if v.accept_permitted and self.arbiter.try_accept(th, "no better counter than its standing sheet"):
+                return
+            if th.status == "final_offer":  # a question after its last word reads as pushing: hold the sheet
+                self.park(th, policy.Verdict("park", "final offer and no counter that offers more"))
                 return
             if th.moves_left(s.case) <= 0:
                 self.park(th, policy.Verdict("park", "no sendable counter and no messages left"))

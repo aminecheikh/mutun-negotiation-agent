@@ -15,7 +15,7 @@ import math
 from dataclasses import dataclass, replace
 from typing import Literal
 
-from ...cost import must_haves_ok, total_cost
+from ...cost import complete_offer, must_haves_ok, supplier_value, total_cost
 from .contracts import Tactic
 from .state import CaseSession, ThreadState
 
@@ -162,6 +162,23 @@ def counter_allowed(session: CaseSession, th: ThreadState) -> bool:
         and fallback
         and session.persona(th.supplier_id) not in cfg.walk_prone_personas
     )
+
+
+def offers_more(session: CaseSession, th: ThreadState, sheets: list[dict]) -> bool:
+    """Our planned sheets give the supplier more than our last message did (its estimated cash value, else the
+    price): a counter to a final offer without that is "push further" with no move of ours - it may walk."""
+    ours = [m for m in th.events if m.get("from") == "buyer" and m.get("term_sheets")]
+    if not ours or not sheets:
+        return bool(sheets)
+    last = [ts.get("terms", ts) for ts in ours[-1]["term_sheets"]]
+    supplier = session.estimates.get(th.supplier_id)
+
+    def worth(terms: dict) -> float:
+        if supplier is None:
+            return float(terms.get("unit_price") or 0.0)
+        return supplier_value(session.case, complete_offer(session.case, terms), supplier)
+
+    return max(map(worth, sheets)) > max(map(worth, last)) + 1e-6
 
 
 # ---- the per-thread verdict ---------------------------------------------------------------------------------
