@@ -255,7 +255,36 @@ def arguments(state: CaseState, supplier_id: str) -> list[Argument]:
         and c.kind not in {"rival_quote", "rival_offer"}
     ]
     usable.sort(key=lambda c: -c.strength)
-    return [Argument(token_for(state, c.refs), c.sentence, tuple(c.refs), c.kind, round(c.strength, 2)) for c in usable]
+    return [
+        Argument(token_for(state, c.refs), true_unit(state, c), tuple(c.refs), c.kind, round(c.strength, 2))
+        for c in usable
+    ]
+
+
+UOM = {"pc": ("unit", "pieces"), "kg": ("kg", "kg"), "m": ("m", "m")}
+
+
+def true_unit(state: CaseState, claim) -> str:
+    """The claim's sentence with the price unit the data really uses: "EUR 12.46 per 100 pieces", not "per unit",
+    when the part is priced per 100 (the figure and the IDs stay as checked; only the unit words change)."""
+    sentence = claim.sentence
+    if " per unit" not in sentence or claim.kind not in {"po_history", "should_cost"}:
+        return sentence
+    package = getattr(state.tools, "package", None)
+    if package is None:
+        return sentence
+    try:
+        fact = package.lookup(claim.refs[0]) or {}
+        part = fact.get("part") or fact.get("part_id")
+        row = package.query("SELECT price_unit, uom FROM parts WHERE id = ?", (part,), 1) if part else []
+    except Exception:
+        return sentence
+    if not row:
+        return sentence
+    per, uom = int(fact.get("price_unit") or row[0]["price_unit"] or 1), str(row[0]["uom"] or "pc")
+    single, plural = UOM.get(uom, (uom, uom))
+    unit = single if per == 1 else f"{per:,} {plural}"
+    return sentence.replace(" per unit", f" per {unit}")
 
 
 def token_for(state: CaseState, refs) -> str:

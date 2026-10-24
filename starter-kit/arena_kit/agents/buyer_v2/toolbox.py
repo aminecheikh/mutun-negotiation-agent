@@ -87,11 +87,11 @@ class Toolset:
 
 
 def _compact(x):
-    """Round floats and drop empty values: shorter results, same information."""
+    """Round floats (to 4 decimals; inf and nan become null) - unknown values stay as explicit nulls."""
     if isinstance(x, float):
         return None if math.isinf(x) or math.isnan(x) else round(x, 4)
     if isinstance(x, dict):
-        return {k: _compact(v) for k, v in x.items() if v not in (None, "", [], {})}
+        return {k: _compact(v) for k, v in x.items()}
     if isinstance(x, list | tuple):
         return [_compact(v) for v in x]
     return x
@@ -284,20 +284,39 @@ def payment_and_delivery(ctx: ToolContext, supplier_id: str):
     }
 
 
+def _month_index(month: str) -> int:
+    year, mo = month.split("-")[:2]
+    return int(year) * 12 + int(mo) - 1
+
+
 def _change(ctx: ToolContext, series_id: str) -> dict | None:
-    values = ctx.rows(
-        "SELECT month, value FROM index_values WHERE series_id = ? ORDER BY month DESC LIMIT 13", series_id
+    """The series' change over the last 12 months by the calendar: its latest month against the same month a year
+    earlier (or the earliest month inside that year if it is missing) - the window the arena checks (<= 12 months
+    apart). Both IDs are citable."""
+    latest = ctx.rows(
+        "SELECT month, value FROM index_values WHERE series_id = ? ORDER BY month DESC LIMIT 1", series_id
     )
-    if len(values) < 2:
+    if not latest:
         return None
-    latest, earlier = values[0], values[-1] if len(values) == 13 else values[-1]
-    pct = (latest["value"] / earlier["value"] - 1) * 100 if earlier["value"] else None
+    to = latest[0]
+    i = _month_index(to["month"]) - 12
+    start = f"{i // 12:04d}-{i % 12 + 1:02d}"
+    earlier = ctx.rows(
+        "SELECT month, value FROM index_values WHERE series_id = ? AND month >= ? AND month < ? ORDER BY month LIMIT 1",
+        series_id, start, to["month"],
+    )  # fmt: skip
+    if not earlier or not earlier[0]["value"]:
+        return None
+    frm = earlier[0]
+    pct = (to["value"] / frm["value"] - 1) * 100
     return {
         "series": series_id,
-        "from": earlier["month"],
-        "to": latest["month"],
-        "change_pct": round(pct, 2) if pct is not None else None,
-        "ids": [f"idx:{series_id}@{earlier['month']}", f"idx:{series_id}@{latest['month']}"],
+        "from": frm["month"],
+        "to": to["month"],
+        "from_value": frm["value"],
+        "to_value": to["value"],
+        "change_pct": round(pct, 2),
+        "ids": [f"idx:{series_id}@{frm['month']}", f"idx:{series_id}@{to['month']}"],
     }
 
 

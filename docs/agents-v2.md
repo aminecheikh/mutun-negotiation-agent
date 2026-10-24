@@ -159,7 +159,18 @@ Remaining, by design:
 ## What is verified, and what is not
 
 - **Verified offline:**
-  - The full test suite (670 passed), including 126 v2 tests: rules and guard properties on all 19 practice case files;
+  - **Every tool returns the true answer** (`tests/test_v2_tools_truth.py`, 90 checks on all 19 practice cases and
+    their suppliers). Each result is compared with an independent source:
+    - a separate SQLite connection;
+    - `facts.json`, the values the arena checks claims against: every verified argument's figure, window and IDs;
+    - the published cost function: C of every offer and package;
+    - the documents' own text: attachments and correspondence.
+
+    Fixed on the way:
+    - the 12-month index change is calendar-based (no row counting);
+    - price arguments state the data's real unit ("per 100 pieces", not "per unit");
+    - unknown values stay explicit nulls.
+  - The full test suite (760 passed), including 216 v2 tests: rules and guard properties on all 19 practice case files;
     every tool on every practice case with the real data package; the tool loop and its deadlines with a scripted
     model; fast paths; the negotiator kept inside the limits; fallbacks; prompts and schemas.
   - arena-sim on a real clock: every case to a deal; no timeouts, no offer above the supplier's price, nothing
