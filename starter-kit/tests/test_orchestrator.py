@@ -397,3 +397,42 @@ def test_keepalive_email_when_strategist_question_has_figures_drops_it():
     s, th = keepalive_thread()
     question = "Could you reach 9.10 if we pay in 14 days?"  # figures in a keep-alive bypass the writer's checks
     assert "9.10" not in keepalive_email(s, th, question).body
+
+
+# ---- a cost breakdown re-prices the band before the verdict ----------------------------------------------------
+
+SANDBOX = {c["case_id"]: c for c in json.loads((KIT / "tests/fixtures/sandbox_cases.json").read_text())}
+J1, C1 = "sup:DEMO-J1", "sup:DEMO-C1"
+BREAKDOWN = (
+    "[Cost breakdown]\nElement | EUR per unit | Share of price\n"
+    "BAR-14021 (material / cost driver) | 5.56 | =B2/B6\nWAGES-METAL (material / cost driver) | 4.39 | =B3/B6\n"
+    "conversion (machine-hour rate x time) | 2.81 | =B4/B6\noverhead and profit | 2.94 | =B5/B6\n"
+    "Unit price | =SUM(B2:B5) | =SUM(C2:C5)"
+)
+
+
+def d02_quote(sid: str, n: int, terms: dict, attachments=()) -> dict:
+    sheet = {"term_sheet_id": f"offer:{sid[4:]}-{n}", "terms": terms}
+    return {"from": f"sales@{sid[4:]}", "status": "open", "term_sheets": [sheet], "attachments": list(attachments),
+            "body": "Offer."}  # fmt: skip
+
+
+def test_verdict_when_a_cost_breakdown_arrives_judges_against_the_repriced_band():
+    # sandbox D02 (53ce03986722d2b5): the band was re-priced only on a counter, so after J1 sent its breakdown the
+    # policy still saw its 15.70 sheet "at our target" and parked it with keep-alives instead of pushing on
+    case = SANDBOX["case:D02"]
+    agent = BuyerAgent(DataTools(DataPackage(DATA)), None, None, None, None, None, OrchestratorConfig(),
+                       Telemetry("off"))  # fmt: skip
+    j1_open = d02_quote(J1, 0, {"unit_price": 17.1, "payment_days": 30, "lead_time_days": 28})
+    c1_open = d02_quote(C1, 0, {"unit_price": 16.0, "payment_days": 45, "incoterm": "EXW"})
+    s = agent.open_case(case, {J1: [j1_open], C1: [c1_open]})
+    th = s.threads[J1]
+    standing = {"unit_price": 15.7, "payment_days": 30, "lead_time_days": 28, "incoterm": "DAP"}
+    th.events += [
+        ours(14.9, 60, {"lead_time_days": 28, "incoterm": "DAP"}),
+        d02_quote(J1, 1, standing, [{"name": "cost-breakdown.xlsx", "text": BREAKDOWN}]),
+    ]
+    observe.rebuild(s, th)
+    agent.pipeline.sync(s, th)
+    assert s.band(J1).c_target < th.c * 0.95  # its own cost says it can go well below its standing sheet
+    assert policy.verdict(s, th).kind == "counter"

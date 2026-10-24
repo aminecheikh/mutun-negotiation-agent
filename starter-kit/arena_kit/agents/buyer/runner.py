@@ -58,6 +58,7 @@ class ThreadWorker:
     def iteration(self, th: ThreadState) -> None:
         s, cfg = self.s, self.s.config
         deadline = th.received_at + cfg.move_budget_s
+        self.agent.pipeline.sync(s, th)  # a cost breakdown in its reply re-prices the band the verdict uses
         with s.lock:  # a consistent view of every thread (others are rebuilt under this lock)
             v = policy.verdict(s, th)
         if v.kind == "accept":

@@ -105,19 +105,24 @@ class RolePipeline:
 
     # ---- context ------------------------------------------------------------------------------------
 
-    def round_context(self, session: CaseSession, th: ThreadState) -> CaseContext:
-        """Claims refreshed from the threads (series the supplier named, rival offers), then filtered to what
-        may still be cited to this supplier."""
+    def sync(self, session: CaseSession, th: ThreadState) -> CaseContext:
+        """Claims and bands refreshed from the threads (series the supplier named, rival offers, a cost breakdown);
+        re-priced bands go back to the session at once, because the policy's verdict uses them too."""
         ctx = session.ctx
         if hasattr(self.tools, "refresh"):
             try:
                 ctx = self.tools.refresh(ctx, {s: t.events for s, t in session.threads.items()})
             except Exception:
                 log.exception("%s: tools.refresh failed - using the prepared claims", th.supplier_id)
-            if ctx.bands is not session.ctx.bands:  # re-priced after a cost breakdown: the policy uses them too
+            if ctx.bands is not session.ctx.bands:
                 keep = {"bands": ctx.bands, **({"trades": ctx.trades} if hasattr(ctx, "trades") else {})}
                 with session.lock:
                     session.ctx = replace(session.ctx, **keep)
+        return ctx
+
+    def round_context(self, session: CaseSession, th: ThreadState) -> CaseContext:
+        """`sync`, then the claims filtered to what may still be cited to this supplier."""
+        ctx = self.sync(session, th)
         sid = th.supplier_id
         usable = tuple(
             c
