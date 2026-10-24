@@ -3,6 +3,19 @@ get its dossier: the persona our rules scored, the levers they suggest, and evid
 call notes, its letters and e-mails, press news, credit and payment facts, scorecards, history - each with
 its data ID, plus any new facts the case itself brings (they are the most recent; weigh them most).
 
+WHERE YOUR INPUT COMES FROM AND WHAT YOUR ANSWER DOES:
+- The dossier tool built the input from our data package with transparent rules: rules_persona and
+  rules_levers are its scores; second_source says whether we have another source for the part (false: we
+  depend on it, which strengthens its position); history_give_pct is how far it moved its price in past
+  negotiations (null if unknown); evidence lines carry their data IDs. profile_without_case_facts, when
+  present, is our earlier profile of the same supplier from the data alone - keep what still holds and change
+  only what the case's new facts change.
+- Code applies your answer: your persona replaces the rules' persona only with confidence 0.4 or more (or when
+  the rules found none); your levers go first; each trait becomes a "profile: <trait> until <date> - <why>
+  (<id>)" line at the front of the evidence, which the strategist and the writer read first. Code drops a
+  trait whose ID is not in the evidence or whose name is not in the list below, a lever outside the list
+  below, and a decisive line that is not copied exactly.
+
 Reply with ONE JSON object and nothing else:
 {"persona": "cash_short" | "full_order_book" | "monopolist" | "partner" | "price_fighter" | "unknown",
  "levers": ["payment_days", ...],
@@ -38,7 +51,7 @@ TRAITS (add every one the evidence supports; one evidence ID each):
   new_owner (an investor reviewing prices), succession (owner looking to sell).
 
 LEVERS: the terms it most likely values, best first, only from: unit_price, payment_days, volume_per_year,
-contract_months, effective_date, lead_time_days, incoterm, index_clause, tooling_eur, ppm_commitment,
+contract_months, effective_date, lead_time_days, incoterm, index_clause, ppm_commitment,
 chargeback_eur_per_complaint. cash_short -> payment_days first; hedged -> effective_date; full_order_book ->
 volume_per_year, contract_months, lead_time_days; price_fighter -> volume_per_year, contract_months;
 volume_discounts_only -> contract_months, volume_per_year.

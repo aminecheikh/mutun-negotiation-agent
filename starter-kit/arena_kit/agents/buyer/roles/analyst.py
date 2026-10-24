@@ -2,7 +2,8 @@
 
 v1 is rule-based and instant: the thread status and the concession fit give p_more, the supplier's own words
 give what it wants and how irritated it is. The LLM read happens inside the strategist's single call
-(roles/strategist.py, S2+S3 merged to save ~10 s per round); this read is its input and its fallback.
+(roles/strategist.py, S2+S3 merged to save ~10 s per round), guided by prompts/analyst.md which the strategist
+embeds in its prompt; this read is its input and its fallback.
 """
 
 import re

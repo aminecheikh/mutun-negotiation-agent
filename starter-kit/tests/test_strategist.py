@@ -8,7 +8,13 @@ from pathlib import Path
 from arena_kit.agents.buyer.contracts import BehaviourRead, Claim, ConcessionFit, Trade
 from arena_kit.agents.buyer.roles import LLMStrategist, RuleAnalyst, RuleStrategist
 from arena_kit.agents.buyer.roles.analyst import wants_from
-from arena_kit.agents.buyer.roles.strategist import accept_ready, negotiable_levers, refined_read, safe
+from arena_kit.agents.buyer.roles.strategist import (
+    accept_ready,
+    negotiable_levers,
+    refined_read,
+    safe,
+    usable_claims,
+)
 from arena_kit.agents.buyer.tools import DataTools
 
 CASE = json.loads((Path(__file__).parents[1] / "arena_kit/sim_cases/S01.json").read_text())
@@ -214,13 +220,70 @@ def test_llm_strategist_when_fields_are_malformed_never_raises():
         assert all(isinstance(i, int) and not isinstance(i, bool) for i in tactic.claims)
 
 
-def test_negotiable_levers_when_every_index_path_rises_drops_index_clause():
+def test_negotiable_levers_keeps_index_clause_on_rising_paths_c_decides():
     ctx, _ = setup([supplier()])
     case = {**ctx.case, "negotiable": [*ctx.case["negotiable"], "index_clause"]}
     rising = replace(ctx, case={**case, "buyer": {**case["buyer"], "index_paths": {"AS-14404": 0.06}}})
-    falling = replace(ctx, case={**case, "buyer": {**case["buyer"], "index_paths": {"AS-14404": -0.04}}})
-    assert "index_clause" not in negotiable_levers(rising, ["unit_price", "index_clause"])
-    assert "index_clause" in negotiable_levers(falling, ["unit_price", "index_clause"])
+    assert "index_clause" in negotiable_levers(rising, ["unit_price", "index_clause"])  # P18: the 24-month package
+
+
+def at_target(ctx, threads, fit):
+    """The context with a band whose target its standing sheet already meets, and the given price fit."""
+    band = ctx.bands[SID]
+    return replace(ctx, bands={SID: replace(band, c_target=1e12)}, fits={SID: fit})
+
+
+def test_accept_when_at_target_but_still_moving_keeps_trading():
+    ctx, threads = setup([supplier(), buyer(), supplier(price=17.0, n=1)])
+    moving = at_target(ctx, threads, ConcessionFit(SID, (17.4, 17.0), 16.0, 2.3, False, p_room=0.7))
+    assert not accept_ready(moving, SID, threads[SID])
+    tactic = safe(moving, threads, {"supplier_id": SID, "action": "accept"}, rule_tactic(moving, threads))
+    assert tactic.action == "send" and "still moving" in tactic.rationale
+
+
+def test_accept_when_at_target_and_stopped_moving_accepts():
+    ctx, threads = setup([supplier(), buyer(), supplier(price=17.0, n=1)])
+    stopped = at_target(ctx, threads, ConcessionFit(SID, (17.4, 17.0, 16.99), 16.98, 0.06, True, p_room=0.1))
+    assert accept_ready(stopped, SID, threads[SID])
+    assert (
+        safe(stopped, threads, {"supplier_id": SID, "action": "accept"}, rule_tactic(stopped, threads)).action
+        == "accept"
+    )
+
+
+def at_floor_band(ctx, floor):
+    band = ctx.bands[SID]
+    return replace(ctx, bands={SID: replace(band, floor=floor, c_target=0.0)})
+
+
+def test_accept_when_price_at_floor_accepts_even_if_still_moving():
+    ctx, threads = setup([supplier(), buyer(), supplier(price=16.0, n=1)])
+    ctx = replace(at_floor_band(ctx, 16.2), fits={SID: ConcessionFit(SID, (17.4, 16.0), 15.5, 8.0, False, 0.9)})
+    assert accept_ready(ctx, SID, threads[SID])
+    assert safe(ctx, threads, {"supplier_id": SID, "action": "accept"}, rule_tactic(ctx, threads)).action == "accept"
+
+
+def test_accept_when_opening_quote_at_floor_still_counters():
+    ctx, threads = setup([supplier(price=16.0)])
+    ctx = at_floor_band(ctx, 16.2)
+    assert not accept_ready(ctx, SID, threads[SID])  # the opening quote is the score's zero line
+    assert rule_tactic(ctx, threads).action == "send"
+
+
+def test_accept_when_price_at_floor_but_alternative_cheaper_does_not_accept():
+    ctx, threads = setup([supplier(), buyer(), supplier(price=16.0, n=1)], alt_c=1.0)
+    assert not accept_ready(at_floor_band(ctx, 16.2), SID, threads[SID])
+
+
+def test_usable_claims_when_rival_quote_or_offer_drops_them():
+    rivals = (
+        Claim("Another supplier quoted EUR 15.10 (quote:Q1).", ("quote:Q1",), "rival_quote", 15.1, True, 0.9),
+        Claim("Another supplier offers EUR 15.00 (offer:2-1).", ("offer:2-1",), "rival_offer", 15.0, True, 0.9),
+    )
+    ctx, _ = setup([supplier()])
+    ctx = replace(ctx, claims={SID: (*CLAIMS, *rivals)})
+    kinds = {c.kind for _, c in usable_claims(ctx, SID, set())}
+    assert kinds == {"index_change", "scorecard"}
 
 
 # ---- what the model sees ------------------------------------------------------------------------------------
@@ -261,7 +324,7 @@ def test_safe_when_model_accepts_keeps_its_levers_claims_and_question_for_a_refu
     raw = {"supplier_id": SID, "action": "accept", "levers": ["unit_price", "payment_days"], "claims": [0],
            "question": "Which payment term would help you most?"}  # fmt: skip
     tactic = safe(ctx, threads, raw, rule_tactic(ctx, threads))
-    assert tactic.action == "accept"
+    assert tactic.action in ("accept", "send")  # safe() or the policy may refuse the accept: either way a full offer
     assert "payment_days" in tactic.levers and tactic.claims == (0,) and tactic.question
 
 
@@ -279,9 +342,7 @@ def test_accept_ready_when_its_prices_show_no_room_accepts_at_target():
 
 def test_strategist_prompt_never_brings_in_another_supplier():
     # organisers: no inter-supplier comparison - one supplier per call, nothing about rivals
-    from arena_kit.agents.buyer.roles.llm import prompt
-
-    text = prompt("strategist").lower()
+    text = LLMStrategist(None).system.lower()  # the whole system prompt, the embedded analyst guide included
     assert "rival" not in text and "rfq" not in text and "every open supplier" not in text
     assert "never mention" in text and "another supplier" in text
 
@@ -293,3 +354,10 @@ def test_choose_when_credibility_known_shows_the_lowest_credible_price_and_why()
     cred = Credibility(SID, 16.01, None, "no cost evidence: at most 8 % under its current offer")
     view = seen_thread(replace(ctx, credibility={SID: cred}), threads)
     assert view["credibility"] == {"lowest_price": 16.01, "evidence_pct": None, "reason": cred.reason}
+
+
+def test_llm_strategist_prompt_embeds_analyst_guide():
+    system = LLMStrategist(None).system
+    assert "{analyst}" not in system
+    assert "READING A SUPPLIER" in system and "p_room" in system and "walk_risk" in system
+    assert '"tactic"' in system  # the JSON braces of the reply format survive the substitution
