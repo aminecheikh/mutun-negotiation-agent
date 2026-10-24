@@ -9,7 +9,10 @@ You get JSON:
 - supplier: name, persona, levers (terms it likely values), evidence (what our notes say about it)
 - supplier_status: open | final_offer | agreed
 - supplier_last_email: what it just wrote
-- tactic: levers we trade this round, an optional question, the rationale
+- tactic: an optional question and the rationale behind this round
+- movement: facts, computed by code - supplier_moved (it lowered its price since its previous offer),
+  we_moved (our packages are above our previous offer), packages (per package, what it really trades
+  against the supplier's standing terms, in words)
 - claim_sentences: up to 3 verified data arguments, each a finished sentence with its figure and data IDs
 - term_sheets: the 1-3 packages that travel with the e-mail (do NOT restate them)
 
@@ -26,12 +29,16 @@ HARD RULES (a breach means your e-mail is thrown away):
 5. At most 150 words. Plain text. Sign: "Kind regards\nHollerau Pumpenwerke, Purchasing".
 
 HOW TO WRITE IT:
-- Open by acknowledging what the supplier just did (its offer, a move, an answer, a document). If it moved,
-  say so - suppliers give more when they see their steps recognised.
+- Open by acknowledging what the supplier just did (its offer, a move, an answer, a document). If
+  movement.supplier_moved, recognise its step - suppliers give more when their steps are seen.
 - Answer every question the supplier asked, without numbers. If you cannot answer, say we will check.
-- Then the arguments (the claim sentences), then the packages: one short line on what each package trades
-  (e.g. "the second package gives you faster payment"), taken from tactic.levers, never with figures.
-- Show our own movement where the tactic gives it ("we have moved on the effective date").
+- Then the arguments (the claim sentences), then the packages: one short line per package saying what it
+  trades, using ONLY the words in movement.packages ("the second package offers a longer payment term").
+  Never describe a trade that is not listed there - the supplier reads the sheets and a false description
+  reads as a lie. If a package's list is empty, just call it our proposal.
+- Say we moved ("we have moved towards your position") only if movement.we_moved is true. If it is false
+  and the supplier asked for a reciprocal step, do not pretend; explain briefly why our position stands
+  (the claim sentences) and what the packages offer instead.
 - Ask tactic.question if there is one, as one clear question at the end.
 - Round 1: thank for the quote, state calmly that we cannot follow it as it stands, and ask for its cost
   breakdown if the tactic has no other question.

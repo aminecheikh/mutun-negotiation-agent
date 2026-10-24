@@ -36,15 +36,68 @@ OPENINGS = {
     "price_fighter": "thank you for your offer. We see good potential for more business between us.",
     "unknown": "thank you for your offer.",
 }
-LEVER_LINES = {
-    "payment_days": "One package changes the payment terms.",
-    "contract_months": "One package offers a longer commitment.",
-    "volume_per_year": "One package offers you more volume.",
-    "effective_date": "One package moves the effective date.",
-    "incoterm": "One package changes the delivery terms.",
-    "lead_time_days": "One package changes the lead time.",
-    "index_clause": "One package links the price to the index.",
-}
+ORDINALS = ("The first package", "The second package", "The third package")
+# (field, more, less): how a package differs from the supplier's standing sheet, in words without figures.
+DIFFS = (
+    ("payment_days", "a longer payment term", "faster payment for you"),
+    ("contract_months", "a longer commitment", "a shorter term"),
+    ("volume_per_year", "more volume for you", "a smaller volume"),
+    ("effective_date", "a later start of the new price", "an earlier start of the new price"),
+    ("lead_time_days", "more lead time for you", "a shorter lead time"),
+    ("tooling_eur", "a higher tooling contribution", "a lower tooling contribution"),
+    ("ppm_commitment", "a looser defect commitment", "a tighter defect commitment"),
+    ("chargeback_eur_per_complaint", "a higher chargeback", "a lower chargeback"),
+)
+
+
+def describe(sheet: dict, theirs: dict) -> list[str]:
+    """What a package trades against the supplier's standing sheet - only what is really in it."""
+    out = []
+    for field, more, less in DIFFS:
+        a, b = sheet.get(field), theirs.get(field)
+        if a is None or b is None or a == b:
+            continue
+        try:
+            out.append(more if a > b else less)
+        except TypeError:
+            continue
+    if sheet.get("incoterm") and theirs.get("incoterm") and sheet["incoterm"] != theirs["incoterm"]:
+        out.append("different delivery terms")
+    if sheet.get("index_clause") and not theirs.get("index_clause"):
+        out.append("a price linked to the index")
+    return out
+
+
+def _price(sheet: dict | None) -> float | None:
+    try:
+        return float(sheet["unit_price"]) if sheet and sheet.get("unit_price") is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def movement(plan: OfferPlan, events: list[dict]) -> dict:
+    """Facts about who moved, for the e-mail: did the supplier come down, did we come up since our last offer,
+    and what each package trades. No figures - the term sheets carry them."""
+    theirs = [m for m in events if m.get("from") != "buyer" and m.get("term_sheets")]
+    ours = [m for m in events if m.get("from") == "buyer" and m.get("term_sheets")]
+    standing = (theirs[-1]["term_sheets"][0].get("terms") or {}) if theirs else {}
+    prev = _price(theirs[-2]["term_sheets"][0].get("terms")) if len(theirs) >= 2 else None
+    now = _price(standing)
+    ours_before = [_price(t.get("terms", t)) for t in ours[-1]["term_sheets"]] if ours else []
+    ours_before = [p for p in ours_before if p is not None]
+    ours_now = [p for p in (_price(s) for s in plan.term_sheets) if p is not None]
+    return {
+        "supplier_moved": prev is not None and now is not None and now < prev,
+        "we_moved": bool(ours_before and ours_now and min(ours_now) > max(ours_before)),
+        "packages": [describe(s, standing) for s in plan.term_sheets],
+    }
+
+
+def package_lines(packages: list[list[str]]) -> list[str]:
+    if len(packages) <= 1:
+        trades = packages[0] if packages else []
+        return [f"It offers {' and '.join(trades)}."] if trades else []
+    return [f"{ORDINALS[i]} offers {' and '.join(t)}." for i, t in enumerate(packages[:3]) if t]
 
 
 def _numbers(text: str) -> set[str]:
@@ -82,13 +135,18 @@ def template(ctx: CaseContext, tactic: Tactic, plan: OfferPlan, claims: list[str
     """No model, a late model or a failed check: a safe e-mail that still fits the persona."""
     dossier = ctx.dossiers.get(tactic.supplier_id)
     persona = dossier.persona if dossier else "unknown"
-    lines = ["Dear Sir or Madam,", "", OPENINGS.get(persona, OPENINGS["unknown"])]
+    moved = movement(plan, events or [])
+    opening = OPENINGS.get(persona, OPENINGS["unknown"])
+    if moved["supplier_moved"]:
+        opening = opening.replace("your offer", "your revised offer and the step you made", 1)
+    lines = ["Dear Sir or Madam,", "", opening]
     if claims:
         lines += ["", *claims]
-    trades = [LEVER_LINES[lever] for lever in tactic.levers if lever in LEVER_LINES][:2]
     many = len(plan.term_sheets) > 1
     lines += ["", "Please find our alternative packages attached." if many else "Please find our proposal attached."]
-    lines += trades
+    if moved["we_moved"]:
+        lines.append("We have moved towards your position.")
+    lines += package_lines(moved["packages"])
     if tactic.question:
         lines += ["", tactic.question]
     lines += ["", SIGNATURE]
@@ -126,7 +184,8 @@ class LLMWriter:
                 },
                 "supplier_status": last.get("status"),
                 "supplier_last_email": supplier_text,
-                "tactic": {"levers": tactic.levers, "question": tactic.question, "rationale": tactic.rationale},
+                "tactic": {"question": tactic.question, "rationale": tactic.rationale},
+                "movement": movement(plan, events),
                 "claim_sentences": sentences,
                 "term_sheets": plan.term_sheets,
             },

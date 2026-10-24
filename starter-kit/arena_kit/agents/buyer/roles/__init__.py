@@ -2,7 +2,7 @@
 
 from .analyst import RuleAnalyst
 from .profiler import PassthroughProfiler
-from .strategist import RuleStrategist
+from .strategist import LLMStrategist, RuleStrategist
 from .writer import LLMWriter
 
-__all__ = ["LLMWriter", "PassthroughProfiler", "RuleAnalyst", "RuleStrategist"]
+__all__ = ["LLMStrategist", "LLMWriter", "PassthroughProfiler", "RuleAnalyst", "RuleStrategist"]

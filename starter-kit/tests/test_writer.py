@@ -133,3 +133,42 @@ def test_writer_on_recorded_supplier_mails_every_template_passes_check():
             email = LLMWriter(None).write(ctx(persona), TACTIC, PLAN, [mail])
             problems = check(email.body, [CLAIM.sentence], set(CLAIM.refs), mail["body"], "HN volute casings")
             assert problems == [], (name, persona, problems)
+
+
+# ---- truthfulness: describe only what the sheets contain (sandbox D01, 16:59) -------------------------
+
+
+def thread(prices_theirs, ours=None):
+    events = []
+    for i, p in enumerate(prices_theirs):
+        terms = {"unit_price": p, "payment_days": 30, "contract_months": 12}
+        events.append(
+            {"from": "sales@70110", "status": "open", "body": "Our offer.", "term_sheets": [{"terms": terms}]}
+        )
+        if ours and i < len(ours):
+            events.append({"from": "buyer", "term_sheets": [{"terms": {"unit_price": ours[i]}}]})
+    return events
+
+
+def test_template_when_sheet_trades_nothing_claims_no_trade():
+    plan = OfferPlan(SID, ({"unit_price": 48.67, "payment_days": 30, "contract_months": 12},), (1.0,), "")
+    email = template(ctx("unknown"), TACTIC, plan, [], thread([52.9, 51.9], ours=[48.67]))
+    assert "payment" not in email.body.lower() and "commitment" not in email.body.lower()
+    assert "moved towards" not in email.body  # 48.67 again is no move
+    assert "the step you made" in email.body  # it came down from 52.90 to 51.90
+
+
+def test_template_when_packages_trade_terms_names_each_trade():
+    sheets = (
+        {"unit_price": 49.5, "payment_days": 60, "contract_months": 12},
+        {"unit_price": 50.0, "payment_days": 30, "contract_months": 24},
+    )
+    email = template(ctx("unknown"), TACTIC, OfferPlan(SID, sheets, (1.0, 2.0), ""), [], thread([52.9], ours=[]))
+    assert "The first package offers a longer payment term." in email.body
+    assert "The second package offers a longer commitment." in email.body
+
+
+def test_template_when_we_raise_our_offer_says_we_moved():
+    plan = OfferPlan(SID, ({"unit_price": 49.5, "payment_days": 30, "contract_months": 12},), (1.0,), "")
+    email = template(ctx("unknown"), TACTIC, plan, [], thread([52.9, 51.9], ours=[48.67]))
+    assert "We have moved towards your position." in email.body
