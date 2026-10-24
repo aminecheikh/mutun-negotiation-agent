@@ -8,7 +8,13 @@ from pathlib import Path
 from arena_kit.agents.buyer.contracts import BehaviourRead, Claim, ConcessionFit, Trade
 from arena_kit.agents.buyer.roles import LLMStrategist, RuleAnalyst, RuleStrategist
 from arena_kit.agents.buyer.roles.analyst import wants_from
-from arena_kit.agents.buyer.roles.strategist import accept_ready, negotiable_levers, refined_read, safe
+from arena_kit.agents.buyer.roles.strategist import (
+    accept_ready,
+    negotiable_levers,
+    refined_read,
+    safe,
+    usable_claims,
+)
 from arena_kit.agents.buyer.tools import DataTools
 
 CASE = json.loads((Path(__file__).parents[1] / "arena_kit/sim_cases/S01.json").read_text())
@@ -243,6 +249,41 @@ def test_accept_when_at_target_and_stopped_moving_accepts():
         safe(stopped, threads, {"supplier_id": SID, "action": "accept"}, rule_tactic(stopped, threads)).action
         == "accept"
     )
+
+
+def at_floor_band(ctx, floor):
+    band = ctx.bands[SID]
+    return replace(ctx, bands={SID: replace(band, floor=floor, c_target=0.0)})
+
+
+def test_accept_when_price_at_floor_accepts_even_if_still_moving():
+    ctx, threads = setup([supplier(), buyer(), supplier(price=16.0, n=1)])
+    ctx = replace(at_floor_band(ctx, 16.2), fits={SID: ConcessionFit(SID, (17.4, 16.0), 15.5, 8.0, False, 0.9)})
+    assert accept_ready(ctx, SID, threads[SID])
+    assert safe(ctx, threads, {"supplier_id": SID, "action": "accept"}, rule_tactic(ctx, threads)).action == "accept"
+
+
+def test_accept_when_opening_quote_at_floor_still_counters():
+    ctx, threads = setup([supplier(price=16.0)])
+    ctx = at_floor_band(ctx, 16.2)
+    assert not accept_ready(ctx, SID, threads[SID])  # the opening quote is the score's zero line
+    assert rule_tactic(ctx, threads).action == "send"
+
+
+def test_accept_when_price_at_floor_but_alternative_cheaper_does_not_accept():
+    ctx, threads = setup([supplier(), buyer(), supplier(price=16.0, n=1)], alt_c=1.0)
+    assert not accept_ready(at_floor_band(ctx, 16.2), SID, threads[SID])
+
+
+def test_usable_claims_when_rival_quote_or_offer_drops_them():
+    rivals = (
+        Claim("Another supplier quoted EUR 15.10 (quote:Q1).", ("quote:Q1",), "rival_quote", 15.1, True, 0.9),
+        Claim("Another supplier offers EUR 15.00 (offer:2-1).", ("offer:2-1",), "rival_offer", 15.0, True, 0.9),
+    )
+    ctx, _ = setup([supplier()])
+    ctx = replace(ctx, claims={SID: (*CLAIMS, *rivals)})
+    kinds = {c.kind for _, c in usable_claims(ctx, SID, set())}
+    assert kinds == {"index_change", "scorecard"}
 
 
 # ---- what the model sees ------------------------------------------------------------------------------------

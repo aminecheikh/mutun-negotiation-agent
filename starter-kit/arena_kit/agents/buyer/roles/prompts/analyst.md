@@ -15,7 +15,7 @@ keyword read of the same e-mails: start from it, correct it where the words say 
   "ohne Bewegung Ihrerseits"), contradicted data ("that costs trust"), repeated or empty e-mails from us,
   timeouts, "not strategic", and a full order book. Above 0.6 only when it says it will stop.
 - wants: the terms it signals it values, only from: unit_price, payment_days, volume_per_year,
-  contract_months, effective_date, lead_time_days, incoterm, index_clause, tooling_eur, ppm_commitment,
+  contract_months, effective_date, lead_time_days, incoterm, index_clause, ppm_commitment,
   chargeback_eur_per_complaint. Read them from its words: faster payment / cash / Zahlungsziel / Skonto ->
   payment_days; volume, commitment, capacity utilisation -> volume_per_year, contract_months; "from <date>",
   "valid from" -> effective_date; delivery time / Lieferzeit -> lead_time_days; freight, pick-up, DAP / FCA /

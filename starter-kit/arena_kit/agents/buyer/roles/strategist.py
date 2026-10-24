@@ -1,12 +1,13 @@
 """Strategist: this round's decision (owner: Saed). S2 + S3 in one LLM call.
 
-`LLMStrategist.choose` sends every open thread (dossier, band, standing C, fit, the supplier's own words,
+One-on-one: one supplier, take its deal or leave it for our alternative - never a comparison with other
+bidders. `LLMStrategist.choose` sends the supplier's thread (dossier, band, standing C, fit, its own words,
 claim results, unused claims) to the model once and gets back both the behaviour read per thread (S3) and the
 tactic (S2) - one call instead of two saves ~10 s of the 60 s per move. The refined reads are written back
 into the `reads` dict the orchestrator passes in, so `tools.plan_offers` uses them. Every answer goes through
-`safe()`: a closed thread, an unknown claim, a first-round accept, a walk without a cheaper alternative or a
-question with figures never reaches the supplier. No model, a late model or a broken answer gives
-`RuleStrategist`, which follows the same policy without an LLM.
+`safe()`: a closed thread, an unknown claim, an accept of the opening quote (the score's zero line), a walk
+without a cheaper alternative or a question with figures never reaches the supplier. No model, a late model or
+a broken answer gives `RuleStrategist`, which follows the same policy without an LLM.
 """
 
 import json
@@ -33,6 +34,8 @@ ATTACHMENT_CHARS = 1500
 MOVING_P_ROOM = 0.35  # p_room at or above this: another round likely gets >= 1 % more
 MOVING_STEP_PCT = 0.3  # without p_room: a last step this big (and not shrinking) means it still moves
 LAST_MESSAGES = 1  # with this many messages left, take any sheet that beats the alternative
+# One-on-one: no argument built on another supplier's quote or offer (tools.claims makes these for RFQs).
+RIVAL_KINDS = {"rival_quote", "rival_offer"}
 MAX_TRADES = 6  # the biggest savings first (tools.levers sorts them); enough to pick 1-2 levers from
 
 
@@ -70,9 +73,7 @@ def usable_claims(ctx: CaseContext, sid: str, used: set[str]) -> list[tuple[int,
     out = [
         (i, c)
         for i, c in enumerate(ctx.claims.get(sid, ()))
-        if c.favours_buyer
-        and not (set(c.refs) & used)
-        and not any(r.startswith("offer:") and r in used for r in c.refs)
+        if c.favours_buyer and c.kind not in RIVAL_KINDS and not (set(c.refs) & used)
     ]
     return sorted(out, key=lambda ic: -ic[1].strength)
 
@@ -93,7 +94,9 @@ def accept_ready(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
     if status == "agreed" or moves_left(ctx.case, events) <= 0:
         return True
     if our_messages(events) == 0:
-        return False  # never take the opening quote
+        return False  # the opening quote is the score's zero line: taking it scores 0
+    if at_floor(ctx, sid, events) and c < alt:
+        return True  # at its estimated cost it cannot go lower: more rounds only risk the walk and the squeeze
     if status == "final_offer":
         return c < alt
     if moves_left(ctx.case, events) <= LAST_MESSAGES:
@@ -101,6 +104,13 @@ def accept_ready(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
     # At the target is not enough: the practice sweep closed P01 after one round at 0.65 while the supplier was
     # still offering alternatives. Accept at the target only once its price path says it has stopped moving.
     return band is not None and c <= band.c_target and not still_moving(ctx, sid)
+
+
+def at_floor(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
+    """Its standing price is at or below the band's floor (its estimated full cost): the best it will ever give."""
+    band = ctx.bands.get(sid)
+    price = standing(events)[1].get("unit_price")
+    return band is not None and band.floor is not None and isinstance(price, int | float) and price <= band.floor
 
 
 def still_moving(ctx: CaseContext, sid: str) -> bool:
@@ -117,7 +127,7 @@ def still_moving(ctx: CaseContext, sid: str) -> bool:
 
 
 def walk_allowed(ctx: CaseContext, threads: dict[str, list[dict]]) -> bool:
-    """Only when the alternative is cheaper than everything on the table and nobody is moving any more."""
+    """Only when our alternative is cheaper than the supplier's standing offer and it is not moving any more."""
     if ctx.c_alternative is None:
         return False
     cheaper = all(standing_c(ctx, ev) > ctx.c_alternative for ev in threads.values())
@@ -129,12 +139,12 @@ def walk_allowed(ctx: CaseContext, threads: dict[str, list[dict]]) -> bool:
 
 
 class RuleStrategist:
-    """Talk to the supplier whose standing sheet costs least; trade price against what it values; accept by
+    """One-on-one: answer the supplier of this thread; trade price against what it values; accept by
     `accept_ready`. The orchestrator's guard still refuses accepts that break a must-have or lose to the
     alternative."""
 
     def choose(self, ctx: CaseContext, threads: dict[str, list[dict]], reads: dict[str, BehaviourRead]) -> Tactic:
-        sid = min(threads, key=lambda s: standing_c(ctx, threads[s]))
+        sid = next(iter(threads))  # the orchestrator passes the one thread being answered
         events = threads[sid]
         if accept_ready(ctx, sid, events):
             status, left = latest(events).get("status"), moves_left(ctx.case, events)
@@ -327,4 +337,4 @@ class LLMStrategist:
         return tactic
 
 
-__all__ = ["LLMStrategist", "RuleStrategist", "accept_ready", "safe", "wants_from"]
+__all__ = ["LLMStrategist", "RuleStrategist", "accept_ready", "at_floor", "safe", "wants_from"]

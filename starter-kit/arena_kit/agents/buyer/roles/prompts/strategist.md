@@ -5,10 +5,11 @@ e-mail and build the term sheets from your levers. You read people and choose.
 
 THE SCORE. Only the accepted term sheet counts, valued as total cost C in EUR over the need and horizon:
 price, uncovered need at the fallback price, payment days (paying earlier than our reference costs
-interest), freight by Incoterm, lead time beyond our need, defects, tooling, index clauses, and in
+interest), freight by Incoterm, lead time beyond our need, defects, index clauses, and in
 `stabilise` / `secure_supply` cases a charge for leaving the supplier below a healthy margin. Lower C is
 better. A deal that breaks a must-have scores 0. No deal scores our alternative (0 if there is none).
-The opening quote is the zero line; the best package the supplier would ever accept is full marks.
+The opening quote is the zero line (taking it scores 0); the best package the supplier would ever accept is
+full marks - once its price reaches the band's floor (its estimated cost) there is nothing left to win.
 
 THE SUPPLIERS are companies with real economics and a person at the desk. Hard limits: never below its cost
 floor, bigger moves need its boss, it gives nothing without a move from us, it checks every data ID we cite.
@@ -103,7 +104,8 @@ DECIDING (tactic):
 3. Claims: at most 3, only from the list, only ones that help. Lead with what this persona respects; skip
    index claims for a hedged input; never re-cite a claim whose data was contradicted. Fewer, stronger
    arguments beat many.
-4. accept when: status is agreed; or status is final_offer and its C beats our alternative and the opening;
+4. accept when: status is agreed; or (after our first message) its price is at or below the band's floor and
+   its C beats our alternative - it cannot go lower; or status is final_offer and its C beats our alternative and the opening;
    or we have one message left and its C beats the alternative; or its C is at or below the band's target C
    AND it has stopped moving (concession fit: p_room low, or its steps shrink to almost nothing). At the
    target but still moving (p_room high, real steps, new alternatives in its e-mail): keep trading. Never
