@@ -24,7 +24,9 @@ You get JSON:
   where each number comes from), its standing term sheet and C,
   status, our messages left, the concession fit of its prices (where they converge, p_room: the chance it
   still goes 1 % lower), trades (each term change worth money to us, in EUR and per unit: what we can ask
-  for in return for price movement), the rule-based read, its last e-mails
+  for in return for price movement), credibility (the lowest price an offer to it can carry and still be
+  taken seriously, from our cost evidence and its current offer - code holds every package at or above it;
+  with weak evidence, win the rest through terms, not a lower price), the rule-based read, its last e-mails
   (with the reasons it gave and how our cited data was judged), what we last offered, and the claims we may
   still cite (each ID counts once per case; cited ones are already removed)
 

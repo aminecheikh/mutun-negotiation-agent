@@ -182,6 +182,7 @@ def _thread_view(ctx: CaseContext, sid: str, events: list[dict], read: Behaviour
         "rule_read": asdict(read),
         "concession": asdict(fit) if (fit := ctx.fits.get(sid)) else None,
         "trades": [asdict(t) for t in ctx.trades.get(sid, ())[:MAX_TRADES]],
+        "credibility": _credibility_view(ctx.credibility.get(sid)),
         "supplier_emails": [
             {
                 "status": m.get("status"),
@@ -203,6 +204,11 @@ def _thread_view(ctx: CaseContext, sid: str, events: list[dict], read: Behaviour
             for i, c in usable_claims(ctx, sid, used)
         ],
     }
+
+
+def _credibility_view(cred) -> dict | None:
+    return None if cred is None else {"lowest_price": cred.lowest_price, "evidence_pct": cred.evidence_pct,
+                                      "reason": cred.reason}  # fmt: skip
 
 
 def _case_view(ctx: CaseContext) -> dict:

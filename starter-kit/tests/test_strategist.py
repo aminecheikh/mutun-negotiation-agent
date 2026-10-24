@@ -284,3 +284,12 @@ def test_strategist_prompt_never_brings_in_another_supplier():
     text = prompt("strategist").lower()
     assert "rival" not in text and "rfq" not in text and "every open supplier" not in text
     assert "never mention" in text and "another supplier" in text
+
+
+def test_choose_when_credibility_known_shows_the_lowest_credible_price_and_why():
+    from arena_kit.agents.buyer.contracts import Credibility
+
+    ctx, threads = setup([supplier()])
+    cred = Credibility(SID, 16.01, None, "no cost evidence: at most 8 % under its current offer")
+    view = seen_thread(replace(ctx, credibility={SID: cred}), threads)
+    assert view["credibility"] == {"lowest_price": 16.01, "evidence_pct": None, "reason": cred.reason}
