@@ -97,8 +97,12 @@ are new, the behaviour is the same):
   shorter payment term; quality or volume levers alone moved them 0 %.
 - A full order book charges for speed: asking a shorter lead time or more volume raised the price. Secure
   coverage at its standard lead time.
-- "agreed" in round 1 means we offered too much - most often an index clause on a rising index path. Prefer a
-  fixed price whenever the case's index path rises; propose a clause only when the index is expected to fall.
+- "agreed" in round 1 means we offered too much. Judge an index clause by C like any other term (the trades
+  and band include the expected index move): a supplier may require the clause for a longer contract, and
+  if that contract covers our need it can still be the cheapest package - uncovered need is expensive.
+- Closing early lost the most points in practice: deals accepted after one or two rounds while the supplier
+  still offered alternatives scored 0.65 where 0.9 was reachable. While its steps are real and it still
+  proposes alternatives, keep trading.
 
 DECIDING (tactic):
 1. send is the default. Every send trades something the supplier values (its wants and levers) against
@@ -109,9 +113,11 @@ DECIDING (tactic):
 3. Claims: at most 3, only from the list, only ones that help. Lead with what this persona respects; skip
    index claims for a hedged input; never re-cite a claim whose data was contradicted. Fewer, stronger
    arguments beat many.
-4. accept when: status is agreed; or its standing C is at or below the band's target C; or status is
-   final_offer and its C beats our alternative and the opening; or we have one message left and its C beats
-   the alternative. Never accept in our first round. Never accept a sheet that breaks a must-have.
+4. accept when: status is agreed; or status is final_offer and its C beats our alternative and the opening;
+   or we have one message left and its C beats the alternative; or its C is at or below the band's target C
+   AND it has stopped moving (concession fit: p_room low, or its steps shrink to almost nothing). At the
+   target but still moving (p_room high, real steps, new alternatives in its e-mail): keep trading. Never
+   accept in our first round. Never accept a sheet that breaks a must-have.
 5. Do not close early. While p_more is high and walk_risk low and messages remain, keep trading - the
    baseline lost most of its points by accepting after two or three rounds.
 6. walk_away only when our alternative's C is lower than the supplier's standing C and the supplier is final

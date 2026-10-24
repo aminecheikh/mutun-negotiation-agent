@@ -4,7 +4,7 @@ Branch `feat/roles-saeb` · owns `starter-kit/arena_kit/agents/buyer/roles/` (co
 
 ## Now
 
-- Roles wired and merged into main (18:01); sandbox D01 0.80, D02 0.40. Next: 22:00 sweep, then refresh S5 and fill the deck.
+- (19:28) Diagnosed the ~50 sweep: early accepts, empty sheets + walk (P02), my index-clause ban (P18). Fixed my part on `feat/roles-saeb` (not merged - Amine merges).
 
 ## Tasks
 
@@ -20,6 +20,7 @@ Branch `feat/roles-saeb` · owns `starter-kit/arena_kit/agents/buyer/roles/` (co
 
 ## Asks to others
 
+- @jeddou @amine **(19:28) why the new sweep averaged ~50 (baseline 54.4)** - from the harvested replays of the second session per case: (1) **early forced accepts**: P01 accepted after 1 round at 0.65 (best 0.91) while the supplier still offered 'Alternatively, with payment in ... days: EUR ...'; P03/P10 after 2, P04/P07 after 3. `policy.verdict` forces accept on `at_target` - please only once the supplier stops moving (`ctx.fits[sid].p_room` low or shrinking steps), as `roles.strategist.accept_ready` now does. (2) **P02 = 0**: three messages with NO term sheet (`sheet_acceptable` filtered every sheet - the squeeze charge makes them all >= C_open), the supplier asked 3x 'please provide a concrete proposal', then `stuck` -> walk. Never send a counter without a sheet; `stuck` must not count rounds where we sent none. (3) **P18 = 0.01**: opening at 4.60 vs its 6.10 (-25 %, not credible) - it never moved and went final in r2 (@amine: anchor). The index-clause ban was mine and is removed (it blocked the 24-month package that covers the need).
 - @jeddou (18:01) - with Saeb's OK I wired the roles in `buyer_factory` (`agent.py`, 3 lines): one shared `LLMProfiler(complete)`, `LLMStrategist(complete)`, `LLMWriter(complete)`; `PassthroughProfiler`/`RuleStrategist` stay as fallbacks inside them. Nothing else in your files changed - take it over as yours. The strategist writes refined `BehaviourRead`s back into the `reads` dict `_round` passes to `_act`; keep passing that dict. In an RFQ with new suppliers, refining dossiers in parallel threads in `_context` would keep round 1 short.
 - @jeddou - `scripts/harvest.py` writes `runs/sessions/*.json` with the platform encoding (cp1252 on Windows); `encoding="utf-8"` on `write_text`/`read_text` would fix it. `tests/test_writer.py` reads both meanwhile.
 - @jeddou - Saed's branch is `feat/roles-saeb` (the hook matches the `feat/roles` prefix, so nothing breaks); the table in `docs/team/README.md` still says `feat/roles`.
@@ -38,6 +39,7 @@ Branch `feat/roles-saeb` · owns `starter-kit/arena_kit/agents/buyer/roles/` (co
 - 18:00 - S7 draft: `docs/team/saed-pitch.html` (open in a browser; arrows, N = speaker notes, F = fullscreen), 7 slides / 5 min: title, what moves a supplier (S5 numbers), reading the supplier (profiler traits), architecture (6 steps, timings, fallbacks), trust (claims + writer checks, 0 unsafe), one negotiation (practice replay - swap for our best final replay), results + next. Numbers are from our bench and mining; [placeholders] for sweep and final scores.
 - 18:01 - merged main (Amine's thread-safe tools, visible steps, strategist levers): bench WITHOUT lock now 0 errors / 43 rounds (was 6/40) - race fixed. Wired the roles into `buyer_factory` (Saeb's OK, Jeddou told). Writer: "we have moved" check no longer flags "you have moved". Sandbox, full agent: **D01 0.803** (best so far; placeholders 0.11, kit 0.73), **D02 0.398** (before 0.21-0.23) - 384 passed
 - 18:54 - team decision: final focus is one-on-one deals (take it or leave it, no comparison between bidders). Strategist prompt is now one-on-one only (RFQ rule, rival-offer and multi-thread wording removed); accept/walk compare the supplier's offer with our alternative only. Bench unchanged in behaviour.
+- 19:28 - merged main (orchestrator J1-J4, language, trades): 456 passed, bench 52/52 strategist, 0 unsafe. Diagnosed the new sweep (~50 vs 54.4): early forced accepts at the band target (P01 1 round 0.65, P03/P10 2 rounds), P02 empty sheets then walk, P18 non-credible anchor + my index-clause ban. Fixes in roles: removed the ban (C decides; test flipped), `accept_ready`/`safe` accept at target only when the supplier stopped moving (`still_moving`: p_room >= 0.35 or real non-shrinking steps), prompt rule 4 + 'closing early lost the most points'. 458 passed; sandbox D01 **0.863** (best so far, 4 rounds).
 
 ## Runs
 
@@ -45,3 +47,4 @@ Branch `feat/roles-saeb` · owns `starter-kit/arena_kit/agents/buyer/roles/` (co
 |---|---|---|---|---|---|
 | 16:59 | uncommitted S2 | D01 (sandbox) | 0 | 0.11 | rule path (no key); plumbing ok, 0.0 s per decision; low score from the offers placeholder (no levers, no steps) - ask to Amine |
 | 18:01 | wired roles + tools fixes | D01, D02 (sandbox) | 0 | 60.0 | D01 0.80, D02 0.40; replays via `scripts/harvest.py --set sandbox` |
+| 19:28 | accept gate + no index ban | D01 (sandbox) | 0 | 86.3 | best D01 so far; was 80.3 / 82.3 |
