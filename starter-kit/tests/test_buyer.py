@@ -106,7 +106,22 @@ def test_buyer_factory_when_model_set_bounds_the_client_by_the_role_budget(monke
     monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
     monkeypatch.setenv("LLM_PROVIDER", "anthropic")
     monkeypatch.setenv("LLM_MODEL", "claude-test")
+    monkeypatch.setenv("BUYER_LLM_TOOLS", "0")
     buyer_factory()
     cfg = OrchestratorConfig.from_env()
     assert FakeAnthropic.built["max_retries"] == 0
     assert FakeAnthropic.built["timeout"] <= max(cfg.strategist_timeout_s, cfg.writer_timeout_s)
+
+
+def test_buyer_factory_with_tool_calling_bounds_the_tool_client_by_its_budget(monkeypatch):
+    import anthropic
+
+    from arena_kit.agents.buyer.config import OrchestratorConfig
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("LLM_MODEL", "claude-test")
+    monkeypatch.delenv("BUYER_LLM_TOOLS", raising=False)
+    buyer_factory()
+    cfg = OrchestratorConfig.from_env()
+    assert FakeAnthropic.built == {"timeout": cfg.strategist_tools_timeout_s, "max_retries": 0}

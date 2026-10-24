@@ -7,6 +7,10 @@ into the `reads` dict the orchestrator passes in, so `tools.plan_offers` uses th
 `safe()`: a closed thread, an unknown claim, a first-round accept, a walk without a cheaper alternative or a
 question with figures never reaches the supplier. No model, a late model or a broken answer gives
 `RuleStrategist`, which follows the same policy without an LLM.
+
+With tool calling on (`converse`, Anthropic only, BUYER_LLM_TOOLS=1 by default) the model may first call the
+read-only tools in `toolbox.py` - price a package, preview the offer engine, read the whole thread, look up a
+data row - for one turn, then answers with the same JSON. One deadline (TOOLS_TIMEOUT_S) covers both calls.
 """
 
 import json
@@ -20,10 +24,12 @@ from ....play import latest, moves_left, standing
 from ...llm import ID_RE
 from ..contracts import BehaviourRead, CaseContext, Claim, Tactic
 from .analyst import wants_from
-from .llm import call_json, prompt
+from .llm import call_json, call_json_with_tools, prompt
+from .toolbox import StrategistToolbox
 
 log = logging.getLogger("arena")
 TIMEOUT_S = 15.0  # the writer takes up to 15 s after this; the move limit is 60 s
+TOOLS_TIMEOUT_S = 22.0  # with tool calling: one tool turn is a second model call (config.strategist_timeout_s)
 TERMS = {
     "unit_price", "payment_days", "volume_per_year", "contract_months", "effective_date", "lead_time_days",
     "incoterm", "index_clause", "tooling_eur", "ppm_commitment", "chargeback_eur_per_complaint",
@@ -285,15 +291,34 @@ def safe(ctx: CaseContext, threads: dict[str, list[dict]], raw: dict, rule: Tact
 
 
 class LLMStrategist:
-    def __init__(self, complete=None, fallback: RuleStrategist | None = None, timeout_s: float = TIMEOUT_S):
-        self.complete, self.timeout_s = complete, timeout_s
+    def __init__(
+        self,
+        complete=None,
+        fallback: RuleStrategist | None = None,
+        timeout_s: float | None = None,
+        converse=None,
+        tools=None,
+    ):
+        """`converse` (roles.llm.converse_from_env) turns on tool calling; `tools` is the orchestrator's DataTools,
+        whose offer engine, supplier estimate and data package the toolbox uses. Without `converse`: one call."""
+        self.complete, self.converse, self.tools = complete, converse, tools
+        self.timeout_s = timeout_s or (TOOLS_TIMEOUT_S if converse is not None else TIMEOUT_S)
         self.fallback = fallback or RuleStrategist()
         # S2+S3 in one call: the analyst's reading guide (prompts/analyst.md) sits inside the strategist prompt
         self.system = prompt("strategist").replace("{analyst}", prompt("analyst").strip())
+        if converse is not None:
+            self.system += "\n\n" + prompt("strategist_tools").strip()
+
+    def _toolbox(self, ctx: CaseContext, threads: dict[str, list[dict]], reads) -> StrategistToolbox:
+        t = self.tools
+        return StrategistToolbox(
+            ctx, threads, reads, plan_offers=getattr(t, "plan_offers", None),
+            supplier_of=getattr(t, "supplier_from_thread", None), package=getattr(t, "package", None),
+        )  # fmt: skip
 
     def choose(self, ctx: CaseContext, threads: dict[str, list[dict]], reads: dict[str, BehaviourRead]) -> Tactic:
         rule = self.fallback.choose(ctx, threads, reads)
-        if self.complete is None:
+        if self.complete is None and self.converse is None:
             return rule
         used = cited_refs(threads)
         user = json.dumps(
@@ -307,7 +332,14 @@ class LLMStrategist:
             ensure_ascii=False,
             default=str,
         )
-        reply = call_json(self.complete, self.system, user, self.timeout_s)
+        toolbox = None
+        if self.converse is not None:
+            toolbox = self._toolbox(ctx, threads, reads)
+            reply = call_json_with_tools(self.converse, self.system, user, toolbox, self.timeout_s)
+        else:
+            reply = call_json(self.complete, self.system, user, self.timeout_s)
+        if toolbox is not None and toolbox.calls:
+            log.info("strategist called tools: %s", ", ".join(toolbox.calls))
         if not isinstance(reply, dict) or not isinstance(reply.get("tactic"), dict):
             return rule
         try:
