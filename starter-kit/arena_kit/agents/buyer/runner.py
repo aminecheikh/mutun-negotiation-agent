@@ -21,7 +21,7 @@ from ...client import ArenaError
 from ...play import fetch_documents, quota_used_up
 from . import guard, observe, policy
 from .arbiter import Arbiter
-from .pipeline import keepalive_email
+from .pipeline import keepalive_message
 from .state import CaseSession, ThreadState
 
 log = logging.getLogger("arena")
@@ -98,7 +98,7 @@ class ThreadWorker:
                 self.park(th, policy.Verdict("park", "no sendable counter and no messages left"))
                 return
             message = self._keepalive_message(th, out.tactic.question)
-            checked = guard.Checked(message, ("no acceptable sheet: question only",))
+            checked = guard.Checked(message, ("no new sheet: our last offer again, or a question",))
         self.send(th, checked.message, "counter", verdict=v, out=out, problems=checked.problems)
 
     def park(self, th: ThreadState, v: policy.Verdict) -> None:
@@ -130,8 +130,7 @@ class ThreadWorker:
         return th in ranked[:2]
 
     def _keepalive_message(self, th: ThreadState, question: str | None = None) -> dict:
-        email = keepalive_email(self.s, th, question)
-        return {"subject": email.subject, "body": email.body, "term_sheets": [], "refs": []}
+        return keepalive_message(self.s, th, question)
 
     # ---- the wire ----------------------------------------------------------------------------------
 

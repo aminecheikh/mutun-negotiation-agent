@@ -67,6 +67,14 @@ KEEPALIVE = {
     "Hollerau Pumpenwerke, Einkauf",
 }
 
+# The same answer when our last offer still stands: it travels with the e-mail, so the supplier always has a package.
+KEEPALIVE_OFFER = {
+    "en": "Dear Sir or Madam,\n\nthank you for your message. Our proposal attached still stands. {question}\n\n"
+    "Kind regards\nHollerau Pumpenwerke, Purchasing",
+    "de": "Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihre Nachricht. Unser beigefügter Vorschlag gilt "
+    "weiterhin. {question}\n\nMit freundlichen Grüßen\nHollerau Pumpenwerke, Einkauf",
+}
+
 
 @dataclass(frozen=True)
 class RoleOutput:
@@ -80,7 +88,7 @@ class RoleOutput:
     sheet_problems: tuple[str, ...] = ()
 
 
-def keepalive_email(session: CaseSession, th: ThreadState, question: str | None = None) -> Email:
+def keepalive_email(session: CaseSession, th: ThreadState, question: str | None = None, with_offer=False) -> Email:
     """A short answer without a term sheet: keeps a parked thread inside its 60 s without conceding anything.
     The strategist's question when it is plain (no figures: a keep-alive skips the writer's number checks) and in
     the supplier's language, else the case type's, else another one: never a body this thread already got."""
@@ -88,12 +96,25 @@ def keepalive_email(session: CaseSession, th: ThreadState, question: str | None 
     questions = QUESTIONS[language]
     own = [question.strip()] if question and language == "en" and not re.search(r"\d", question) else []
     first = questions.get(str(session.case.get("type")), questions["default"])
-    bodies = [KEEPALIVE[language].format(question=q) for q in dict.fromkeys([*own, first, *questions.values()])]
+    template = (KEEPALIVE_OFFER if with_offer else KEEPALIVE)[language]
+    bodies = [template.format(question=q) for q in dict.fromkeys([*own, first, *questions.values()])]
     sent = {str(m.get("body") or "") for m in th.events if m.get("from") == "buyer"}
     body = next((b for b in bodies if b not in sent), bodies[0])
     subject = str(latest(th.events).get("subject") or "").strip() or session.case.get("title", "")
     subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
     return Email(subject=subject[:300], body=body)
+
+
+def keepalive_message(session: CaseSession, th: ThreadState, question: str | None = None) -> dict:
+    """A keep-alive that still carries an offer: our last sheets again, where the guard still lets them go out
+    and the supplier has not given its last word (pushing after a final offer makes it walk). A message without a
+    package gets "without movement from your side" (practice replays)."""
+    sheets: list[dict] = []
+    ours = [m for m in th.events if m.get("from") == "buyer" and m.get("term_sheets")]
+    if th.status == "open" and ours:
+        sheets, _ = guard.check_sheets(session, th, [ts.get("terms", ts) for ts in ours[-1]["term_sheets"]])
+    email = keepalive_email(session, th, question, with_offer=bool(sheets))
+    return {"subject": email.subject, "body": email.body, "term_sheets": [{"terms": t} for t in sheets], "refs": []}
 
 
 class RolePipeline:

@@ -13,7 +13,7 @@ from arena_kit.agents.buyer.agent import BuyerAgent
 from arena_kit.agents.buyer.arbiter import Arbiter
 from arena_kit.agents.buyer.config import OrchestratorConfig
 from arena_kit.agents.buyer.contracts import ConcessionFit, Email, Tactic
-from arena_kit.agents.buyer.pipeline import keepalive_email
+from arena_kit.agents.buyer.pipeline import keepalive_email, keepalive_message
 from arena_kit.agents.buyer.telemetry import Telemetry
 from arena_kit.agents.buyer.tools import DataTools
 from arena_kit.client import ArenaError
@@ -518,3 +518,26 @@ def test_verdict_when_at_target_in_the_first_half_keeps_negotiating():
 def test_verdict_when_at_target_and_its_prices_show_no_room_accepts():
     s, th = at_target_thread(ConcessionFit(SID, (10.0, 9.0), 8.9, -10.0, True, 0.05))
     assert policy.verdict(s, th).kind == "accept"
+
+
+# ---- every message carries an offer ----------------------------------------------------------------------------
+
+
+def test_keepalive_message_when_our_last_offer_still_stands_sends_it_again():
+    # sweep 4c30c05: 7 of 28 messages carried no term sheet; a message without a package gets "without movement
+    # from your side" (practice replays) - a keep-alive repeats our last offer, which still stands
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    th.events += [ours(8.5), quote(SID, 1, 9.8)]
+    observe.rebuild(s, th)
+    message = keepalive_message(s, th)
+    assert [ts["terms"]["unit_price"] for ts in message["term_sheets"]] == [8.5]
+    assert "proposal" in message["body"].lower()
+
+
+def test_keepalive_message_after_a_final_offer_sends_no_sheet():
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    th.events += [ours(8.5), quote(SID, 1, 9.8, "final_offer")]
+    observe.rebuild(s, th)
+    assert keepalive_message(s, th)["term_sheets"] == []
