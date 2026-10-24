@@ -319,3 +319,36 @@ def test_check_when_email_brings_in_another_supplier_reports_it(line):
     # organisers: no inter-supplier comparison
     problems = run_check(body(CLAIM.sentence, line))
     assert any("without a claim" in p for p in problems), problems
+
+
+def test_without_cost_asks_drops_only_the_question_and_keeps_claims_verbatim():
+    from arena_kit.agents.buyer.roles.writer import without_cost_asks
+
+    text = body(
+        "thank you for your offer. Could you explain your cost structure for this part?",
+        CLAIM.sentence,
+        "Could you share a breakdown of your costs?",
+        "Our counter-proposal is attached.",
+    )
+    out = without_cost_asks(text)
+    assert "cost structure" not in out and "breakdown" not in out
+    assert CLAIM.sentence in out and "thank you for your offer." in out and "counter-proposal" in out
+    assert run_check(out) == []
+
+
+def test_writer_when_model_asks_for_costs_keeps_its_email_without_that_sentence():
+    text = body(
+        "thank you for your offer and the long cooperation.", CLAIM.sentence, "Could you explain your costs to us?"
+    )
+
+    def complete(system, user):
+        return json.dumps({"subject": "Re: casings", "body": text})
+
+    writer = LLMWriter(complete)
+    email = writer.write(ctx("partner"), TACTIC, PLAN, thread([120.0]))
+    assert writer.last_used_model and "explain your costs" not in email.body and CLAIM.sentence in email.body
+
+
+def test_check_when_email_acknowledges_its_costs_does_not_flag_it():
+    problems = run_check(body("thank you. We understand your costs have risen.", CLAIM.sentence, "Kind regards"))
+    assert not any("asks for its costs" in p for p in problems)

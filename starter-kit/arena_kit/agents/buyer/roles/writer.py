@@ -201,10 +201,23 @@ def _numbers(text: str) -> set[str]:
 # Asking for its cost breakdown or calculation (Saeb: never - every e-mail is a logical counter-offer instead).
 ASKS_COSTS = re.compile(
     r"(?:send|share|provide|show|walk us through|explain)[^.?!\n]{0,40}"
-    r"(?:cost ?breakdown|break ?down|calculation|cost structure)|"
-    r"(?:kostenaufschl.sselung|kalkulation)[^.?!\n]{0,40}\?",
+    r"(?:cost ?breakdown|break ?down|calculation|cost structure|cost drivers|cost elements|(?:your|its) costs?\b)|"
+    r"(?:kostenaufschl.sselung|kalkulation|kostenstruktur)[^.?!\n]{0,40}\?",
     re.I,
 )
+SENTENCE_END = re.compile(r"(?<=[.?!])\s+")
+
+
+def without_cost_asks(body: str) -> str:
+    """The e-mail without the sentences that ask for its costs; every other line (claim sentences included)
+    stays exactly as written."""
+    lines = []
+    for line in body.split("\n"):
+        kept = [s for s in SENTENCE_END.split(line) if not ASKS_COSTS.search(s)]
+        if line.strip() and not kept:
+            continue  # the whole line was the question
+        lines.append(" ".join(kept))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
 def check(body: str, sentences: list[str], allowed_refs: set[str], supplier_text: str, title: str) -> list[str]:
@@ -353,6 +366,11 @@ class LLMWriter:
         years = " ".join(YEAR_RE.findall(" ".join(dossier.evidence))) if dossier else ""
         allowed_text = f"{supplier_text}\n{tactic.question or ''}\n{years}"
         problems = check(body, sentences, set(refs), allowed_text, ctx.case["title"])
+        if problems and all(p.startswith("asks for its costs") for p in problems):
+            # only a stray question about its costs: drop that sentence, keep the model's e-mail (practice: the
+            # whole e-mail was thrown away for it in P02/P03)
+            body = without_cost_asks(body)
+            problems = check(body, sentences, set(refs), allowed_text, ctx.case["title"])
         if not moved["we_moved"] and (claim := MOVED_RE.search(body)):
             problems.append(f"claims a move we did not make: {claim.group(0)!r}")
         if problems:
