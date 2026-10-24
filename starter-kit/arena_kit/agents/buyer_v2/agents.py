@@ -119,6 +119,9 @@ SPECS = {
                    preload=("price_band", "cost_drivers", "should_cost", "verified_arguments")),
 }  # fmt: skip
 NEGOTIATOR_TOOLS = ("price_package", "propose_counter", "supplier_offers")
+# the offer engine's own paced counter goes into the negotiator's input: it is credibility-aware and
+# C-aware (in squeeze cases it holds above the C minimum), so it is the anchor unless there is a reason
+NEGOTIATOR_PRELOAD = ("propose_counter",)
 
 
 # ---- the texts every agent reads ---------------------------------------------------------------------------
@@ -284,10 +287,11 @@ def pace_guidance(state: F.CaseState, f: F.ThreadFacts) -> str:
                 f" {cred.reason}."
             )
         lines.append(
-            "- In our replays, first counters 4-8 % under the quote closed best; counters more than about 15 %"
-            " under were answered with a final offer almost every time, which ends the room to trade."
-            " Go that deep only with firm cost evidence (a should-cost, its own breakdown) and a supplier"
-            " that is not walk-prone. Anchor on fair price and target, precise figures, 2-3 packages."
+            "- ANCHOR AT THE LOWEST CREDIBLE PRICE above. It is computed per supplier from our cost evidence:"
+            " deep when a firm should-cost or its own breakdown backs it, shallow when the evidence is thin -"
+            " exactly as deep as we can justify. Anchoring above it leaves money on the table (the midpoint of"
+            " the two openings decides most deals); going below it reads as a lowball and draws a final offer."
+            " Precise figures, 2-3 packages on different terms."
         )
         return "\n".join(lines)
     limit = guard.step_limit(state, f)
@@ -359,12 +363,12 @@ def negotiation_log(state: F.CaseState, f: F.ThreadFacts) -> str:
 def precomputed(role: str, tools, f: F.ThreadFacts) -> str:
     """The tool results a specialist would ask for first, run by code before it starts (milliseconds, no model
     turn): the deal agent timed out in 18 of 42 live calls while fetching these one by one."""
-    spec = SPECS.get(role)
-    if spec is None or not spec.preload:
+    preload = NEGOTIATOR_PRELOAD if role == "negotiator" else getattr(SPECS.get(role), "preload", ())
+    if not preload:
         return ""
     sid, part = f.supplier_id, None
     blocks = []
-    for name in spec.preload:
+    for name in preload:
         tool = tools.tools.get(name)
         if tool is None:
             continue
@@ -410,10 +414,11 @@ def analyst_input(role: str, state: F.CaseState, f: F.ThreadFacts, events: list[
     return "\n\n".join(x for x in [brief, now, memory, pre, extra + thread, task] if x)
 
 
-def negotiator_input(state: F.CaseState, f: F.ThreadFacts, events: list[dict], reports: dict) -> str:
+def negotiator_input(state: F.CaseState, f: F.ThreadFacts, events: list[dict], reports: dict, pre: str = "") -> str:
     parts = [
         case_brief(state, f.supplier_id),
         decision_frame(state, f),
+        *([pre] if pre else []),
         negotiation_log(state, f),
         "THE WHOLE E-MAIL THREAD AS WRITTEN (oldest first):",
         emails.transcript(events),

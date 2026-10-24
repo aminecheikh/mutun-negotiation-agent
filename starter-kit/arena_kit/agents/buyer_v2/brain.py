@@ -194,7 +194,9 @@ class Brain:
         # through the pool like the specialists: even a transport that ignores its timeout cannot hold the move
         answer = self.llm.run_many([AgentCall(
             role="negotiator", system=A.system_prompt("negotiator"),
-            user=A.negotiator_input(state, f, events, reports), deadline=received_at + cfg.decide_by_s,
+            user=A.negotiator_input(state, f, events, reports,
+                                    A.precomputed("negotiator", toolset(list(A.NEGOTIATOR_TOOLS), ctx), f)),
+            deadline=received_at + cfg.decide_by_s,
             schema=A.SCHEMAS["negotiator"], tools=toolset(list(A.NEGOTIATOR_TOOLS), ctx),
             tool_turns=cfg.negotiator_tool_turns, context=context,
         )])["negotiator"]  # fmt: skip

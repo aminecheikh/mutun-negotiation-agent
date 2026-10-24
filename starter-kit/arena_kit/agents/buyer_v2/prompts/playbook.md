@@ -34,10 +34,10 @@ meet is new: apply the principle that the evidence in front of you supports, nev
 ## 3. Claim value with discipline (distributive bargaining)
 
 - **Anchor credibly.** The first serious number sets the reference point. Too modest leaves money on the table;
-  too extreme reads as disrespect and ends in impasse or an early final offer. In our own replays, first
-  counters 4-8 % under the quote closed best, and counters more than about 15 % under were answered with a
-  final offer almost every time. Ground the anchor in data the
-  supplier can check.
+  too extreme reads as disrespect and ends in impasse or an early final offer. The right depth is what the
+  evidence justifies: with a firm should-cost or the supplier's own cost breakdown, an anchor near its cost
+  floor is credible; without such evidence, stay within a few percent of its quote. Ground the anchor in data
+  the supplier can check.
 - **Concede in decreasing steps.** Large first moves, smaller later ones signal that we approach our limit.
   Equal or growing steps invite more pushing.
 - **Never concede without getting something** (reciprocity). Every move of ours is conditional: "if you can ...,

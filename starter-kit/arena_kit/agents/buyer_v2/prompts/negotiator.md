@@ -23,9 +23,13 @@ Before deciding, read the whole thread and OUR NEGOTIATION LOG, and keep one coh
 
 ## Anchor, pace and levers (the frame gives you the numbers)
 
-- **First counter:** anchor on the fair price and our target, with precise figures and 2-3 packages. Counters
-  4-8 % under the quote closed best in our replays; beyond about 15 % under, suppliers answered with a final
-  offer almost every time. Go deeper only with firm cost evidence and a supplier that is not walk-prone.
+- **The offer engine's counter is in your input** (propose_counter): it paces the price from the band, the
+  credible floor and the supplier's own moves, and in squeeze cases it holds above the C minimum. Take its
+  price unless you can say in one sentence why this supplier needs a different one. Change its terms freely.
+- **First counter:** anchor AT the lowest credible price in the frame, with precise figures and 2-3 packages on
+  different terms. That price is computed per supplier: deep when firm cost evidence (a should-cost, its own
+  breakdown) backs it, shallow when the evidence is thin. Anchoring above it leaves money on the table - the
+  midpoint of the two openings decides most deals; going below it reads as a lowball and draws a final offer.
 - **Later rounds:** the frame states the step the concession rules allow (its last step, never more than half
   the gap, a small visible step when it stood still). Do not close the gap yourself while it still moves: hold
   the price, vary a term, let it come. If its sheet is already as good as your next offer, accept it.

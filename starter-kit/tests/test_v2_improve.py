@@ -115,10 +115,20 @@ def test_specialists_get_their_numbers_precomputed_and_one_tool_turn():
     assert "LEVERS WORTH THE MOST TO US" in deal and "[propose_counter(" in deal
 
 
+def test_the_negotiator_sees_the_offer_engines_own_counter():
+    events = [quote(SID, 0, 17.4)]
+    st = state_for(S01, {SID: events})
+    f = F.thread_facts(st, SID, events)
+    ctx = ToolContext(st, {SID: events}, None, focus=SID)
+    pre = A.precomputed("negotiator", toolset(list(A.NEGOTIATOR_TOOLS), ctx), f)
+    text = A.negotiator_input(st, f, events, {}, pre)
+    assert "[propose_counter(" in text and "LOWEST CREDIBLE PRICE" in text
+
+
 def test_the_frame_gives_anchor_guidance_in_round_one_and_the_allowed_step_later():
     st = state_for(S01, {SID: [quote(SID, 0, 17.4)]})
     first = A.decision_frame(st, F.thread_facts(st, SID, [quote(SID, 0, 17.4)]))
-    assert "YOUR FIRST COUNTER" in first and "4-8 %" in first and "LEVERS WORTH THE MOST" in first
+    assert "YOUR FIRST COUNTER" in first and "LOWEST CREDIBLE PRICE" in first and "LEVERS WORTH THE MOST" in first
     st, f = two_rounds()
     later = A.decision_frame(st, f)
     assert "THIS ROUND'S STEP" in later and "may cost us at most" in later and "never did" in later
