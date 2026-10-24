@@ -62,7 +62,7 @@ def plan(
         return OfferPlan(
             supplier_id, (alternative,), (c_alt,), "its own alternative sheet is cheaper for us: sent back"
         )
-    price = next_price(case, band, events, lowest)
+    price = next_price(case, band, events, lowest, _cap(case, band, std, supplier))
     main = _main_sheet(case, band, theirs, price, std, supplier, _our_last_terms(events))
     main = _not_below_c_minimum(case, main, std, supplier, band, min(band.ceiling, theirs["unit_price"]))
     c_main = total_cost(case, main, std, supplier)
@@ -90,9 +90,10 @@ def anchor_price(band, events: list[dict]) -> float:
     return min(max(2 * band.target - theirs[0], lowest), band.target, band.ceiling, theirs[-1])
 
 
-def next_price(case: dict, band, events: list[dict], lowest: float = 0.0) -> float:
+def next_price(case: dict, band, events: list[dict], lowest: float = 0.0, cap: float | None = None) -> float:
+    """`cap`: the most our sheet's own terms allow (C at the band's C ceiling), else the band's price ceiling."""
     theirs, ours = supplier_prices(events), our_prices(events)
-    limit = min(band.ceiling, theirs[-1])
+    limit = min(cap if cap is not None else band.ceiling, theirs[-1])
     anchor = anchor_price(band, events)
     horizon = max(case.get("round_limit", 10) - 1, 1)
     share = min(len(ours) / horizon, 1.0) ** (1 / BOULWARE_BETA)
@@ -138,6 +139,17 @@ def _not_below_c_minimum(case: dict, sheet: dict, std: dict, supplier, band, lim
     if floor <= sheet["unit_price"]:
         return sheet
     return complete_offer(case, {**sheet, "unit_price": round(min(floor, limit), 2)})
+
+
+def _cap(case: dict, band, std: dict, supplier) -> float:
+    """The highest price our target package may carry: where its C reaches the band's C ceiling (our alternative
+    or its opening). band.ceiling is a bare price (e.g. the alternative's quote on other terms): P07 froze at it,
+    5.37 three rounds while the supplier came down, though 5.52 on our terms still cost us 51k less than the
+    alternative - the same sheet twice drew its final offer."""
+    if not band.target_terms or band.target_terms.get("unit_price") is None:
+        return band.ceiling
+    sheet = reprice(case, complete_offer(case, dict(band.target_terms)), band.c_ceiling, std, supplier)
+    return max(band.ceiling, sheet["unit_price"]) if sheet else band.ceiling
 
 
 def _closing(case: dict, events: list[dict]) -> bool:

@@ -354,3 +354,17 @@ def test_plan_when_above_target_our_steps_never_grow(tools, case):
     steps = [(b, a - b) for b, a in zip(ours, ours[1:], strict=False)]
     above = [step for before, step in steps if before >= band.target]
     assert all(later <= earlier + 0.011 for earlier, later in zip(above, above[1:], strict=False)), above
+
+
+def test_next_price_when_band_price_ceiling_reached_still_answers_a_step_within_the_c_cap(tools):
+    # sweep 92d9283 P07: band.ceiling (the alternative's bare price, 5.37) froze our price three rounds while the
+    # supplier came down 5.58 -> 5.52; on our own terms C was still far under the alternative - match its step
+    case_id, sid, opening = P01
+    case = CASES[case_id]
+    p = opening["unit_price"]
+    band = replace(tools.prepare(case, {sid: [supplier_msg(sid, opening, 0)]}).bands[sid], ceiling=round(p - 3.0, 2))
+    events = [supplier_msg(sid, opening, 0), buyer_msg({**opening, "unit_price": band.ceiling}),
+              supplier_msg(sid, {**opening, "unit_price": round(p - 1.0, 2)}, 1)]  # fmt: skip
+    frozen = offers.next_price(case, band, events)
+    moved = offers.next_price(case, band, events, cap=p)
+    assert frozen <= band.ceiling < moved <= round(p - 1.0, 2)
