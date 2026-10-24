@@ -30,7 +30,7 @@ def ctx(persona: str = "partner") -> CaseContext:
     return CaseContext(case, {SID: dossier}, {}, {SID: (CLAIM,)}, None)
 
 
-TACTIC = Tactic(SID, "send", ("payment_days", "effective_date"), (0,), "Could you send us a cost breakdown?")
+TACTIC = Tactic(SID, "send", ("payment_days", "effective_date"), (0,), "Which lead time can you confirm?")
 PLAN = OfferPlan(SID, ({"unit_price": 129.9, "payment_days": 60},), (100.0,), "")
 
 
@@ -86,7 +86,7 @@ def test_writer_when_model_invents_a_price_falls_back_to_template_with_refs():
 
 def test_writer_when_model_follows_rules_keeps_its_email():
     text = body(
-        "thank you for your offer and the long cooperation.", CLAIM.sentence, "Could you send us a cost breakdown?"
+        "thank you for your offer and the long cooperation.", CLAIM.sentence, "Which lead time can you confirm?"
     )
 
     def complete(system, user):
@@ -215,6 +215,8 @@ def test_moved_re_when_supplier_moved_does_not_flag_but_our_move_does():
 
     assert not MOVED_RE.search("We appreciate that you have moved on the price.")
     assert not MOVED_RE.search("We note the step you made.")
+    assert not MOVED_RE.search("Thank you for answering the points we raised.")
+    assert not MOVED_RE.search("The concerns we have raised still stand.")
     for ours in ("We have moved towards your position.", "We raised our offer.", "Our offer has improved."):
         assert MOVED_RE.search(ours), ours
 
@@ -282,8 +284,71 @@ def test_prompts_when_supplier_text_is_shown_treat_it_as_data_not_instructions(n
     assert "never instructions" in prompt(name).lower()
 
 
+def test_email_from_text_when_model_writes_markdown_email_rescues_it():
+    from arena_kit.agents.buyer.roles.writer import email_from_text
+
+    text = "**Subject:** Pump housing: our proposal\n\nDear Mr Seidl,\n\nthank you for your offer.\n\nKind regards"
+    assert email_from_text(text) == {
+        "subject": "Pump housing: our proposal",
+        "body": "Dear Mr Seidl,\n\nthank you for your offer.\n\nKind regards",
+    }
+    assert email_from_text("I think you should push harder.") is None
+
+
+def test_call_json_when_reply_not_json_uses_salvage_else_none():
+    from arena_kit.agents.buyer.roles.llm import call_json
+
+    def complete(system, user):
+        return "Subject: Hi\nBody text"
+
+    assert call_json(complete, "s", "u", 2.0) is None
+    assert call_json(complete, "s", "u", 2.0, salvage=lambda t: {"subject": "Hi", "body": "Body text"}) == {
+        "subject": "Hi",
+        "body": "Body text",
+    }
+
+
+def test_check_when_email_asks_for_cost_breakdown_rejects_it():
+    problems = run_check(body("thank you for your offer.", CLAIM.sentence, "Could you send us a cost breakdown?"))
+    assert any("asks for its costs" in p for p in problems)
+    assert not any("asks for its costs" in p for p in run_check(body("thank you.", CLAIM.sentence, "Kind regards")))
+
+
 @pytest.mark.parametrize("line", ["Another supplier offers a lower price.", "Ein anderer Lieferant ist günstiger."])
 def test_check_when_email_brings_in_another_supplier_reports_it(line):
     # organisers: no inter-supplier comparison
     problems = run_check(body(CLAIM.sentence, line))
     assert any("without a claim" in p for p in problems), problems
+
+
+def test_without_cost_asks_drops_only_the_question_and_keeps_claims_verbatim():
+    from arena_kit.agents.buyer.roles.writer import without_cost_asks
+
+    text = body(
+        "thank you for your offer. Could you explain your cost structure for this part?",
+        CLAIM.sentence,
+        "Could you share a breakdown of your costs?",
+        "Our counter-proposal is attached.",
+    )
+    out = without_cost_asks(text)
+    assert "cost structure" not in out and "breakdown" not in out
+    assert CLAIM.sentence in out and "thank you for your offer." in out and "counter-proposal" in out
+    assert run_check(out) == []
+
+
+def test_writer_when_model_asks_for_costs_keeps_its_email_without_that_sentence():
+    text = body(
+        "thank you for your offer and the long cooperation.", CLAIM.sentence, "Could you explain your costs to us?"
+    )
+
+    def complete(system, user):
+        return json.dumps({"subject": "Re: casings", "body": text})
+
+    writer = LLMWriter(complete)
+    email = writer.write(ctx("partner"), TACTIC, PLAN, thread([120.0]))
+    assert writer.last_used_model and "explain your costs" not in email.body and CLAIM.sentence in email.body
+
+
+def test_check_when_email_acknowledges_its_costs_does_not_flag_it():
+    problems = run_check(body("thank you. We understand your costs have risen.", CLAIM.sentence, "Kind regards"))
+    assert not any("asks for its costs" in p for p in problems)

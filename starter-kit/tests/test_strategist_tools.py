@@ -45,7 +45,7 @@ def tool_use(name, args, id_="t1"):
 
 ANSWER = json.dumps(
     {
-        "reads": {SID: {"p_more": 0.7, "walk_risk": 0.1, "wants": ["payment_days"], "signals": []}},
+        "read": {"p_more": 0.7, "walk_risk": 0.1, "wants": ["payment_days"], "signals": []},
         "tactic": {"supplier_id": SID, "action": "send", "levers": ["unit_price", "payment_days"], "claims": [],
                    "question": None, "rationale": "price_terms: 14 days is worth it"},
     }

@@ -83,8 +83,8 @@ TEXT = {
     "en": {
         "salutation": "Dear Sir or Madam,",
         "revised": ("your offer", "your revised offer and the step you made"),
-        "many": "Please find our alternative packages attached.",
-        "one": "Please find our proposal attached.",
+        "many": "We cannot accept your offer as it stands. Please find our counter-proposal attached, in packages.",
+        "one": "We cannot accept your offer as it stands. Please find our counter-proposal attached.",
         "moved": "We have moved towards your position.",
         "and": " and ",
         "single": "It offers {}.",
@@ -94,8 +94,8 @@ TEXT = {
     "de": {
         "salutation": "Sehr geehrte Damen und Herren,",
         "revised": ("Ihr Angebot", "Ihr überarbeitetes Angebot und Ihren Schritt auf uns zu"),
-        "many": "Anbei finden Sie unsere alternativen Pakete.",
-        "one": "Anbei finden Sie unseren Vorschlag.",
+        "many": "Ihr Angebot können wir so nicht annehmen. Anbei finden Sie unseren Gegenvorschlag in Paketen.",
+        "one": "Ihr Angebot können wir so nicht annehmen. Anbei finden Sie unseren Gegenvorschlag.",
         "moved": "Wir sind Ihnen entgegengekommen.",
         "and": " und ",
         "single": "Es bietet {}.",
@@ -198,6 +198,28 @@ def _numbers(text: str) -> set[str]:
     return {n.replace(",", "") for n in NUMBER_RE.findall(text)}
 
 
+# Asking for its cost breakdown or calculation (Saeb: never - every e-mail is a logical counter-offer instead).
+ASKS_COSTS = re.compile(
+    r"(?:send|share|provide|show|walk us through|explain)[^.?!\n]{0,40}"
+    r"(?:cost ?breakdown|break ?down|calculation|cost structure|cost drivers|cost elements|(?:your|its) costs?\b)|"
+    r"(?:kostenaufschl.sselung|kalkulation|kostenstruktur)[^.?!\n]{0,40}\?",
+    re.I,
+)
+SENTENCE_END = re.compile(r"(?<=[.?!])\s+")
+
+
+def without_cost_asks(body: str) -> str:
+    """The e-mail without the sentences that ask for its costs; every other line (claim sentences included)
+    stays exactly as written."""
+    lines = []
+    for line in body.split("\n"):
+        kept = [s for s in SENTENCE_END.split(line) if not ASKS_COSTS.search(s)]
+        if line.strip() and not kept:
+            continue  # the whole line was the question
+        lines.append(" ".join(kept))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
 def check(body: str, sentences: list[str], allowed_refs: set[str], supplier_text: str, title: str) -> list[str]:
     """Problems that must stop an e-mail; empty means it may be sent. Claim sentences are the only source
     of our figures and IDs; a figure the supplier wrote itself may be repeated."""
@@ -225,6 +247,8 @@ def check(body: str, sentences: list[str], allowed_refs: set[str], supplier_text
         problems.append(f"reveals our notes about the supplier: {sorted(private)[:3]}")
     if len(body.split()) > MAX_WORDS:
         problems.append(f"too long: {len(body.split())} words")
+    if ask := ASKS_COSTS.search(body):
+        problems.append(f"asks for its costs: {ask.group(0)!r}")
     return problems
 
 
@@ -263,13 +287,30 @@ def template(ctx: CaseContext, tactic: Tactic, plan: OfferPlan, claims: list[str
 
 
 # Claims of our own movement; only allowed when the packages really are above our previous offer.
+_AUX = r"(?: have| has| are| is)?(?: now| also| further| again| already)?"
 MOVED_RE = re.compile(
-    r"\b(?:we|our (?:offer|proposal|position|price))(?: have| has| are| is)?(?: now| also| further| again| already)?"
-    r" (?:moved|improved|raised|increased|stepped|coming|come (?:closer|towards))\b|"
+    rf"\b(?:we|our (?:offer|proposal|position|price)){_AUX}"
+    r" (?:moved|improved|stepped|coming|come (?:closer|towards))\b|"
+    rf"\bour (?:offer|proposal|position|price){_AUX} (?:raised|increased)\b|"
+    rf"\bwe{_AUX} (?:raised|increased) (?:our|the) (?:offer|price|proposal|bid)\b|"  # not "the points we raised"
     r"\bwir sind (?:ihnen )?(?:entgegengekommen|nachgekommen)|"
     r"\bwir haben (?:unser angebot|unseren vorschlag|unseren preis) (?:verbessert|erhöht|angehoben)",
     re.I,
 )  # "we have moved towards you" - not "we appreciate that you have moved"
+
+
+SUBJECT_LINE = re.compile(r"^\W*(?:subject|betreff)\W*:\W*(.+?)\W*$", re.I | re.M)
+
+
+def email_from_text(text: str) -> dict | None:
+    """A reply written as an e-mail instead of JSON ("**Subject:** ..." then the body): the same e-mail as JSON.
+    It still goes through `check` like any model answer."""
+    m = SUBJECT_LINE.search(text)
+    if not m:
+        return None
+    body = text[m.end() :].strip().strip("`").strip()
+    body = re.sub(r"^\W*(?:body|text)\W*:\W*", "", body, flags=re.I).strip()
+    return {"subject": m.group(1).strip(), "body": body} if body else None
 
 
 class LLMWriter:
@@ -316,7 +357,7 @@ class LLMWriter:
             default=str,
         )
         self.last_problems, self.last_used_model = [], False
-        reply = call_json(self.complete, self.system, user, TIMEOUT_S, name="writer")
+        reply = call_json(self.complete, self.system, user, TIMEOUT_S, name="writer", salvage=email_from_text)
         if not isinstance(reply, dict) or not isinstance(reply.get("body"), str) or not reply["body"].strip():
             return fallback
         body = reply["body"].strip()
@@ -325,6 +366,11 @@ class LLMWriter:
         years = " ".join(YEAR_RE.findall(" ".join(dossier.evidence))) if dossier else ""
         allowed_text = f"{supplier_text}\n{tactic.question or ''}\n{years}"
         problems = check(body, sentences, set(refs), allowed_text, ctx.case["title"])
+        if problems and all(p.startswith("asks for its costs") for p in problems):
+            # only a stray question about its costs: drop that sentence, keep the model's e-mail (practice: the
+            # whole e-mail was thrown away for it in P02/P03)
+            body = without_cost_asks(body)
+            problems = check(body, sentences, set(refs), allowed_text, ctx.case["title"])
         if not moved["we_moved"] and (claim := MOVED_RE.search(body)):
             problems.append(f"claims a move we did not make: {claim.group(0)!r}")
         if problems:
