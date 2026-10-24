@@ -230,3 +230,13 @@ def test_plan_when_rounds_pass_never_takes_back_what_we_offered(tools, case):
         if previous is not None and main["unit_price"] < their_price:
             assert worth >= previous - 1e-6
         previous = worth
+
+
+def test_plan_when_above_target_and_supplier_moves_we_still_move(tools):
+    # brief: "it gives nothing without a move from you". Sandbox D02 (53ce03986722d2b5): holding at 14.90 while J1
+    # came down from 15.70 to 15.30 left it waiting, and it walked after we answered its final offer unmoved
+    case, ctx, events = d02_after_breakdown(tools)
+    events = [*events, buyer_msg({"unit_price": 14.9, "payment_days": 60, "lead_time_days": 28, "incoterm": "DAP"}),
+              supplier_msg(D02_J1, {**D02_STANDING, "unit_price": 15.3}, 2)]  # fmt: skip
+    plan = tools.plan_offers(ctx, D02_J1, events, Tactic(D02_J1, "send"), READ)
+    assert 14.9 < plan.term_sheets[0]["unit_price"] <= (14.9 + 15.3) / 2 + 0.005

@@ -7,10 +7,10 @@ Price of the main sheet, each round:
   time     anchor -> ceiling on a Boulware curve: (t / T) ** (1 / beta), beta < 1 holds early and concedes late
            (time-dependent tactics, Faratin, Sierra & Jennings 1998)
   pace     until our target, at least a linear step per round (reaching it halfway): visible movement
-  reply    until our target, at least what the supplier conceded in its last move (absolute tit-for-tat, same
-           paper): "it gives nothing without a move from you" - and matched moves meet at the midpoint, i.e. the
-           target. Never past the midpoint of the current gap: a big drop from an inflated opening is not a
-           step to copy (split-the-difference, Raiffa). Above our target we hold and move on terms instead
+  reply    at least what the supplier conceded in its last move (absolute tit-for-tat, same paper): "it gives
+           nothing without a move from you" (the brief) - and matched moves meet at the midpoint, i.e. the target.
+           Never past the midpoint of the current gap: a big drop from an inflated opening is not a step to copy
+           (split-the-difference, Raiffa); below our target, not past the target either
   limits   never above the ceiling or its standing price, never below our previous offer
 The main sheet is the cheapest package in C the supplier can still accept at this price: the band's target
 package, its own terms or our last ones (the target package's short payment or pickup only pays near the target
@@ -83,9 +83,10 @@ def next_price(case: dict, band, events: list[dict]) -> float:
         if ours[-1] < band.target:  # a visible step every round until our target, even if it waits for us
             pace = (band.target - anchor) / max(horizon * TARGET_BY_SHARE_OF_ROUNDS, 1)
             price = max(price, min(ours[-1] + pace, band.target))
-            if len(theirs) >= 2 and theirs[-2] > theirs[-1]:
-                matched = ours[-1] + TIT_FOR_TAT * (theirs[-2] - theirs[-1])
-                price = max(price, min(matched, band.target, (ours[-1] + theirs[-1]) / 2))
+        if len(theirs) >= 2 and theirs[-2] > theirs[-1]:
+            matched = ours[-1] + TIT_FOR_TAT * (theirs[-2] - theirs[-1])
+            cap = (ours[-1] + theirs[-1]) / 2
+            price = max(price, min(matched, cap, band.target) if ours[-1] < band.target else min(matched, cap))
     return round(min(price, limit), 2)
 
 
