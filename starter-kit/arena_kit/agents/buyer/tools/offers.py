@@ -11,7 +11,8 @@ Price of the main sheet, each round:
            nothing without a move from you" (the brief) - and matched moves meet at the midpoint, i.e. the target.
            Never past the midpoint of the current gap: a big drop from an inflated opening is not a step to copy
            (split-the-difference, Raiffa); below our target, not past the target either
-  limits   never above the ceiling or its standing price, never below our previous offer
+  limits   never above the ceiling or its standing price, never below our previous offer, never below the
+           lowest credible price (tools.credibility: our cost evidence and its current offer)
 The main sheet is the cheapest package in C the supplier can still accept at this price: the band's target
 package, its own terms or our last ones (the target package's short payment or pickup only pays near the target
 price). Up to two more sheets change one term each and are re-priced to cost us the same C: worth more to the
@@ -44,7 +45,8 @@ def plan(
     if band is None or theirs.get("unit_price") is None:
         sheet = complete_offer(case, theirs)
         return OfferPlan(supplier_id, (sheet,), (total_cost(case, sheet, std, supplier),), "no band: echo its terms")
-    price = next_price(case, band, events)
+    credible = ctx.credibility.get(supplier_id)
+    price = next_price(case, band, events, credible.lowest_price if credible else 0.0)
     main = _main_sheet(case, band, theirs, price, std, supplier, _our_last_terms(events))
     c_main = total_cost(case, main, std, supplier)
     levers = tuple(f for f in tactic.levers if f != "unit_price" and f in case["negotiable"])
@@ -71,7 +73,7 @@ def anchor_price(band, events: list[dict]) -> float:
     return min(max(2 * band.target - theirs[0], lowest), band.target, band.ceiling, theirs[-1])
 
 
-def next_price(case: dict, band, events: list[dict]) -> float:
+def next_price(case: dict, band, events: list[dict], lowest: float = 0.0) -> float:
     theirs, ours = supplier_prices(events), our_prices(events)
     limit = min(band.ceiling, theirs[-1])
     anchor = anchor_price(band, events)
@@ -87,7 +89,7 @@ def next_price(case: dict, band, events: list[dict]) -> float:
             matched = ours[-1] + TIT_FOR_TAT * (theirs[-2] - theirs[-1])
             cap = (ours[-1] + theirs[-1]) / 2
             price = max(price, min(matched, cap, band.target) if ours[-1] < band.target else min(matched, cap))
-    return round(min(price, limit), 2)
+    return round(min(max(price, lowest), limit), 2)
 
 
 def _our_last_terms(events: list[dict]) -> dict | None:

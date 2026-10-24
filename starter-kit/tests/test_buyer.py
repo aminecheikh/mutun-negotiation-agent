@@ -34,7 +34,8 @@ def test_plan_offers_when_first_round_returns_complete_sheet_at_anchor():
     plan = tools.plan_offers(ctx, SID, threads[SID], Tactic(SID, "send"), read)
     sheet = plan.term_sheets[0]
     anchor = round(min(2 * ctx.bands[SID].target - 17.4, ctx.bands[SID].target), 2)  # midpoint lands on target
-    assert set(sheet) == set(CASE["negotiable"]) and sheet["unit_price"] == anchor
+    credible = ctx.credibility[SID].lowest_price  # without cost evidence: within 8 % of its offer (tools.credibility)
+    assert set(sheet) == set(CASE["negotiable"]) and sheet["unit_price"] == max(anchor, credible)
 
 
 def test_concession_fit_when_steps_shrink_reports_shrinking():

@@ -99,6 +99,16 @@ class Trade:
 
 
 @dataclass(frozen=True)
+class Credibility:
+    """How low an offer to this supplier may go and still be taken seriously (tools.credibility)."""
+
+    supplier_id: str
+    lowest_price: float  # no main sheet below this unit price
+    evidence_pct: float | None  # the uncertainty of our cost evidence; None: no cost evidence
+    reason: str
+
+
+@dataclass(frozen=True)
 class CaseContext:
     """Everything prepared before the first move (no clock running yet)."""
 
@@ -109,6 +119,7 @@ class CaseContext:
     c_alternative: float | None
     trades: dict[str, tuple[Trade, ...]] = field(default_factory=dict)  # per supplier, biggest saving first
     fits: dict[str, ConcessionFit] = field(default_factory=dict)  # per supplier, this round's fit of its prices
+    credibility: dict[str, Credibility] = field(default_factory=dict)  # per supplier, from its latest price
 
 
 # ---- roles layer (LLM, owner: roles) -----------------------------------------------------------

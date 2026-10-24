@@ -39,3 +39,12 @@ decision - why`. Changing `contracts.py` always needs an entry here.
   around every use of its SQLite connection and around building the lazy ID index. - Callers outside the tools
   (Saed's bench, the kit's own agents) used the raw package; a 16-thread test mixed up results 3 times out of 3
   without the lock. `ThreadSafePackage` stays (harmless double lock, pre-builds the index).
+- 2026-10-24 20:10 - team (Amine, user-approved) - `CaseContext.credibility: dict[str, Credibility]` (default empty)
+  and the `Credibility` type (lowest_price, evidence_pct, reason) from `tools/credibility.py`, recomputed each round
+  from the supplier's latest price. Firm cost evidence (<= 5 %) backs offers down to its floor; a rough estimate
+  keeps offers within its own error under the supplier's current offer; no evidence within 8 % (the bands'
+  uninformed share). The offer engine never prices under it; the strategist sees it. - Sweep 4c30c05 opened 25-28 %
+  under the supplier wherever the estimate was a guess; P10 went final at once.
+- 2026-10-24 20:10 - team (user, organisers' rule) - No inter-supplier comparison: each supplier is negotiated on its
+  own. No rival claims, no rival anchors, no offer IDs in messages, no thread parked for a rival; the close still
+  never signs a dearer acceptable sheet over a cheaper one.
