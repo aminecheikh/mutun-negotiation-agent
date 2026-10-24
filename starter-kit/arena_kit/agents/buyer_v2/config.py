@@ -29,6 +29,8 @@ class V2Config:
     # ---- time per message (brief: 60 s from the supplier's reply) -------------------------------------
     move_budget_s: float = 48.0  # receipt of a reply -> our message leaves; 12 s cushion for network and server
     analysts_by_s: float = 20.0  # the specialist agents report by this many seconds after the reply
+    # counterpart and market read documents (live: ~19 s, over 20 s); the negotiator needs ~10-14 s after them
+    static_analysts_by_s: float = 25.0
     decide_by_s: float = 42.0  # the negotiator answers by then; the guard and the POST use the rest
     min_llm_window_s: float = 5.0  # less time than this left: skip the model, use the rule fallback
     # ---- models (Anthropic; the provider and key come from LLM_PROVIDER / ANTHROPIC_API_KEY) ------------

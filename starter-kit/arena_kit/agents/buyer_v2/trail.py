@@ -9,11 +9,14 @@
 Directory: V2_LOG_DIR, else BUYER_LOG_DIR, else `runs` (gitignored); "off" disables. Never logs keys.
 """
 
+import hashlib
 import json
 import logging
 import os
 import threading
 import time
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 log = logging.getLogger("arena")
@@ -50,7 +53,40 @@ class Trail:
     def case(self, **fields) -> None:
         self._write("v2-cases.jsonl", fields)
 
+    def llm_record(self, call, result) -> None:
+        """The full in/out record of one agent call, in the team's format (roles/llm.py `record`):
+        BUYER_LLM_LOG_DIR (default runs/llm, "off" disables)/<date>/<time>-v2-<role>-<id>.json with the case,
+        supplier and round, the whole user input, every turn (the model's text, each tool call with its input and
+        result), the raw reply, the parsed answer, tokens, seconds and outcome; each distinct system prompt once
+        under prompts/. Never raises."""
+        root = os.environ.get("BUYER_LLM_LOG_DIR", "runs/llm")
+        if root.lower() == "off":
+            return
+        try:
+            base, now = Path(root), datetime.now()
+            role = f"v2-{call.role}"
+            digest = hashlib.sha256(call.system.encode("utf-8")).hexdigest()[:12]
+            prompt_file = base / "prompts" / f"{role}-{digest}.md"
+            with self._lock:
+                if not prompt_file.exists():
+                    prompt_file.parent.mkdir(parents=True, exist_ok=True)
+                    prompt_file.write_text(call.system, encoding="utf-8")
+            entry = {
+                "ts": now.isoformat(timespec="milliseconds"), "role": role, **(call.context or {}),
+                "outcome": "ok" if result.ok else (result.error or "error"), "seconds": result.seconds,
+                "system_prompt": str(prompt_file.relative_to(base)), "user": call.user, "turns": result.turns,
+                "reply": result.reply, "answer": result.data, "tools_called": result.tool_calls,
+                "stop_reason": result.stop_reason, "usage": result.usage,
+            }  # fmt: skip
+            day = base / now.strftime("%Y-%m-%d")
+            day.mkdir(parents=True, exist_ok=True)
+            name = f"{now.strftime('%H%M%S.%f')}-{role}-{uuid.uuid4().hex[:6]}.json"
+            (day / name).write_text(json.dumps(entry, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+        except Exception as e:  # a full disk or a read-only folder must never cost a move
+            log.warning("v2 LLM record failed: %s", e)
+
     def llm_call(self, call, result) -> None:
+        self.llm_record(call, result)
         self._write(
             "v2-llm.jsonl",
             {
@@ -61,6 +97,7 @@ class Trail:
                 "tools": result.tool_calls,
                 "stop": result.stop_reason,
                 "usage": result.usage,
+                **(call.context or {}),
                 "prompt_chars": len(call.user),
                 "answer": json.dumps(result.data, ensure_ascii=False)[:TEXT_CHARS] if result.ok else None,
             },

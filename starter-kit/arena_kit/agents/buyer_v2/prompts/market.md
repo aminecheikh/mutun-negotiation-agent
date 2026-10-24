@@ -22,6 +22,9 @@ first turn revealed):
 
 ## Judgement rules
 
+- Read the whole thread: the arguments the supplier made in every round, how our cited data was judged
+  (verified / contradicted), and which data we already cited (the log) - never propose those again.
+
 - Every number comes from a tool; name the ID or the tool it came from.
 - An increase is justified only by the moves of the inputs that make up the part's cost, weighted by their share,
   over the same period. Wages and energy rising while metal falls may net out to little. A supplier with hedged

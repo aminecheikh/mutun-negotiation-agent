@@ -20,6 +20,9 @@ turn showed to matter):
 
 ## Judgement rules
 
+- The thread itself is evidence: how it has negotiated so far (speed and size of its steps, tone, what it asked
+  for, who writes) confirms or refutes the profile from the data. Update the profile when the e-mails show more.
+
 - Base every statement on data and name its ID. The newest and most specific evidence weighs most; this case's
   own facts and the Sunday release are newest. One repeated template sentence is one signal, not several.
 - Profiles are hypotheses. Say how confident you are and what in its e-mails would confirm or refute them.

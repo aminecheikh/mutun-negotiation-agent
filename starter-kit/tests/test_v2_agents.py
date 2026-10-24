@@ -136,7 +136,7 @@ def test_round_one_runs_all_specialists_in_parallel_then_the_negotiator():
     assert time.monotonic() - t0 < 1.0, "specialists run in parallel"
     assert move.kind == "send" and move.detail["path"] == "agents"
     negotiator_input = model.requests[-1]["messages"][0]["content"]
-    assert "THE E-MAIL THREAD AS WRITTEN" in negotiator_input and "Our offer." in negotiator_input
+    assert "THE WHOLE E-MAIL THREAD AS WRITTEN" in negotiator_input and "Our offer." in negotiator_input
     assert "[reader]" in negotiator_input and "DECISION FRAME" in negotiator_input
 
 
@@ -208,7 +208,7 @@ def test_a_late_negotiator_falls_back_to_the_rules_in_time():
 
 def test_slow_specialists_are_dropped_and_the_negotiator_still_decides():
     model = scripted(delay={"counterpart": 3.5, "market": 3.5})
-    brain = brain_with(model, analysts_by_s=2.2, decide_by_s=8.0)
+    brain = brain_with(model, analysts_by_s=2.2, static_analysts_by_s=2.2, decide_by_s=8.0)
     t0 = time.monotonic()
     _, move = decide(brain, S01, {SID: [quote(SID, 0, 17.4)]}, received_at=t0)
     assert move.detail["path"] == "agents" and not move.detail["agents"]["market"]["ok"]

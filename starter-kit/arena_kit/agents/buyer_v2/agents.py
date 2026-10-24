@@ -234,37 +234,70 @@ def walk_allowed(state: F.CaseState, f: F.ThreadFacts) -> bool:
     return not f.acceptable and (f.status == "final_offer" or f.moves_left <= 1)
 
 
+def price_path(prices) -> str:
+    """'17.40 -> 17.00 (-2.3 %) -> 16.85 (-0.9 %)': each step and its size, so the pattern of moves is visible."""
+    prices = [float(p) for p in prices]
+    if not prices:
+        return "none yet"
+    out = [f"{prices[0]:.2f}"]
+    for a, b in zip(prices, prices[1:], strict=False):
+        out.append(f"{b:.2f} ({(b / a - 1) * 100:+.1f} %)" if a else f"{b:.2f}")
+    return " -> ".join(out)
+
+
+def negotiation_log(state: F.CaseState, f: F.ThreadFacts) -> str:
+    """What we decided in every earlier round with this supplier and why, with both price paths - the memory that
+    keeps one strategy across rounds (the e-mails show what was said; this shows what we meant)."""
+    entries = state.notes.get(f.supplier_id, {}).get("log", [])
+    lines = [
+        "OUR NEGOTIATION LOG WITH THIS SUPPLIER (every round so far - keep one coherent strategy):",
+        f"- Its price path: {price_path(f.supplier_prices)}",
+        f"- Our price path: {price_path(f.our_prices)}",
+    ]
+    if not entries:
+        lines.append("- No earlier round: this is our first answer.")
+    for e in entries:
+        sheets = "; ".join(f"{s['terms']} (C {_money(s['c'])})" for s in e.get("sheets") or []) or "none"
+        lines.append(f"- Round {e['round']} ({e.get('path')}): {e.get('decision')} - {e.get('why')}")
+        lines.append(f"    our sheets: {sheets}")
+        if e.get("cited"):
+            lines.append(f"    data we cited (never again): {', '.join(e['cited'])}")
+        read = e.get("its_message") or {}
+        if read:
+            lines.append(
+                f"    its message as we read it then: {read.get('offer_summary')} | moved: {read.get('movement')} | "
+                f"wants: {read.get('wants')} | tone: {read.get('tone')} | walk risk {read.get('walk_risk')}, "
+                f"room {read.get('room_to_move')}"
+            )
+            if read.get("questions_to_answer"):
+                lines.append(f"    its questions then: {read.get('questions_to_answer')}")
+    return "\n".join(lines)
+
+
 def analyst_input(role: str, state: F.CaseState, f: F.ThreadFacts, events: list[dict]) -> str:
-    brief, now = case_brief(state, f.supplier_id), thread_state(state, f)
+    """Every specialist reads the case, the computed state, our log of every round and the WHOLE thread as written."""
+    brief, now, memory = case_brief(state, f.supplier_id), thread_state(state, f), negotiation_log(state, f)
+    thread = "THE WHOLE E-MAIL THREAD AS WRITTEN (oldest first):\n\n" + emails.transcript(events)
     args = F.arguments(state, f.supplier_id)
     tokens = "\n".join(f"- [[{a.token}]] ({a.kind}): {a.sentence}" for a in args[:12]) or "- none left"
-    if role == "reader":
-        return (
-            f"{brief}\n\n{now}\n\nTHE E-MAIL THREAD AS WRITTEN (oldest first):\n\n{emails.transcript(events)}\n\n"
-            "Read the supplier's latest e-mail (the last SUPPLIER message) and report."
-        )
-    if role == "deal":
-        return (
-            f"{brief}\n\n{now}\n\nTHE LAST MESSAGES AS WRITTEN:\n\n{emails.transcript(events, last_n=4)}\n\n"
-            "Price the deal and design this round's counter candidates."
-        )
-    if role == "counterpart":
-        return (
-            f"{brief}\n\nTHE SUPPLIER'S LATEST E-MAIL:\n\n{emails.latest_supplier_email(events)}\n\n"
-            f"Profile {supplier_name(state, f.supplier_id)} ({f.supplier_id}) from the data and report."
-        )
-    return (
-        f"{brief}\n\n{now}\n\nVERIFIED ARGUMENTS AVAILABLE (tokens):\n{tokens}\n\nTHE SUPPLIER'S FIRST AND LATEST "
-        f"E-MAILS:\n\n{emails.transcript(events[:1])}\n\n{emails.latest_supplier_email(events)}\n\n"
-        "Judge the price and choose the arguments; report."
-    )
+    task = {
+        "reader": "Read the supplier's latest e-mail (the last SUPPLIER message) in the light of everything before "
+        "it, and report.",
+        "deal": "Price the deal and design this round's counter candidates, consistent with the moves so far.",
+        "counterpart": f"Profile {supplier_name(state, f.supplier_id)} ({f.supplier_id}) from the data and from how it "
+        "has negotiated in this thread so far, and report.",
+        "market": "Judge the price and choose the arguments (never one we already cited), and report.",
+    }[role]
+    extra = "VERIFIED ARGUMENTS AVAILABLE (tokens):\n" + tokens + "\n\n" if role == "market" else ""
+    return "\n\n".join([brief, now, memory, extra + thread, task])
 
 
 def negotiator_input(state: F.CaseState, f: F.ThreadFacts, events: list[dict], reports: dict) -> str:
     parts = [
         case_brief(state, f.supplier_id),
         decision_frame(state, f),
-        "THE E-MAIL THREAD AS WRITTEN (oldest first):",
+        negotiation_log(state, f),
+        "THE WHOLE E-MAIL THREAD AS WRITTEN (oldest first):",
         emails.transcript(events),
         "SPECIALIST REPORTS:",
     ]

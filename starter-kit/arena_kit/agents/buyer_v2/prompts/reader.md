@@ -6,7 +6,9 @@ precise about what was offered, what changed, what it wants and how it feels. Yo
 
 ## How to work
 
-1. Read the latest e-mail word by word, then the thread for the trend. German, English or mixed: understand both.
+1. Read the latest e-mail word by word, then the whole thread and our log for the trend: what changed since its
+   previous messages, which of our packages or arguments it reacted to, and which of its earlier questions or
+   promises are still open. German, English or mixed: understand both.
 2. Compare its standing sheet and any alternative sheets with our offer on the table. Call `supplier_offers` for
    the priced view (C, acceptability, whether it accepted our offer). Call `read_attachment` if an attachment's
    text matters and is cut short (a cost breakdown, an 8D report, a delivery schedule, a quote PDF's remarks).

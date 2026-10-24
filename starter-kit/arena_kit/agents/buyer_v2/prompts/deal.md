@@ -20,6 +20,9 @@ design:
 
 ## Judgement rules
 
+- Read the whole thread and our log: price each candidate against the path of both sides' concessions so far. The
+  next step should be smaller than our previous one, and proportionate to the supplier's last move.
+
 - Compare in C, never in price alone. A sheet that covers less of our need, pays earlier or adds an index clause
   on a rising path can be dearer at a lower price.
 - Hard limits for counters: unit price never above its current offer, every counter cheaper for us than its

@@ -74,7 +74,36 @@ class Brain:
                 log.exception("%s/%s: rule fallback failed too - last resort", state.case.get("case_id"), sid)
                 move = self._last_resort(state, sid, threads)
         move.detail.setdefault("seconds", round(time.monotonic() - t0, 2))
+        try:
+            self._remember(state, sid, threads[sid], move)
+        except Exception:  # memory refines later rounds; it must never cost this one
+            log.exception("%s/%s: could not record the round", state.case.get("case_id"), sid)
         return move
+
+    def _remember(self, state: F.CaseState, sid: str, events: list[dict], move: Move) -> None:
+        """Our negotiation log for this supplier: each round's decision, why, what we offered and argued, and how
+        the reader understood its message - so every later round knows the strategy so far, not only the e-mails."""
+        if move.kind not in ("send", "accept", "stop"):
+            return
+        message = move.message or {}
+        entry = {
+            "round": sum(m.get("from") == "buyer" for m in events) + 1,
+            "path": move.detail.get("path"),
+            "decision": move.detail.get("decision") or move.kind,
+            "why": str(move.detail.get("reasoning") or move.reason)[:500],
+            "sheets": [
+                {
+                    "terms": T.describe(s["terms"]),
+                    "c": round(s["c"]) if s.get("c") not in (None, float("inf")) else None,
+                }
+                for s in move.detail.get("sheets") or []
+            ],  # fmt: skip
+            "cited": list(message.get("refs") or []),
+            "its_message": move.detail.get("read"),
+            "corrections": (move.detail.get("guard") or [])[:4],
+        }
+        with state.lock:
+            state.notes.setdefault(sid, {}).setdefault("log", []).append(entry)
 
     def _decide(self, state: F.CaseState, sid: str, threads: dict[str, list[dict]], received_at: float) -> Move:
         F.refreshed(state, threads)
@@ -136,14 +165,17 @@ class Brain:
         latest = F.latest_supplier(events) or {}
         new_docs = bool(latest.get("attachments")) and f.our_rounds > 0
         analysts_deadline = received_at + cfg.analysts_by_s
+        context = {"case_id": state.case.get("case_id"), "supplier_id": sid, "round": f.our_rounds + 1}
         calls = []
         for role, spec in A.SPECS.items():
             if spec.static and role in notes and not new_docs:
                 continue
+            # the profile and market agents read documents: a little longer, the negotiator still has its window
+            deadline = received_at + cfg.static_analysts_by_s if spec.static else analysts_deadline
             calls.append(AgentCall(
                 role=role, system=A.system_prompt(role), user=A.analyst_input(role, state, f, events),
-                deadline=analysts_deadline, schema=A.SCHEMAS[role], tools=toolset(list(spec.tools), ctx),
-                tool_turns=cfg.analyst_tool_turns,
+                deadline=deadline, schema=A.SCHEMAS[role], tools=toolset(list(spec.tools), ctx),
+                tool_turns=cfg.analyst_tool_turns, context=context,
             ))  # fmt: skip
         results = self.llm.run_many(calls)
         reports, status = {}, {}
@@ -163,12 +195,18 @@ class Brain:
             role="negotiator", system=A.system_prompt("negotiator"),
             user=A.negotiator_input(state, f, events, reports), deadline=received_at + cfg.decide_by_s,
             schema=A.SCHEMAS["negotiator"], tools=toolset(list(A.NEGOTIATOR_TOOLS), ctx),
-            tool_turns=cfg.negotiator_tool_turns,
+            tool_turns=cfg.negotiator_tool_turns, context=context,
         )])["negotiator"]  # fmt: skip
         status["negotiator"] = {"ok": answer.ok, "s": answer.seconds, "tools": answer.tool_calls, "error": answer.error}
         if not answer.ok:
-            return self._fallback(state, sid, threads, f, f"negotiator: {answer.error}", status, reports)
-        return self._apply(state, sid, threads, f, answer.data, status, reports)
+            move = self._fallback(state, sid, threads, f, f"negotiator: {answer.error}", status, reports)
+        else:
+            move = self._apply(state, sid, threads, f, answer.data, status, reports)
+        read = reports.get("reader")
+        if isinstance(read, dict):  # for the log: how we understood its message this round
+            keep = ("offer_summary", "movement", "wants", "questions_to_answer", "tone", "walk_risk", "room_to_move")
+            move.detail["read"] = {k: read.get(k) for k in keep}
+        return move
 
     def _apply(self, state, sid, threads, f: F.ThreadFacts, d: dict, status: dict, reports: dict) -> Move:
         decision = d.get("decision")

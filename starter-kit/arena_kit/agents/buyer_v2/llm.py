@@ -45,6 +45,7 @@ class AgentCall:
     schema: dict | None = None  # JSON schema of the final answer (structured outputs)
     tools: object | None = None  # a toolbox.Toolset: .schemas (list of tool definitions) and .run(name, args)
     tool_turns: int = 0
+    context: dict = field(default_factory=dict)  # case, supplier, round: for the in/out log only
 
 
 @dataclass
@@ -56,6 +57,8 @@ class CallResult:
     seconds: float = 0.0
     stop_reason: str | None = None
     usage: dict = field(default_factory=dict)
+    turns: list[dict] = field(default_factory=list)  # per model call: its text, tool calls with inputs and results
+    reply: str | None = None  # the final answer's raw text
 
     @property
     def ok(self) -> bool:
@@ -159,11 +162,14 @@ class LLM:
             if stop == "refusal":
                 raise RuntimeError("the model refused")
             uses = [b for b in blocks if _block_type(b) == "tool_use"]
+            turn_text = "".join(_attr(b, "text") or "" for b in blocks if _block_type(b) == "text")
+            result.turns.append({"turn": turn + 1, "stop": stop, "text": turn_text, "tool_calls": []})
             if uses and not final and stop == "tool_use":
                 messages.append({"role": "assistant", "content": blocks})
                 messages.append({"role": "user", "content": self._run_tools(call, uses, result)})
                 continue
-            text = "".join(_attr(b, "text") or "" for b in blocks if _block_type(b) == "text")
+            text = turn_text
+            result.reply = text
             if stop == "max_tokens" and not text.strip():
                 raise RuntimeError("answer cut off at max_tokens")
             return parse_json(text)
@@ -187,6 +193,10 @@ class LLM:
                 except Exception as e:  # a wrong argument is information for the model, never a crash
                     content, error = f"error: {e}"[:500], True
             out.append({"type": "tool_result", "tool_use_id": use_id, "content": content, "is_error": error})
+            if result.turns:  # the in/out log keeps what each tool was asked and what it answered
+                result.turns[-1]["tool_calls"].append(
+                    {"name": str(name), "input": args, "result": content[:4000], "is_error": error}
+                )
         return out
 
     # ---- several agents at once ----------------------------------------------------------------------
