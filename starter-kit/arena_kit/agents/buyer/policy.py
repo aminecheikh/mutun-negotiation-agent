@@ -46,7 +46,7 @@ def acceptable(session: CaseSession, th: ThreadState) -> bool:
 
 def standing_ok(session: CaseSession, th: ThreadState) -> bool:
     """The acceptability test on the standing sheet alone, whether or not we still work the thread."""
-    if not th.standing_id or math.isinf(th.c):
+    if not th.standing_id or math.isinf(th.c) or th.standing_id in th.refused:
         return False
     if not must_haves_ok(session.case, th.standing_terms, th.std):
         return False

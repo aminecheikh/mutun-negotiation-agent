@@ -72,6 +72,8 @@ class Arbiter:
                 s.finish(result, f"already ended ({e.detail})")
                 return True
             log.warning("%s: closing action refused (%s): %s", s.case["case_id"], e.status, e.detail)
+            if message["action"].get("term_sheet_id"):  # never retry it: the thread counters or waits instead
+                th.refused.add(message["action"]["term_sheet_id"])
             return False
         log.info("%s: %s (C %s)", s.case["case_id"], reason, None if th.c == float("inf") else round(th.c))
         self.telemetry.round(

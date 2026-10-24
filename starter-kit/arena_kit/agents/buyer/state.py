@@ -39,6 +39,7 @@ class ThreadState:
     errors: int = 0
     rule_only_once: bool = False  # after a resume: the first answer uses rule twins only (the clock may be short)
     walk_hint: bool = False  # the strategist asked to walk away (the arbiter decides at case level)
+    refused: set[str] = field(default_factory=set)  # sheet IDs the arena refused to let us accept: never again
     slowest_round_s: float = 0.0  # longest decision + reply so far on this thread
     fit: ConcessionFit | None = None
     read: BehaviourRead | None = None
