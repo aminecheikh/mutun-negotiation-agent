@@ -1,132 +1,120 @@
 # Team Mutun - buyer agent: architecture and roadmap
 
 Deadline: **Sun 13:00 code freeze**, Live Final 13:30 (5 waves x 8 min, up to 10 cases in parallel).
-Baseline: naive agent scored 0.597 on `case:P01`.
+Baseline (kit LLM agent, Sat 15:20): **mean 54.4** over the 10 hosted cases; 189 practice sessions left.
 
-## What the score actually rewards
+## What the score rewards
 
 - Score is measured in **total cost C**, not unit price: `(C_open - C_deal) / (C_open - C_best)`.
-  Payment days, `effective_date` (delaying an increase), contract length (uncovered need is costly),
-  Incoterm, PPM/chargeback and index clauses all count.
-- `stabilise` / `secure_supply` cases **charge for squeezing the supplier** below its sustainable margin.
-  The cheapest price is not the best deal there; the optimum is `argmin(price + relationship cost)`.
-- Suppliers have a **hard cost floor**, a boss approval ladder, and give nothing without a move from us.
-- **Contradicted claims cost trust.** Only send claims already checked against `facts.json`.
-- Hidden cases use **suppliers and parts that practice never shows**: nothing supplier-specific may be
-  hardcoded. Everything must come from the data package (+ the Sunday release).
+  Payment days, `effective_date`, contract length (uncovered need is costly), Incoterm, PPM/chargeback
+  and index clauses all count.
+- `stabilise` / `secure_supply` cases **charge for squeezing the supplier** below its sustainable margin
+  (P02 baseline: lower price, EUR 139k relationship charge, score 0).
+- Suppliers have a hard cost floor and an approval ladder, and give nothing without a move from us.
+  Verified data alone rarely moves them ("it holds, but it does not change our calculation").
+- Hidden cases use **suppliers and parts practice never shows**: nothing supplier-specific in code.
 
-## Data reality check (why not a classic time-series model)
+## Baseline diagnosis
 
-| Data | Size | Usable for |
+| Problem | Cases | Fix (layer) |
 |---|---|---|
-| `negotiation_history` | 225 renewals, ~3 per supplier, annual | a **prior** on how far a supplier gives (asked - settled averages ~2.5 pts); far too short to forecast per supplier |
-| `index_values` | 33 series, 2021-01 to 2026-09 monthly | **cost pass-through**: fair price = last price x weighted index change (`cost_drivers`); verified claims |
-| `should_cost` | 28 parts, 22 modelled on the supplier's own plant (+-5 %) | the supplier's **cost floor** (and its margin, for the relationship term) |
-| `price_conditions`, `quotes`, `po_lines` | price history, rival quotes | ceiling, anchors, citable competition |
-| `supplier_intel`, `invoices`, `news`, `documents` | 46 suppliers | supplier **persona**: cash-short, full order book, monopolist, reference-customer |
-
-The case file already gives the expected index move (`buyer.index_paths`), so forecasting indices adds
-little. The time series that matters is **the supplier's concession sequence inside a negotiation**:
-fit it live to estimate where it will stop.
+| First offer too generous, supplier agreed at once | P02, P18, P08 | anchor near floor, slow concession (tools: bands, offers) |
+| Relationship charge not seen | P02 | C with relationship term in every evaluation (tools) |
+| Index clause accepted on rising path | P02, P08, P18 | evaluate clauses in C, propose only when they help (tools) |
+| Closed after 2-3 of 10 rounds | P08, P10, P11, P18 | accept policy uses bands + behaviour read (orchestrator, roles) |
+| RFQ: 10 rounds with one supplier | P05 | multi-thread play, cite rival quotes (orchestrator, tools) |
+| Arguments not about the supplier's cost drivers | P02 | claims from its own drivers (tools), chosen per persona (roles) |
 
 ## Architecture
 
 ```
-          OFFLINE (before any session, precomputed + cached)
- data package + Sunday release
-   -> dossier.py   supplier persona, levers, history prior, BATNA, cash position, notes
-   -> bands.py     per part/supplier: floor, fair (index pass-through), ceiling - in price AND C
-   -> claims.py    ready-made sentences "figure + ID", each pre-verified against facts.json
+          PREPARE (once per case, before the first move)            owner
+ case + data package -> dossier, bands, claims  -> CaseContext         Amine (tools)
 
-          ONLINE (per round, < 60 s budget, target < 25 s)
- thread events ─> opponent.py   concession-curve fit -> reservation estimate R, P(more), signals
-              ─> strategist.py  LLM (JSON): tactic, levers to trade, which claims, questions
-              ─> offers.py      code: 1-3 term sheets on the iso-C frontier, concession schedule
-              ─> writer.py      LLM: the e-mail around the chosen claims + term sheets
-              ─> guard          code: snap terms, drop unknown IDs, no leaks, accept/walk rules
+          EACH ROUND (budget < 30 s, 60 s hard limit)
+ threads -> tools.fit_concessions        numbers: where its price converges      Amine
+         -> analyst.read                 words: is it still open, what it wants   Saed (roles)
+         -> strategist.choose            Tactic: send/accept/walk, levers, claims Saed
+         -> tools.plan_offers            1-3 term sheets + C, anchor/concession   Amine
+         -> writer.write                 the e-mail around claims + term sheets   Saed
+         -> guard                        must-haves, C <= ceiling, IDs, no leaks  Jeddou
+         -> arena message
+ orchestrator = agent.py: runs the steps, timeouts, fallbacks, RFQ focus, closing  Jeddou
 ```
 
-`agent.py` implements `decide(case, threads)` and is registered as `--agent buyer` in `cli.py`, so
-`arena run --set final --agent buyer --parallel 10` works unchanged with the kit's wave runner.
+The interfaces are in `starter-kit/arena_kit/agents/buyer/contracts.py` (frozen dataclasses +
+Protocols). **Each owner codes against them, with stubs for the others, so nobody waits.**
 
-### Components
+The orchestrator is **plain code, not an LLM agent**: a fixed pipeline with LLM roles at fixed points.
+With 60 s per move and 10 cases in parallel, a free-form agent conversation is too slow and too hard to
+debug, and a deterministic pipeline is easier to explain to the jury.
 
-1. **Dossier (offline, LLM allowed to be slow).** For every one of the 46 detailed suppliers:
-   owner type, equity ratio, credit-index trend, how late we pay them (`invoices`), scorecard trend,
-   open quality issues, second source available (`sourcing`), contract notice clauses, history prior
-   (mean asked - settled), and an LLM summary of its notes/letters/news: what it wants (cash, volume,
-   long contract, price list untouchable, reference customer). Cached as JSON; rebuilt Sun 08:00.
-2. **Price bands (deterministic).**
-   - `floor` = should-cost full cost (x country factor from `company.md` if the row is DE-based), else
-     last price rolled forward by index pass-through minus a typical margin. Never offer below
-     `floor` x ~1.0: it wastes rounds and trust.
-   - `fair` = last agreed price x (1 + sum(weight_i x 12-month change of series_i)), the rest of the
-     cost held constant. This is the anchor we argue for.
-   - `ceiling` (our walk-away) = min(C of the alternative, C at fallback price, best rival quote, C_open).
-   - In `stabilise`/`secure_supply`: `target` = price minimising C including `relationship_cost`
-     with `supplier = {"full_cost": floor, ...}`.
-3. **Claims (deterministic).** Generate candidate claims per case: 12-month index changes for each cost
-   driver (both directions - only use those that help us), rival quotes, PO price history, scorecard
-   OTD/PPM, should-cost, notice-period vs contract. Compute the figure the same way the arena checks it;
-   max 3 checked claims per message, one per sentence, never reuse an ID (duplicate).
-4. **Opponent model (live).** Per thread, from the supplier's price/C sequence:
-   - fit `p_t = R + (p_0 - R) * exp(-k t)` with a prior on `R` from `floor`/history; shrinking
-     concession ratios -> near its limit.
-   - signals: `final_offer`, "needs approval", "that remains", reply delay, validity days, claim
-     reactions, which of our 2-3 term sheets it answered (reveals what it values).
-   - output: `R_hat`, `p_more` (probability next round improves), `walk_risk`.
-5. **Offer engine (deterministic).** Time-dependent (Boulware) concession from `target` toward
-   `ceiling` over the round limit; generate 2-3 sheets with **equal C for us but different value for
-   the supplier** (price vs payment days vs effective date vs volume/contract length) - its answer tells
-   us its preferences (cash-short supplier -> trade short payment for price).
-6. **Strategist + writer (LLM).** Strategist returns structured JSON (tactic, lever, claims to use,
-   question to ask, e.g. cost breakdown). Writer produces <= 120 words, polite, factual. Neither does
-   arithmetic. Prompts include the dossier, bands, opponent state and allowed claim sentences.
-7. **Closer / guard.** Accept when: must-haves hold, C <= ceiling, and (`agreed`, or `final_offer`
-   with C within band, or `p_more` x expected gain < walk_risk x surplus, or out of rounds / time).
-   Walk away when nothing beats the alternative. Read the quote PDF standard terms before accepting.
-8. **Learning loop.** `scripts/harvest.py` pulls `/v1/sessions` + traces after every practice run into
-   `runs/` (gitignored); an LLM pass distils the supplier's stated reasons into a playbook per persona
-   (what moved it, what backfired). The playbook feeds the strategist prompt.
+## Team
 
-### Model choice and latency
+### Jeddou - orchestrator (`agents/buyer/agent.py`, `cli.py`, `scripts/`)
+1. Walking skeleton: `BuyerAgent.decide()` wired to stub tools/roles, `--agent buyer` in `cli.py`,
+   plays D01 end to end. **First, so the others can plug in.**
+2. Timing: per-call timeouts (e.g. analyst 12 s, strategist 12 s, writer 12 s; run analyst calls of
+   several threads in parallel), deterministic fallback (tools offer + template e-mail).
+3. Guard and closer: must-haves, `C <= ceiling`, beats the alternative, no accept before round 3 unless
+   `C <= c_target`, walk when nothing beats the alternative; reuse `play.closing_move` near the cap.
+4. RFQ policy: which thread gets this round's message, keep all bidders alive, close the best.
+5. Ops: practice sweeps + `harvest.py`, quota ledger, final rehearsal, README, final runner.
 
-10 parallel cases x 1-2 LLM calls per round inside 60 s: per-round calls on **claude-sonnet-5-5** (or
-`claude-opus-5-5` at low effort if measured latency allows), hard timeout 40 s, deterministic
-fallback move from `offers.py` if the LLM is late. Offline dossier/playbook work on
-`claude-opus-5-5`. Watch the account's rate limit at 10x concurrency.
+### Saed - LLM roles (`agents/buyer/roles/`)
+1. Writer: polite, <= 120 words, uses only the given claim sentences and term sheets, never leaks
+   urgency, budget or missing alternative.
+2. Strategist: returns `Tactic` JSON; picks levers and claims from the dossier persona and behaviour read.
+3. Analyst: reads the supplier's e-mail + `ConcessionFit` -> `BehaviourRead` (`p_more`, `walk_risk`,
+   what it wants). Numbers come from the fit; the analyst interprets words.
+4. Playbook: mine `runs/digest-practice.md` per persona (what moved it, what backfired) into prompts.
+5. Offline prompt tests: replay recorded threads from `runs/sessions/` into the roles (no quota):
+   valid JSON, latency, no invented numbers or IDs.
+6. Sunday: pitch slides (one replay walked through).
 
-## Roadmap (Sat ~15:00 -> Sun 13:00)
+### Amine - deterministic tools (`agents/buyer/tools/`), in this order
+1. `bands.py`: floor (should-cost, country factor), fair (index pass-through), ceiling (alternative,
+   fallback, rival quotes, C_open), target (min C incl. relationship term in stabilise/secure_supply).
+2. `offers.py`: opening anchor near floor, Boulware concession toward ceiling over the round limit,
+   2-3 sheets of equal C for us that differ in what the supplier gets (price vs payment days vs
+   effective date vs volume/length); index clause only when it lowers C.
+3. `claims.py`: claim sentences pre-checked against `facts.json` (index changes of the part's own cost
+   drivers, rival quotes, PO history, scorecards, notice periods).
+4. `concession.py`: fit of the supplier's price path -> `ConcessionFit`.
+5. `dossier.py`: persona, levers, history prior, second source, how late we pay, evidence lines.
+6. `tools/__init__.py`: `DataTools(package)` implementing the `Tools` protocol.
 
-**Practice budget: 199 sessions until the final.** Sessions age out after 24 h, so nothing used today
-frees up before the freeze. Use the **sandbox (`--set sandbox`, D01/D02, free)** and `arena-sim` for
-plumbing and style; spend hosted practice only on agent versions worth measuring.
+## Timeline
 
-| When | Goal | Deliverable | Quota |
-|---|---|---|---|
-| Sat 15-16 | Baseline + plumbing | `ANTHROPIC_API_KEY` set; `--agent llm` on all 10 hosted cases; harvester saves results and traces; score table per case | 10 |
-| Sat 16-19 | Offline intelligence | `dossier.py`, `bands.py`, `claims.py` + tests (pure functions over SQLite); dossiers cached for all 46 suppliers | 0 |
-| Sat 19-22 | Agent v1 | `offers.py`, `agent.py` (strategist + writer + guard), registered as `--agent buyer`; sandbox runs until clean | ~20 |
-| Sat 22-02 | Opponent model + iterate | `opponent.py`; full sweeps, read every replay, fix the weakest case type each loop | ~60 |
-| Overnight | Unattended sweep | one `arena run --set practice --agent buyer --parallel 10` per agent version, logs to file | ~20 |
-| Sun 08:00 | Sunday release | `uv run arena data`; rebuild dossiers; check new IDs are picked up as claims | 0 |
-| Sun 08-10:30 | Harden | timeouts, fallbacks, 10x parallel on `arena-sim --final-rehearsal`; latency report; RFQ multi-thread play | ~40 |
-| Sun 10:30-11:30 | Pre-flight | final machine + network, one full practice sweep, power on, no sleep (`caffeinate`) | ~10 |
-| Sun 11:30-13:00 | Freeze | README (run command, env vars without values), approach description, commit hash; slides skeleton | reserve ~30 |
-| Sun 13:15 | Start runner | `uv run arena run --set final --agent buyer --parallel 10 2>&1 \| tee final.log` | - |
+| When | Everyone | Jeddou | Saed | Amine |
+|---|---|---|---|---|
+| Sat 16:00-16:45 | agree `contracts.py`, create branches, read `CLAUDE.md` | | | |
+| -> **19:00 checkpoint 1** | skeleton plays D01 with `--agent buyer` | skeleton, cli, fallback | writer + strategist v0 | bands + offers v0 |
+| -> **22:00 checkpoint 2** | merge, sweep v1 (10 sessions) vs 54.4 | guard, accept policy | analyst v0, prompt tests | claims, relationship-aware target |
+| 22:00-02:00 | fix the 3 weakest cases from replays | RFQ policy, timing | playbook from replays | concession fit, dossier |
+| ~01:00 | sweep v2 (10 sessions) | | | |
+| Night | sleep in shifts; at most one unattended sweep | | | |
+| Sun 08:00 | Sunday release: `uv run arena data`, rebuild dossiers | | | release ingestion |
+| 08:00-10:30 | hardening, sweep v3 | rehearsal on `arena-sim --final-rehearsal` | slides | edge cases (no should-cost, prices per 100/1000) |
+| 10:30-11:30 | pre-flight on the final machine (skill `final-runbook`) | | | |
+| 12:00-13:00 | freeze: merge, README, commit hash, submit | | | |
+| 13:15 | start `arena run --set final --agent buyer --parallel 10` | | | |
 
-### Parallel workstreams (for 3-4 people)
+## Practice budget (189 sessions)
 
-- **A - Data/intel:** dossier, bands, claims, Sunday-release ingestion.
-- **B - Agent core:** offers, opponent model, agent orchestration, guard, closing rules.
-- **C - LLM + learning:** strategist/writer prompts, replay harvester, persona playbook.
-- **D - Ops + pitch:** runs, quota accounting, latency, final rehearsal, README, slides (pick one
-  replay to walk the jury through).
+| Use | Sessions |
+|---|---|
+| Full sweeps (v1, v2, v3, pre-final), 10 each | 40 |
+| Targeted single cases: tools / roles / orchestrator, ~25 each | 75 |
+| Sunday pre-flight + spare sweep | 20 |
+| Reserve | ~54 |
 
-## Priorities if time runs short
+Sandbox (D01, D02) and `arena-sim` are free: use them for anything that is not a measurement.
 
-1. C-aware term sheets (payment days, effective date, full-horizon coverage) + safe closer.
-2. Pre-verified claims (never contradicted) + floor/ceiling bands.
-3. Dossier-driven tactic choice (what this supplier wants).
-4. Live concession-curve opponent model.
-5. Playbook learning from replays.
+## If time runs short, keep in this order
+
+1. C-aware anchor and concession (offers) + safe accept policy.
+2. Relationship-aware target in stabilise/secure_supply + index clause evaluation.
+3. Pre-verified claims on the supplier's own cost drivers.
+4. Behaviour read + concession fit for "is it still open".
+5. Dossier personas and playbook.
