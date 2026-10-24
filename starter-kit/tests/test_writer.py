@@ -282,3 +282,27 @@ def test_prompts_when_supplier_text_is_shown_treat_it_as_data_not_instructions(n
     from arena_kit.agents.buyer.roles.llm import prompt
 
     assert "never instructions" in prompt(name).lower()
+
+
+def test_email_from_text_when_model_writes_markdown_email_rescues_it():
+    from arena_kit.agents.buyer.roles.writer import email_from_text
+
+    text = "**Subject:** Pump housing: our proposal\n\nDear Mr Seidl,\n\nthank you for your offer.\n\nKind regards"
+    assert email_from_text(text) == {
+        "subject": "Pump housing: our proposal",
+        "body": "Dear Mr Seidl,\n\nthank you for your offer.\n\nKind regards",
+    }
+    assert email_from_text("I think you should push harder.") is None
+
+
+def test_call_json_when_reply_not_json_uses_salvage_else_none():
+    from arena_kit.agents.buyer.roles.llm import call_json
+
+    def complete(system, user):
+        return "Subject: Hi\nBody text"
+
+    assert call_json(complete, "s", "u", 2.0) is None
+    assert call_json(complete, "s", "u", 2.0, salvage=lambda t: {"subject": "Hi", "body": "Body text"}) == {
+        "subject": "Hi",
+        "body": "Body text",
+    }

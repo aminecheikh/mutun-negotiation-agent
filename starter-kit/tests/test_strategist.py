@@ -91,7 +91,7 @@ def test_safe_filters_claims_levers_and_question_with_figures():
     }
     tactic = safe(ctx, threads, raw, rule_tactic(ctx, threads))
     assert tactic.claims == (0,)  # 1 hurts us, 2 already cited, 7 and "x" do not exist
-    assert tactic.levers == ("payment_days", "unit_price")  # tooling_eur is not negotiable in S01
+    assert tactic.levers == ("unit_price", "payment_days")  # tooling_eur is not negotiable in S01
     assert tactic.question is None
 
 
@@ -304,7 +304,9 @@ def test_choose_when_trades_priced_shows_them_with_their_euro_value():
     ctx, threads = setup([supplier()])
     trade = Trade("payment_days", 30, 60, 1234.0, 0.21)
     view = seen_thread(replace(ctx, trades={SID: (trade,)}), threads)
-    assert view["trades"] == [{"field": "payment_days", "theirs": 30, "ours": 60, "eur": 1234.0, "per_unit": 0.21}]
+    assert view["trades"] == [
+        {"field": "payment_days", "theirs": 30, "ours": 60, "eur": 1234.0, "per_unit": 0.21, "price_pct": 1.21}
+    ]  # 0.21 on its 17.40: comparable with its own price steps
 
 
 def test_llm_strategist_prompt_embeds_analyst_guide():
@@ -330,3 +332,78 @@ def test_standing_c_when_supplier_estimate_known_includes_relationship_charge():
     without = SimpleNamespace(case=case)  # before Jeddou's contracts field lands: no charge, no crash
     assert standing_c(with_estimate, events, SID) == total_cost(case, terms, supplier=estimate)
     assert standing_c(with_estimate, events, SID) > standing_c(without, events, SID)
+
+
+# ---- lever floor: what code always keeps in the levers ------------------------------------------------------
+
+
+def wider(ctx):
+    """S01 with contract length and lead time negotiable too."""
+    case = {**ctx.case, "negotiable": [*ctx.case["negotiable"], "contract_months", "lead_time_days"]}
+    return replace(ctx, case=case)
+
+
+def with_alternative(price, months):
+    msg = supplier(n=1)
+    msg["term_sheets"].append(
+        {
+            "term_sheet_id": "offer:70270-1-a",
+            "terms": {"unit_price": price, "payment_days": 30, "contract_months": months},
+        }
+    )
+    return msg
+
+
+def test_lever_floor_when_alternative_cheaper_keeps_the_terms_it_changes():
+    from arena_kit.agents.buyer.roles.strategist import alternatives, lever_floor, standing_c
+
+    ctx, threads = setup([supplier(), buyer(), with_alternative(price=15.0, months=24)])
+    ctx = replace(wider(ctx), trades={})
+    events = threads[SID]
+    assert alternatives(ctx, SID, events)[0][1] < standing_c(ctx, events, SID)
+    assert "contract_months" in lever_floor(ctx, SID, events, ("payment_days",))
+    view = seen_thread(ctx, threads)
+    assert view["alternatives"][0]["vs_standing_c"] < 0
+
+
+def test_lever_floor_when_alternative_dearer_ignores_it():
+    from arena_kit.agents.buyer.roles.strategist import lever_floor
+
+    ctx, threads = setup([supplier(), buyer(), with_alternative(price=19.0, months=24)])
+    ctx = replace(wider(ctx), trades={})
+    assert lever_floor(ctx, SID, threads[SID], ("payment_days",)) == ("unit_price", "payment_days")
+
+
+def test_lever_floor_keeps_the_largest_trade_but_never_forces_lead_time():
+    from arena_kit.agents.buyer.roles.strategist import lever_floor
+
+    ctx, threads = setup([supplier(), buyer(), supplier(n=1)])
+    ctx = wider(ctx)
+    big = Trade("contract_months", 12, 24, 9000.0, 0.9)
+    lead = Trade("lead_time_days", 56, 35, 20000.0, 2.0)
+    forced = lever_floor(replace(ctx, trades={SID: (big,)}), SID, threads[SID], ("payment_days",))
+    assert forced[:2] == ("unit_price", "contract_months")
+    kept = lever_floor(replace(ctx, trades={SID: (lead, big)}), SID, threads[SID], ())
+    assert "lead_time_days" not in kept and "contract_months" in kept
+
+
+def test_lever_floor_when_supplier_held_its_price_leads_with_terms_not_offered_last_time():
+    from arena_kit.agents.buyer.roles.strategist import lever_floor, stalled
+
+    ours = {
+        "from": "buyer",
+        "body": "Our proposal.",
+        "refs": [],
+        "term_sheets": [
+            {"terms": {"unit_price": 15.0, "payment_days": 30, "contract_months": 12}},
+            {"terms": {"unit_price": 15.3, "payment_days": 60, "contract_months": 12}},
+        ],
+    }
+    events = [supplier(), ours, supplier(n=1)]  # it answered at the same 17.40
+    ctx, threads = setup(events)
+    ctx = replace(wider(ctx), trades={SID: (Trade("payment_days", 30, 60, 9000.0, 0.9),)})
+    assert stalled(events)
+    assert lever_floor(ctx, SID, events, ("payment_days",))[1] == "contract_months"  # not payment_days again
+    moving = [supplier(), ours, supplier(price=17.0, n=1)]
+    assert not stalled(moving)
+    assert lever_floor(ctx, SID, moving, ("payment_days",))[1] == "payment_days"

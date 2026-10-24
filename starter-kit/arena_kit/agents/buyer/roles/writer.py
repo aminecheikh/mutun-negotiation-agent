@@ -82,8 +82,8 @@ TEXT = {
     "en": {
         "salutation": "Dear Sir or Madam,",
         "revised": ("your offer", "your revised offer and the step you made"),
-        "many": "Please find our alternative packages attached.",
-        "one": "Please find our proposal attached.",
+        "many": "We cannot accept your offer as it stands. Please find our counter-proposal attached, in packages.",
+        "one": "We cannot accept your offer as it stands. Please find our counter-proposal attached.",
         "moved": "We have moved towards your position.",
         "and": " and ",
         "single": "It offers {}.",
@@ -93,8 +93,8 @@ TEXT = {
     "de": {
         "salutation": "Sehr geehrte Damen und Herren,",
         "revised": ("Ihr Angebot", "Ihr überarbeitetes Angebot und Ihren Schritt auf uns zu"),
-        "many": "Anbei finden Sie unsere alternativen Pakete.",
-        "one": "Anbei finden Sie unseren Vorschlag.",
+        "many": "Ihr Angebot können wir so nicht annehmen. Anbei finden Sie unseren Gegenvorschlag in Paketen.",
+        "one": "Ihr Angebot können wir so nicht annehmen. Anbei finden Sie unseren Gegenvorschlag.",
         "moved": "Wir sind Ihnen entgegengekommen.",
         "and": " und ",
         "single": "Es bietet {}.",
@@ -274,6 +274,20 @@ MOVED_RE = re.compile(
 )  # "we have moved towards you" - not "we appreciate that you have moved"
 
 
+SUBJECT_LINE = re.compile(r"^\W*(?:subject|betreff)\W*:\W*(.+?)\W*$", re.I | re.M)
+
+
+def email_from_text(text: str) -> dict | None:
+    """A reply written as an e-mail instead of JSON ("**Subject:** ..." then the body): the same e-mail as JSON.
+    It still goes through `check` like any model answer."""
+    m = SUBJECT_LINE.search(text)
+    if not m:
+        return None
+    body = text[m.end() :].strip().strip("`").strip()
+    body = re.sub(r"^\W*(?:body|text)\W*:\W*", "", body, flags=re.I).strip()
+    return {"subject": m.group(1).strip(), "body": body} if body else None
+
+
 class LLMWriter:
     def __init__(self, complete=None):
         self.complete = complete
@@ -318,7 +332,7 @@ class LLMWriter:
             default=str,
         )
         self.last_problems, self.last_used_model = [], False
-        reply = call_json(self.complete, self.system, user, TIMEOUT_S)
+        reply = call_json(self.complete, self.system, user, TIMEOUT_S, salvage=email_from_text)
         if not isinstance(reply, dict) or not isinstance(reply.get("body"), str) or not reply["body"].strip():
             return fallback
         body = reply["body"].strip()

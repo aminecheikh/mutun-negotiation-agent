@@ -56,12 +56,16 @@ def threads_from_trace(trace: list[dict]) -> dict[str, list[dict]]:
         else:
             last_supplier = actor
             sheet = {"term_sheet_id": move.get("offer_id"), "terms": move.get("terms") or {}}
+            alts = [
+                {"term_sheet_id": a.get("offer_id"), "terms": a.get("terms") or {}}
+                for a in move.get("alternatives") or []
+            ]
             threads.setdefault(actor, []).append(
                 {
                     "from": f"sales@{actor}",
                     "status": move.get("status"),
                     "body": body,
-                    "term_sheets": [sheet] if move.get("terms") else [],
+                    "term_sheets": [sheet, *alts] if move.get("terms") else [],
                     "claim_results": move.get("claim_results"),
                     "missing_fields": move.get("missing_fields"),
                     "attachments": [],

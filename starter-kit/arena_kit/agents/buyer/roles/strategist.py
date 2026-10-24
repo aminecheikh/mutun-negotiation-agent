@@ -1,7 +1,8 @@
 """Strategist: this round's decision (owner: Saed). S2 + S3 in one LLM call.
 
-One-on-one: one supplier, take its deal or leave it for our alternative - never a comparison with other
-bidders. The orchestrator calls `choose(ctx, {supplier_id: events}, reads)` with the one thread being answered.
+One-on-one: the supplier of this thread, take its deal or leave it for our alternative. Other suppliers of the
+case are negotiated separately in their own threads by the orchestrator - never compared here. The orchestrator
+calls `choose(ctx, {supplier_id: events}, reads)` with the one thread being answered.
 `LLMStrategist.choose` sends that thread (dossier, band, standing C, fit, its own words, claim results, unused
 claims) to the model once and gets back both its read of the supplier (S3) and the tactic (S2) - one call
 instead of two saves ~10 s of the 60 s per move. The refined read is written back into the `reads` dict the
@@ -38,6 +39,12 @@ LAST_MESSAGES = 1  # with this many messages left, take any sheet that beats the
 # One-on-one: no argument built on another supplier's quote or offer (tools.claims makes these for RFQs).
 RIVAL_KINDS = {"rival_quote", "rival_offer"}
 MAX_TRADES = 6  # the biggest savings first (tools.levers sorts them); enough to pick 1-2 levers from
+MAX_LEVERS = 3  # unit_price + the 2 extra sheets the offer engine builds (tools.offers MAX_SHEETS - 1)
+# An alternative counts as cheaper for us beyond the offer engine's equal-cost tolerance (tools.offers, 0.2 %).
+CHEAPER_ALTERNATIVE = 0.002
+# Lead time and PPM stay at the supplier's standard unless the strategist trades them on purpose (tools.bands
+# HOLD_AT_STANDARD; a full order book charges for speed): code never forces them in.
+NOT_FORCED = {"lead_time_days", "ppm_commitment"}
 
 
 # ---- shared helpers (pure) ---------------------------------------------------------------------
@@ -62,7 +69,7 @@ def our_messages(events: list[dict]) -> int:
 
 
 def the_thread(threads: dict[str, list[dict]]) -> tuple[str, list[dict]]:
-    """The one supplier thread the orchestrator hands us (one-on-one: there is no other)."""
+    """The supplier thread the orchestrator hands us (each thread is negotiated on its own)."""
     sid = next(iter(threads))
     return sid, threads[sid]
 
@@ -92,6 +99,62 @@ def negotiable_levers(ctx: CaseContext, levers) -> tuple[str, ...]:
     the expected index move): banning it on rising paths cut P18's 24-month package, the one covering the need."""
     allowed = set(ctx.case.get("negotiable") or ()) | {"unit_price"}
     return tuple(dict.fromkeys(lever for lever in levers if lever in allowed and lever in TERMS))
+
+
+def alternatives(ctx: CaseContext, sid: str, events: list[dict]) -> list[tuple[dict, float]]:
+    """The other sheets of its last e-mail as (terms, C), cheapest first. We can only accept its first (standing)
+    sheet (api.md), so a cheaper alternative is won by proposing those terms back."""
+    sheets = (latest(events).get("term_sheets") or [])[1:]
+    supplier = (getattr(ctx, "supplier_estimates", None) or {}).get(sid)
+    out = []
+    for sheet in sheets:
+        terms = sheet.get("terms") or {}
+        try:
+            out.append((terms, total_cost(ctx.case, terms, standard_terms(events), supplier)))
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            continue
+    return sorted(out, key=lambda tc: tc[1])
+
+
+def lever_floor(ctx: CaseContext, sid: str, events: list[dict], levers) -> tuple[str, ...]:
+    """The levers code always keeps, whatever the model chose: price; the terms a cheaper alternative of the
+    supplier changes (our sheets then rebuild its own proposal, which it can agree to); the largest trade (the
+    term worth most to us - in practice often more than the whole price gap). Then the model's choice."""
+    _, theirs = standing(events)
+    c = standing_c(ctx, events, sid)
+    alt_fields = []
+    for terms, c_alt in alternatives(ctx, sid, events)[:1]:
+        if c_alt < c * (1 - CHEAPER_ALTERNATIVE):
+            alt_fields = [f for f, v in terms.items() if f != "unit_price" and v != theirs.get(f)]
+    # It held its price after our last sheets: the same packages again get "you sent the exact same packages",
+    # then a final offer (practice). Lead with terms we have not offered yet, so the sheets change.
+    used = our_last_variant_fields(events) if stalled(events) else set()
+    trade_fields = [t.field for t in ctx.trades.get(sid, ()) if t.field not in NOT_FORCED]
+    top = [f for f in trade_fields if f not in used][:1]  # stalled: the best trade we did not just offer
+    fresh = [f for f in (*levers, *trade_fields, *ctx.case.get("negotiable", ())) if f not in used | NOT_FORCED]
+    rest = [*levers] if not used else [*fresh, *levers]
+    ordered = negotiable_levers(ctx, ("unit_price", *alt_fields, *top, *rest))
+    return ordered[:MAX_LEVERS]
+
+
+def stalled(events: list[dict]) -> bool:
+    """It answered our last sheets without moving its price."""
+    prices = [
+        (m.get("term_sheets") or [{}])[0].get("terms", {}).get("unit_price")
+        for m in events
+        if m.get("from") != "buyer" and m.get("term_sheets")
+    ]
+    return our_messages(events) > 0 and len(prices) >= 2 and prices[-1] is not None and prices[-1] >= prices[-2]
+
+
+def our_last_variant_fields(events: list[dict]) -> set[str]:
+    """The non-price terms our last packages varied (each extra sheet changes one term of the first)."""
+    ours = [m for m in events if m.get("from") == "buyer" and m.get("term_sheets")]
+    if not ours:
+        return set()
+    sheets = [ts.get("terms", ts) for ts in ours[-1]["term_sheets"]]
+    main = sheets[0]
+    return {f for sheet in sheets[1:] for f, v in sheet.items() if f != "unit_price" and v != main.get(f)}
 
 
 def accept_ready(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
@@ -165,7 +228,7 @@ class RuleStrategist:
         levers = negotiable_levers(ctx, ("unit_price", *valued))
         if len(levers) < 2:  # probe at least one non-price term
             levers = negotiable_levers(ctx, (*levers, "payment_days", "contract_months", "effective_date"))
-        levers = levers[:3]
+        levers = lever_floor(ctx, sid, events, levers)
         claims = tuple(i for i, _ in usable_claims(ctx, sid, cited_refs(events))[: 3 if first else 2])
         question = COST_BREAKDOWN if first else None
         return Tactic(sid, "send", levers, claims, question, "rule: trade price against what it values")
@@ -197,7 +260,14 @@ def _thread_view(ctx: CaseContext, sid: str, events: list[dict], read: Behaviour
         "standing": {"term_sheet_id": sheet_id, "terms": terms, "c": None if math.isinf(c) else round(c)},
         "rule_read": asdict(read),
         "concession": asdict(fit) if (fit := ctx.fits.get(sid)) else None,
-        "trades": [asdict(t) for t in ctx.trades.get(sid, ())[:MAX_TRADES]],
+        "alternatives": [
+            {"terms": t, "c": round(c_alt), "vs_standing_c": None if math.isinf(c) else round(c_alt - c)}
+            for t, c_alt in alternatives(ctx, sid, events)
+        ],
+        "trades": [
+            {**asdict(t), "price_pct": _price_pct(t.per_unit, terms.get("unit_price"))}
+            for t in ctx.trades.get(sid, ())[:MAX_TRADES]
+        ],
         "supplier_emails": [
             {
                 "status": m.get("status"),
@@ -219,6 +289,11 @@ def _thread_view(ctx: CaseContext, sid: str, events: list[dict], read: Behaviour
             for i, c in usable_claims(ctx, sid, used)
         ],
     }
+
+
+def _price_pct(per_unit: float, price) -> float | None:
+    """A trade's value as a share of the supplier's price: comparable with its own steps (concession)."""
+    return round(per_unit / price * 100, 2) if isinstance(price, int | float) and price > 0 else None
 
 
 def _case_view(ctx: CaseContext) -> dict:
@@ -271,7 +346,7 @@ def safe(ctx: CaseContext, threads: dict[str, list[dict]], raw: dict, rule: Tact
     picked = (i for i in _items(raw.get("claims")) if isinstance(i, int) and not isinstance(i, bool) and i in usable)
     claims = tuple(dict.fromkeys(picked))[:3]
     levers = [lever for lever in _items(raw.get("levers")) if isinstance(lever, str)]
-    levers = negotiable_levers(ctx, levers) or (rule.levers if rule.supplier_id == sid else ())
+    levers = lever_floor(ctx, sid, events, negotiable_levers(ctx, levers) or rule.levers)
     question = raw.get("question")
     if not isinstance(question, str) or not question.strip() or any(ch.isdigit() for ch in question):
         question = None
@@ -336,4 +411,14 @@ class LLMStrategist:
         return tactic
 
 
-__all__ = ["LLMStrategist", "RuleStrategist", "accept_ready", "at_floor", "safe", "wants_from"]
+__all__ = [
+    "LLMStrategist",
+    "RuleStrategist",
+    "accept_ready",
+    "alternatives",
+    "at_floor",
+    "lever_floor",
+    "stalled",
+    "safe",
+    "wants_from",
+]

@@ -19,15 +19,26 @@ def prompt(name: str) -> str:
     return (PROMPTS / f"{name}.md").read_text(encoding="utf-8")
 
 
-def call_json(complete, system: str, user: str, timeout_s: float) -> dict | None:
+def call_json(complete, system: str, user: str, timeout_s: float, salvage=None) -> dict | None:
+    """The model's JSON answer, or None (the role falls back). `salvage(text)` may rescue a reply that is not
+    JSON (the writer: a "Subject: ... / body" e-mail); whatever it returns still passes the role's own checks."""
     if complete is None:
         return None
     future = _POOL.submit(complete, system, user)
     try:
-        return parse(future.result(timeout=timeout_s))
+        text = future.result(timeout=timeout_s)
     except FutureTimeout:
         future.cancel()  # do not charge for stale queued work after returning a rule-based answer
         log.warning("LLM call over %.0fs - using the fallback", timeout_s)
-    except Exception as e:  # provider error or unparsable reply
+        return None
+    except Exception as e:  # provider error
+        log.warning("LLM call failed (%s) - using the fallback", e)
+        return None
+    try:
+        return parse(text)
+    except Exception as e:  # unparsable reply
+        rescued = salvage(text) if salvage and isinstance(text, str) else None
+        if rescued:
+            return rescued
         log.warning("LLM call failed (%s) - using the fallback", e)
     return None
