@@ -39,24 +39,24 @@ SAFETY_S = 2.0  # never start a stage that would end closer than this to the mov
 # Questions for keep-alive e-mails, per case type: open, no figures, answerable by the role in charge.
 QUESTIONS = {
     "en": {
-        "price_increase": "Could you send us a breakdown of the cost elements behind your price?",
+        "price_increase": "Which later start date for the new price could you accept?",
         "renewal": "Which volume commitment would improve your terms for the coming period?",
         "rfq": "What is your earliest confirmed lead time for the start of production?",
         "bundling": "Could you confirm your price per complete kit?",
         "raw_material": "Could you state your base price without the surcharge clause?",
         "capacity": "What lead time can you confirm against a firm commitment from our side?",
         "quality": "Which defect level will your improvement plan commit to?",
-        "default": "Could you send us a breakdown of the cost elements behind your price?",
+        "default": "Which payment term or contract length would let you improve your price?",
     },
     "de": {
-        "price_increase": "Könnten Sie uns die Kostenbestandteile hinter Ihrem Preis aufschlüsseln?",
+        "price_increase": "Welchen späteren Beginn des neuen Preises könnten Sie akzeptieren?",
         "renewal": "Welche Mengenzusage würde Ihre Konditionen für die kommende Periode verbessern?",
         "rfq": "Welche Lieferzeit können Sie uns für den Serienanlauf verbindlich bestätigen?",
         "bundling": "Könnten Sie uns Ihren Preis pro vollständigem Set bestätigen?",
         "raw_material": "Könnten Sie uns Ihren Basispreis ohne die Zuschlagsklausel nennen?",
         "capacity": "Welche Lieferzeit können Sie gegen eine feste Abnahmezusage bestätigen?",
         "quality": "Auf welche Fehlerquote wird sich Ihr Verbesserungsplan festlegen?",
-        "default": "Könnten Sie uns die Kostenbestandteile hinter Ihrem Preis aufschlüsseln?",
+        "default": "Welches Zahlungsziel oder welche Vertragslaufzeit würde Ihnen bessere Konditionen ermöglichen?",
     },
 }
 KEEPALIVE = {

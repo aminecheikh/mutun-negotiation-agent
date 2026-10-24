@@ -729,3 +729,12 @@ def test_verdict_when_a_final_offer_carries_a_cheaper_alternative_sends_that_alt
     v = policy.verdict(s, th)
     assert v.kind == "counter" and "alternative" in v.reason
     assert policy.offers_more(s, th, [alt])  # its own proposal: more for it than our last sheet, not a push
+
+
+def test_keepalive_questions_never_ask_for_a_cost_breakdown():
+    # Saed (PR #4): no cost-breakdown requests anywhere - questions ask for a term that could change its price
+    from arena_kit.agents.buyer.pipeline import QUESTIONS
+
+    for language in QUESTIONS.values():
+        for question in language.values():
+            assert "breakdown" not in question.lower() and "aufschlüssel" not in question.lower()
