@@ -204,9 +204,11 @@ def buyer_factory(package=None):
     profiles + live reads of case facts, Saed). Per case: the strategist (S2+S3 in one call) and the writer.
     Without LLM_MODEL every role runs on its rule twin (no LLM calls at all)."""
     safe = thread_safe(package)
-    complete = llm_from_env() if os.environ.get("LLM_MODEL") else None
-    tools = DataTools(safe)
     config, telemetry = OrchestratorConfig.from_env(), Telemetry()
+    # the client gives up when the orchestrator stops waiting, so a late call frees its worker (llm.py pool)
+    budget = max(config.strategist_timeout_s, config.writer_timeout_s)
+    complete = llm_from_env(timeout_s=budget) if os.environ.get("LLM_MODEL") else None
+    tools = DataTools(safe)
     profiler = LLMProfiler(complete)
 
     def new_agent() -> BuyerAgent:

@@ -27,3 +27,7 @@ decision - why`. Changing `contracts.py` always needs an entry here.
   supplier, each term change against its quote that saves us money, in EUR and as a price per unit (lead time,
   ppm/chargeback, payment, Incoterm, volume, contract length, dates, clauses). For the strategist's explicit trades -
   the tools no longer impose lead time or ppm, they price them.
+- 2026-10-24 19:00 - team (Amine, user-approved) - Kit `agents/llm.py`: `llm_from_env(timeout_s=45.0)` builds the
+  Anthropic client with `max_retries=0`; `buyer_factory` passes the larger role bound (17 s). - The SDK retried
+  timeouts twice, so one late call held a worker of the 32-thread LLM pool ~135 s after the role fell back; with
+  10 cases the pool could fill and every role would fall back. The kit's own `LLMAgent` keeps its 45 s.
