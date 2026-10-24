@@ -185,10 +185,10 @@ def template(ctx: CaseContext, tactic: Tactic, plan: OfferPlan, claims: list[str
 
 # Claims of our own movement; only allowed when the packages really are above our previous offer.
 MOVED_RE = re.compile(
-    r"\b(?:we|our (?:offer|proposal|position))\b[^.\n]{0,40}\b(?:have |has )?(?:moved|improved|raised|increased|"
-    r"come (?:closer|towards)|stepped)\b",
+    r"\b(?:we|our (?:offer|proposal|position|price))(?: have| has| are| is)?(?: now| also| further| again| already)?"
+    r" (?:moved|improved|raised|increased|stepped|coming|come (?:closer|towards))\b",
     re.I,
-)
+)  # "we have moved towards you" - not "we appreciate that you have moved"
 
 
 class LLMWriter:

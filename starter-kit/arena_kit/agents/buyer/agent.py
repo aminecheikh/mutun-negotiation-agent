@@ -13,7 +13,7 @@ from ..llm import llm_from_env
 from ..naive import NaiveAgent
 from . import guard
 from .contracts import CaseContext, Tactic
-from .roles import LLMWriter, PassthroughProfiler, RuleAnalyst, RuleStrategist
+from .roles import LLMProfiler, LLMStrategist, LLMWriter, RuleAnalyst
 from .tools import DataTools
 
 log = logging.getLogger("arena")
@@ -89,10 +89,10 @@ def _summary(decision: dict) -> str:
 
 
 def buyer_factory(package=None):
-    """`--agent buyer`: one BuyerAgent per case, sharing the data package and the LLM client.
-    Without LLM_MODEL the writer uses its template (no LLM calls at all)."""
+    """`--agent buyer`: one BuyerAgent per case, sharing the data package, the LLM client and the profiler
+    (precomputed profiles + live reads of case facts). Without LLM_MODEL every role uses its rule-based
+    fallback (no LLM calls at all)."""
     complete = llm_from_env() if os.environ.get("LLM_MODEL") else None
     tools = DataTools(package)
-    return lambda: BuyerAgent(
-        tools, PassthroughProfiler(), RuleAnalyst(), RuleStrategist(), LLMWriter(complete), package
-    )
+    profiler = LLMProfiler(complete)
+    return lambda: BuyerAgent(tools, profiler, RuleAnalyst(), LLMStrategist(complete), LLMWriter(complete), package)

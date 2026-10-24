@@ -208,3 +208,12 @@ def test_check_when_vague_data_talk_without_claim_reports_it():
 def test_check_when_email_reveals_our_private_notes_reports_it():
     problems = run_check(body(CLAIM.sentence, "We know your bank is watching, so faster payment should help."))
     assert any("reveals our notes" in p for p in problems)
+
+
+def test_moved_re_when_supplier_moved_does_not_flag_but_our_move_does():
+    from arena_kit.agents.buyer.roles.writer import MOVED_RE
+
+    assert not MOVED_RE.search("We appreciate that you have moved on the price.")
+    assert not MOVED_RE.search("We note the step you made.")
+    for ours in ("We have moved towards your position.", "We raised our offer.", "Our offer has improved."):
+        assert MOVED_RE.search(ours), ours
