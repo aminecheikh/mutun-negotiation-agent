@@ -199,3 +199,16 @@ def test_candidates_when_any_case_every_claim_checks_out(case, mutate, package):
 
 def test_candidates_when_no_data_package_and_no_threads_returns_empty():
     assert claims.candidates(CASES["case:P01"], None, "sup:70110") == ()
+
+
+def test_data_tools_when_prepared_and_refreshed_pass_threads_to_claims(package):
+    from arena_kit.agents.buyer.tools import DataTools
+
+    case = CASES["case:P01"]
+    sheet = {"term_sheet_id": "offer:70110-0", "terms": {"unit_price": 138.55, "effective_date": "2026-11-01"}}
+    body = "PPI-D351 rose 1.0 % in twelve months and is 6 % of our cost."
+    threads = {"sup:70110": [{"from": "sales@70110", "status": "open", "body": body, "term_sheets": [sheet]}]}
+    tools = DataTools(package)
+    ctx = tools.prepare(case, threads)
+    assert ctx.claims["sup:70110"] == claims.candidates(case, package, "sup:70110", threads)
+    assert tools.refresh(ctx, threads).claims == ctx.claims
