@@ -1,6 +1,7 @@
 """tools/offers.py: the offer engine on real cases, and its invariants on every case file."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -305,18 +306,38 @@ def test_c_minimum_floor_when_the_round_changes_stays_the_same_price(tools):
     assert len(floors) == 1
 
 
-def test_plan_when_supplier_offers_a_cheaper_alternative_sends_exactly_that_alternative(tools):
-    # Saed: send the supplier's cheaper alternative back as our sheet (it will agree to its own proposal)
+def _with_cheaper_alternative(tools, status):
     case_id, sid, opening = P01
     case = CASES[case_id]
     events = [supplier_msg(sid, opening, 0)]
     ctx = tools.prepare(case, {sid: events})
-    reply = supplier_msg(sid, {**opening, "unit_price": 136.0}, 1)
+    reply = {**supplier_msg(sid, {**opening, "unit_price": 136.0}, 1), "status": status}
     alternative = {**opening, "unit_price": 131.0, "payment_days": 30}
     reply["term_sheets"].append({"term_sheet_id": f"offer:{sid[4:]}-1-a", "terms": alternative})
     events = [*events, buyer_msg({**opening, "unit_price": 128.0}), reply]
-    plan = tools.plan_offers(ctx, sid, events, Tactic(sid, "send"), READ)
+    return case, tools.plan_offers(ctx, sid, events, Tactic(sid, "send"), READ), alternative
+
+
+def test_plan_when_final_offer_has_a_cheaper_alternative_sends_exactly_that_alternative(tools):
+    # Saed: at closing time send the supplier's cheaper alternative back (it will agree to its own proposal)
+    case, plan, alternative = _with_cheaper_alternative(tools, "final_offer")
     assert plan.term_sheets[0] == complete_offer(case, alternative)
+
+
+def test_plan_when_cheaper_alternative_mid_negotiation_keeps_negotiating(tools):
+    # sweep 92d9283: sent back in round 2, P08/P18 closed at its own proposal (0.43/0.34) - negotiate it down instead
+    case, plan, alternative = _with_cheaper_alternative(tools, "open")
+    assert plan.term_sheets[0] != complete_offer(case, alternative)
+    assert plan.term_sheets[0]["unit_price"] < alternative["unit_price"]
+
+
+def test_plan_when_credibility_missing_never_opens_below_the_no_evidence_gap(tools):
+    case_id, sid, opening = P01
+    case = CASES[case_id]
+    events = [supplier_msg(sid, opening, 0)]
+    ctx = replace(tools.prepare(case, {sid: events}), credibility={})
+    plan = tools.plan_offers(ctx, sid, events, Tactic(sid, "send"), READ)
+    assert min(s["unit_price"] for s in plan.term_sheets) >= round(opening["unit_price"] * 0.92, 2) - 0.01
 
 
 @pytest.mark.parametrize("case", list(CASES.values()), ids=list(CASES))
