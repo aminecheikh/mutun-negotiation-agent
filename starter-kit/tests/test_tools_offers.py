@@ -286,3 +286,20 @@ def test_plan_when_supplier_does_not_move_never_repeats_our_price(tools):
     ours = [p.term_sheets[0]["unit_price"] for p in plans]
     for before, after in zip(ours, ours[1:], strict=False):
         assert after > before or after >= 52.9 - 0.005  # a visible step, unless we already reached its price
+
+
+def test_c_minimum_floor_when_the_round_changes_stays_the_same_price(tools):
+    # Saed (sweep e848872): P01's offer crept up (134.87 -> 134.88) while the supplier was still moving: the floor's
+    # grid ran from this round's price to its current price, so the same floor moved by a cent each round
+    case = CASES["case:P01"]
+    sid, opening = P01[1], complete_offer(CASES["case:P01"], P01[2])
+    events = [supplier_msg(sid, opening, 0)]
+    ctx = tools.prepare(case, {sid: events})
+    supplier, band = tools.supplier(ctx, sid, opening), ctx.bands[sid]
+    floors = {
+        offers._not_below_c_minimum(case, {**band.target_terms, "unit_price": low}, None, supplier, band, limit)[
+            "unit_price"
+        ]
+        for low, limit in ((120.0, 138.55), (121.5, 138.0), (122.3, 137.4))
+    }
+    assert len(floors) == 1
