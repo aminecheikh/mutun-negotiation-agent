@@ -13,6 +13,7 @@ Every stage has a deterministic fallback; no exception, slow model or missing da
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 from ...docs import standard_terms
@@ -48,14 +49,24 @@ class BuyerAgent:
         except Exception:
             log.exception("%s: tools.prepare failed - negotiating without bands, claims or dossiers", case["case_id"])
             ctx = CaseContext(case, {}, {}, {}, policy.alternative_cost(case))
-        dossiers = {}
-        for sid, dossier in ctx.dossiers.items():
+        return replace(ctx, dossiers=self._refine(case, ctx.dossiers))
+
+    def _refine(self, case: dict, dossiers: dict) -> dict:
+        """The profiler on every supplier, in parallel (an RFQ with new suppliers may call the model once per
+        supplier; the clock is already running). A failure keeps the tools' dossier."""
+
+        def one(item):
+            sid, dossier = item
             try:
-                dossiers[sid] = self.profiler.refine(case, dossier)
+                return sid, self.profiler.refine(case, dossier)
             except Exception:
                 log.exception("%s: profiler failed for %s - dossier unchanged", case["case_id"], sid)
-                dossiers[sid] = dossier
-        return replace(ctx, dossiers=dossiers)
+                return sid, dossier
+
+        if len(dossiers) <= 1:
+            return dict(map(one, dossiers.items()))
+        with ThreadPoolExecutor(max_workers=len(dossiers), thread_name_prefix="buyer-profiler") as pool:
+            return dict(pool.map(one, dossiers.items()))
 
     def estimator(self, case: dict, ctx: CaseContext):
         """(supplier_id, events) -> our estimate of the supplier, the same one the tools price with: its quote and
@@ -190,19 +201,19 @@ def _summary(decision: dict) -> str:
 def buyer_factory(package=None):
     """`--agent buyer`: one BuyerAgent per case, sharing the data package (behind the tools' lock: one SQLite
     connection, up to 10 cases in parallel), the LLM client and the telemetry. Without LLM_MODEL every role runs on
-    its rule twin (no LLM calls at all). The strategist is Saed's LLMStrategist when the roles package provides it,
-    else the rule strategist."""
+    its rule twin (no LLM calls at all). Strategist and profiler are Saed's LLM roles when the roles package provides
+    them, else their rule versions (identical behaviour without a model)."""
     safe = thread_safe(package)
     complete = llm_from_env() if os.environ.get("LLM_MODEL") else None
     tools = DataTools(safe)
     config, telemetry = OrchestratorConfig.from_env(), Telemetry()
-    llm_strategist = getattr(roles, "LLMStrategist", None)
+    llm_strategist = getattr(roles, "LLMStrategist", None)  # S2+S3 (Saed); absent on older roles code
+    llm_profiler = getattr(roles, "LLMProfiler", None)  # S4 (Saed): a cached lookup, the model only for new facts
 
     def new_agent() -> BuyerAgent:
         strategist = llm_strategist(complete) if llm_strategist else RuleStrategist()
-        return BuyerAgent(
-            tools, PassthroughProfiler(), RuleAnalyst(), strategist, LLMWriter(complete), safe, config, telemetry
-        )
+        profiler = llm_profiler(complete) if llm_profiler else PassthroughProfiler()
+        return BuyerAgent(tools, profiler, RuleAnalyst(), strategist, LLMWriter(complete), safe, config, telemetry)
 
     return new_agent
 
