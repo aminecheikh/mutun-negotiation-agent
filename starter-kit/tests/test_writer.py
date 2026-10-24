@@ -185,3 +185,21 @@ def test_writer_when_model_claims_a_move_we_did_not_make_uses_template():
     email = writer.write(ctx("unknown"), TACTIC, plan, events)
     assert "moved towards" not in email.body and not writer.last_used_model
     assert any("move we did not make" in p for p in writer.last_problems)
+
+
+def test_writer_when_model_recalls_a_year_from_our_notes_keeps_it_but_not_other_figures():
+    evidence = ("doc:20260715-70110-N: reminded us that in 2022 they kept supplying at the old price; OTD 63.5 %",)
+    dossier = Dossier(SID, "Giesserei Brandlhuber", "DE", "partner", (), None, False, evidence)
+    c = CaseContext({"case_id": "case:T01", "title": "HN volute casings", "briefing": ""}, {SID: dossier}, {},
+                    {SID: (CLAIM,)}, None)  # fmt: skip
+    ok = body("Thank you for holding your price in 2022.", CLAIM.sentence)
+    bad = body("Your delivery was only 63.5 % on time.", CLAIM.sentence)
+    for text, used in ((ok, True), (bad, False)):
+        writer = LLMWriter(lambda s, u, t=text: json.dumps({"subject": "Re", "body": t}))
+        writer.write(c, TACTIC, PLAN, EVENTS)
+        assert writer.last_used_model is used, text
+
+
+def test_check_when_vague_data_talk_without_claim_reports_it():
+    problems = run_check(body(CLAIM.sentence, "Comparable parts cost much less on the market."))
+    assert any("data talk" in p for p in problems)

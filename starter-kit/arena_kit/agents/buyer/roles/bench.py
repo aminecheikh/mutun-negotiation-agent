@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import statistics
+import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -80,9 +81,16 @@ def points(threads: dict[str, list[dict]], n: int) -> list[dict[str, list[dict]]
     return [cuts[round(i * step)] for i in range(n)]
 
 
-def one(case, cut, tools, complete) -> dict:
+DATA_LOCK = threading.Lock()  # --lock: serialise data-package access to measure the roles alone
+
+
+def one(case, cut, tools, complete, lock: bool) -> dict:
     opening = {sid: ev[:1] for sid, ev in cut.items()}
-    ctx = tools.prepare(case, opening)
+    if lock:
+        with DATA_LOCK:
+            ctx = tools.prepare(case, opening)
+    else:
+        ctx = tools.prepare(case, opening)
     live = {sid: ev for sid, ev in cut.items() if ev[-1].get("status") not in ("walked_away", "no_bid")}
     reads = {sid: RuleAnalyst().read(ctx, sid, ev, tools.fit_concessions(ctx, sid, ev)) for sid, ev in live.items()}
     t0 = time.monotonic()
@@ -94,7 +102,12 @@ def one(case, cut, tools, complete) -> dict:
     if tactic.action != "send":
         return out
     events = live[tactic.supplier_id]
-    plan = tools.plan_offers(ctx, tactic.supplier_id, events, tactic, reads[tactic.supplier_id])
+    if lock:
+        with DATA_LOCK:
+            plan = tools.plan_offers(ctx, tactic.supplier_id, events, tactic, reads[tactic.supplier_id])
+    else:
+        plan = tools.plan_offers(ctx, tactic.supplier_id, events, tactic, reads[tactic.supplier_id])
+    sentences = [ctx.claims[tactic.supplier_id][i].sentence for i in tactic.claims]
     writer = LLMWriter(complete)
     t0 = time.monotonic()
     email = writer.write(ctx, tactic, plan, events)
@@ -102,7 +115,9 @@ def one(case, cut, tools, complete) -> dict:
     out["writer_llm"] = writer.last_used_model
     out["writer_rejected"] = writer.last_problems
     out["email"] = email.body
-    out["final_check"] = check(email.body, [], set(email.refs), str(events[-1].get("body") or ""), case["title"])
+    allowed = f"{events[-1].get('body') or ''}\n{tactic.question or ''}"
+    out["final_check"] = check(email.body, sentences, set(email.refs), allowed, case["title"])
+    out["claims_sent"] = len(sentences)
     return out
 
 
@@ -111,6 +126,7 @@ def main() -> None:
     ap.add_argument("--parallel", type=int, default=10)
     ap.add_argument("--points", type=int, default=3, help="decision points per recorded session")
     ap.add_argument("--show", type=int, default=2, help="e-mails to print")
+    ap.add_argument("--lock", action="store_true", help="serialise data-package access (measure the roles alone)")
     args = ap.parse_args()
     load_env()
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
@@ -131,12 +147,15 @@ def main() -> None:
     print(f"{len(jobs)} decision points from {len(list(RUNS.glob('*.json')))} sessions, {args.parallel} in parallel")
     t0 = time.monotonic()
     with ThreadPoolExecutor(args.parallel) as pool:
-        results = list(pool.map(lambda j: _safe(one, *j, tools, complete), jobs))
+        results = list(pool.map(lambda j: _safe(one, *j, tools, complete, args.lock), jobs))
     wall = time.monotonic() - t0
     ok = [r for r in results if "error" not in r]
-    for r in results:
-        if "error" in r:
-            print("ERROR", r["case"], r["error"])
+    errors = [r for r in results if "error" in r]
+    for r in errors[:2]:
+        print("ERROR", r["case"], r["error"])
+    if errors:
+        kinds = [r["error"].split("(")[0] for r in errors]
+        print(f"errors: {len(errors)}/{len(results)}", {k: kinds.count(k) for k in set(kinds)})
     ts, tw = [r["t_strategist"] for r in ok], [r["t_writer"] for r in ok if "t_writer" in r]
     print(f"\nwall {wall:.0f}s for {len(jobs)} points")
     for name, xs in (("strategist", ts), ("writer", tw)):
@@ -153,6 +172,9 @@ def main() -> None:
         reasons = [p.split(":")[0] for r in sent for p in r["writer_rejected"]]
         print("writer rejections:", {k: reasons.count(k) for k in set(reasons)} or "none")
         print("unsafe e-mails sent (must be 0):", sum(bool(r["final_check"]) for r in sent))
+        for r in [r for r in sent if r["final_check"]][:3]:
+            print("  unsafe:", r["case"], r["final_check"])
+        print(f"claims cited: {sum(r['claims_sent'] for r in sent)} in {len(sent)} e-mails")
     actions = [r["tactic"]["action"] for r in ok]
     print("actions:", {a: actions.count(a) for a in set(actions)})
     for r in sent[: args.show]:

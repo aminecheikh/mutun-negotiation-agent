@@ -1,3 +1,5 @@
+> **REFERENCE ONLY - never fed to a prompt.** Practice suppliers, names and figures below are the evidence the general rules were derived from; the final's suppliers are new. The prompts in `prompts/` carry only the general rules.
+
 # Negotiation playbook - what the data says, and how to turn it into agent skills
 
 Source: data package v1 (as of 2026-09-30). Everything here was computed from `data/` - the

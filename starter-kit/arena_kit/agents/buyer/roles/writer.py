@@ -19,10 +19,20 @@ log = logging.getLogger("arena")
 TIMEOUT_S = 15.0
 MAX_WORDS = 180  # the prompt asks for 150; claim sentences with their IDs are long
 NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
+YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 LEAKS = re.compile(
     r"\b(urgent\w*|asap|as soon as possible|immediately|right away|quickly|soon|deadline|budget|"
     r"no (?:other )?alternative|only (?:possible )?supplier|depend(?:ent|s)? on you|"
     r"(?:switch|move|change) (?:to )?(?:another|a different|other) supplier|last chance|or else)\b",
+    re.I,
+)
+# Talk of data we do not cite: the supplier asks for it, we cannot show it, it costs trust (D02, Amine's ask).
+# Allowed inside claim sentences and when the supplier used the same words first.
+VAGUE_DATA = re.compile(
+    r"\b(?:comparable (?:parts?|shafts?|castings?|suppliers?|offers?|quotes?|prices?)|benchmarks?|"
+    r"market (?:prices?|levels?|data|rates?)|other suppliers?|competitors?|competing offers?|"
+    r"our (?:data|analysis|analyses|records|research|figures|estimates?|calculations?|assessment|cost model)|"
+    r"should[- ]cost|cost picture|price indices|index data)\b",
     re.I,
 )
 SIGNATURE = "Kind regards\nHollerau Pumpenwerke, Purchasing"
@@ -119,6 +129,11 @@ def check(body: str, sentences: list[str], allowed_refs: set[str], supplier_text
         problems.append(f"data IDs not from the chosen claims: {sorted(ids)[:5]}")
     if leak := LEAKS.search(rest):
         problems.append(f"leak: {leak.group(0)!r}")
+    vague = {m.group(0).lower() for m in VAGUE_DATA.finditer(rest)} - {
+        m.group(0).lower() for m in VAGUE_DATA.finditer(supplier_text)
+    }
+    if vague:
+        problems.append(f"data talk without a claim: {sorted(vague)[:3]}")
     if len(body.split()) > MAX_WORDS:
         problems.append(f"too long: {len(body.split())} words")
     return problems
@@ -208,7 +223,10 @@ class LLMWriter:
         if not isinstance(reply, dict) or not isinstance(reply.get("body"), str) or not reply["body"].strip():
             return fallback
         body = reply["body"].strip()
-        allowed_text = f"{supplier_text}\n{tactic.question or ''}"
+        # Years from our own notes may be recalled ("you held your price in 2022"); other figures there are not
+        # arena-checked claims and stay out.
+        years = " ".join(YEAR_RE.findall(" ".join(dossier.evidence))) if dossier else ""
+        allowed_text = f"{supplier_text}\n{tactic.question or ''}\n{years}"
         problems = check(body, sentences, set(refs), allowed_text, ctx.case["title"])
         if not moved["we_moved"] and (claim := MOVED_RE.search(body)):
             problems.append(f"claims a move we did not make: {claim.group(0)!r}")
