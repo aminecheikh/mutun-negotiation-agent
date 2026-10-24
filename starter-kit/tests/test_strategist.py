@@ -385,8 +385,8 @@ def wider(ctx):
     return replace(ctx, case=case)
 
 
-def with_alternative(price, months):
-    msg = supplier(n=1)
+def with_alternative(price, months, main=17.4, status="open"):
+    msg = supplier(price=main, status=status, n=1)
     msg["term_sheets"].append(
         {
             "term_sheet_id": "offer:70270-1-a",
@@ -449,3 +449,23 @@ def test_lever_floor_when_supplier_held_its_price_leads_with_terms_not_offered_l
     moving = [supplier(), ours, supplier(price=17.0, n=1)]
     assert not stalled(moving)
     assert lever_floor(ctx, SID, moving, ("payment_days",))[1] == "payment_days"
+
+
+def test_lever_floor_when_alternative_cheaper_mid_negotiation_does_not_force_it():
+    from arena_kit.agents.buyer.roles.strategist import closing, lever_floor
+
+    events = [supplier(), buyer(), with_alternative(price=15.0, months=24, main=17.0)]  # it moved: still talking
+    ctx, threads = setup(events)
+    ctx = replace(wider(ctx), trades={})
+    assert not closing(ctx, events)
+    assert "contract_months" not in lever_floor(ctx, SID, events, ("payment_days",))
+
+
+def test_lever_floor_when_alternative_cheaper_in_final_offer_rebuilds_it():
+    from arena_kit.agents.buyer.roles.strategist import closing, lever_floor
+
+    events = [supplier(), buyer(), with_alternative(price=15.0, months=24, main=17.0, status="final_offer")]
+    ctx, threads = setup(events)
+    ctx = replace(wider(ctx), trades={})
+    assert closing(ctx, events)
+    assert "contract_months" in lever_floor(ctx, SID, events, ("payment_days",))

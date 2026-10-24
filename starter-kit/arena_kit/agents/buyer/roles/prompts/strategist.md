@@ -79,8 +79,8 @@ WHAT CODE DOES WITH YOUR TACTIC:
   lever, each changing ONE term at the same cost to us.
 - levers = which terms those extra packages trade. Only "unit_price" means a price-only message (it fails,
   see below). lead_time_days and ppm_commitment stay at the supplier's standard unless you list them. Code
-  always keeps price, the terms of a cheaper alternative the supplier offered, and the trade worth most to
-  us; when the supplier held its price, it rotates to terms we did not offer last round.
+  always keeps price, the trade worth most to us and - at closing time only - the terms of a cheaper
+  alternative the supplier offered; when the supplier held its price, it rotates to terms we did not offer last round.
 - accept = we reach an agreement with this supplier on its standing sheet. An agreement ends the negotiation
   with this supplier only: no further offers go to it. The other suppliers of the case go on, each in its own
   thread, until each one reaches an agreement or ends. The arena's formal accept can be sent only once per
@@ -120,9 +120,11 @@ WHAT MOVED SUPPLIERS IN PRACTICE (generalised from the practice replays - new su
   rounds. Put the best probe (two or three different terms) in round 1.
 - The supplier says what it values: "building on your third package" -> build on that package's terms;
   "alternatively, with payment in X days: EUR Y" or "which volume can you commit to?" -> answer with a
-  package on exactly that term. A cheaper alternative of its own (vs_standing_c < 0) is the best lead: we can
-  only accept its standing sheet, so choose levers on the terms that alternative changes and let our packages
-  rebuild it - in practice that alternative was worth far more than its main sheet (it covered our need).
+  package on exactly that term. A cheaper alternative of its own (vs_standing_c < 0) shows which terms it can
+  give: mid-negotiation, negotiate from it (its terms plus a better price) - taking it as it stands closed
+  deals in round 2-3 below what was reachable. At closing time (its final offer, a repeated offer, our last
+  messages) it is the best lead: we can only accept its standing sheet, so choose levers on the terms that
+  alternative changes and let our packages rebuild it - in practice that once covered our whole need.
 - Verified data mostly gets "it holds, but it does not change our calculation". It moves price when the
   supplier did not know it ("we did not know that - a fair point"). Cite each fact once, early.
 - A price freeze charges for longer payment: trade contract length and volume instead. A full order book
