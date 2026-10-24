@@ -82,3 +82,4 @@ Branch `feat/roles-saeb` · owns `starter-kit/arena_kit/agents/buyer/roles/` (co
 | 23:00 | practice sweep (teammate) | 10 practice | 10 | 61.3 | best so far; P05 .07->.36, P02/P08 new bests |
 | 00:05 | 8030653 (no LLM credit) | 10 practice | 10 | 50.6 | INVALID: all LLM calls failed, rules only |
 | 00:20 | 92d9283 | 10 practice | 10 | 58.4 | valid (LLM ok); alternative sent back too early (P08/P18) |
+| 01:50 | 82cd3ae (offers cap + alt at closing + credible floor + release dossiers) | 10 practice | 10 | **62.7** | best single run; P08 .665 new best, P05 .36 (was .09), P02 .22 weakest; best-of 68.8 |
