@@ -684,3 +684,22 @@ def test_close_when_the_arena_says_the_thread_ended_marks_it_dead():
     s.table = EndedTable()
     Arbiter(s)._close(th, {"action": {"type": "accept", "term_sheet_id": "offer:x"}}, "test")
     assert not th.alive
+
+
+# ---- the same offer twice is its best -----------------------------------------------------------------------------
+
+
+def test_verdict_when_one_supplier_repeats_its_offer_accepts_it_within_our_margin():
+    # the user: when the supplier gives the same offer twice, do not negotiate any more
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0), ours(8.0), quote(SID, 1, 9.6), ours(8.3), quote(SID, 2, 9.6)]})
+    th = s.threads[SID]
+    assert policy.acceptable(s, th)
+    v = policy.verdict(s, th)
+    assert v.kind == "accept" and "same offer" in v.reason
+
+
+def test_others_settled_when_a_supplier_repeated_its_offer_counts_it_as_its_best():
+    b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0),
+                ours(15.2, extra={"lead_time_days": 42}), rfq_quote(B, 2, 17.0)]  # fmt: skip
+    s = session_for(S02, {A: A_COUNTERED, B: b_events})
+    assert policy.others_settled(s, s.threads[A])

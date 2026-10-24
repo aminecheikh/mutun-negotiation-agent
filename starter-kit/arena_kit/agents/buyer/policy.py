@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from ...cost import complete_offer, must_haves_ok, supplier_value, total_cost
+from . import observe
 from .contracts import Tactic
 from .state import CaseSession, ThreadState
 
@@ -171,6 +172,7 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
     meets = band is None or th.c <= band.c_target * (1 + cfg.accept_eps)  # our expectation: the band target
     at_target = ok and band is not None and meets and not early
     final_closed = th.status == "final_offer" and not counter_allowed(session, th)
+    repeated = th.status == "open" and repeated_offer(th)
     forced = [
         why
         for cond, why in (
@@ -178,6 +180,7 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
             (left <= 0, "no messages left"),
             (at_target, "standing sheet at our target"),
             (final_closed, "final offer, no counter worth the risk"),
+            (repeated, "the same offer twice: its best, no more negotiating"),
             (session.in_close_window(), "case cap is near"),
         )
         if cond
@@ -221,11 +224,20 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
     return Verdict("counter", "negotiate", accept_permitted=ok and cheaper is None and not early and settled)
 
 
+def repeated_offer(th: ThreadState) -> bool:
+    """The supplier sent the same terms in its last two replies to our offers: its best (the user: then stop)."""
+    sheets = observe.supplier_sheets(th.events)
+    ours = sum(1 for m in th.events if m.get("from") == "buyer" and m.get("term_sheets"))
+    return ours >= 2 and len(sheets) >= 3 and sheets[-1] == sheets[-2]
+
+
 def others_settled(session: CaseSession, th: ThreadState) -> bool:
     """Every other live supplier has given its best offer: a final offer, an agreement to our sheet, or no
     messages left. One supplier: trivially true."""
     for other in session.alive():
         if other is th or other.status == "final_offer" or other.moves_left(session.case) <= 0:
+            continue
+        if repeated_offer(other):  # the same offer twice: its best
             continue
         if other.status == "agreed" and acceptable(session, other):
             continue  # it accepted our own sheet: its best answer to our offer
