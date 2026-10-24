@@ -339,3 +339,18 @@ def test_arbiter_when_nothing_beats_the_alternative_walks_once():
     arbiter.step()
     arbiter.step()
     assert s.table.closed == [(SID, {"type": "walk_away"})] and s.ended
+
+
+def test_reserve_when_two_threads_cite_the_same_id_only_the_first_keeps_it():
+    # integration run with the real data: two RFQ bidders were sent the same index pair in the same second
+    s = session_for(S02, {A: [rfq_quote(A, 0, 17.2)], B: [rfq_quote(B, 0, 17.5)]})
+    known = {"idx:LCI-C@2025-06", "idx:LCI-C@2026-06"}
+    s.set_lookup(lambda ref: ref in known)
+    claim = "Labour costs changed +2.7% from 2025-06 to 2026-06 (idx:LCI-C@2025-06, idx:LCI-C@2026-06)."
+    body = f"Dear Sir or Madam,\n\nthank you for your offer. {claim} Please find our proposal attached. Kind regards"
+    message = {"subject": "Re", "body": body, "term_sheets": [], "refs": sorted(known)}
+    first = guard.reserve(s, s.threads[A], message)  # both were built before either was sent
+    second = guard.reserve(s, s.threads[B], message)
+    assert claim in first["body"] and first["refs"] == sorted(known)
+    assert claim not in second["body"] and second["refs"] == [] and "proposal attached" in second["body"]
+    assert known <= s.burned

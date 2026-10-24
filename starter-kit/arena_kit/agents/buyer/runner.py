@@ -129,8 +129,10 @@ class ThreadWorker:
 
     def send(self, th: ThreadState, message: dict, kind: str, verdict=None, out=None, problems=()) -> None:
         s = self.s
-        if not self.arbiter.begin_send(th):
-            return
+        with s.lock:  # reserve this message's data IDs atomically: parallel threads must not cite the same one
+            message = guard.reserve(s, th, message)
+            if not self.arbiter.begin_send(th):
+                return
         asked_at = th.received_at
         delivered, reply = True, None
         try:
@@ -163,7 +165,6 @@ class ThreadWorker:
         with s.lock:
             if delivered:
                 th.events.append({**message, "from": "buyer"})
-                s.burned |= {r for r in observe.ids_in(message) if not r.startswith("offer:")}
             th.events.append(reply)
             th.received_at = received
             th.slowest_round_s = max(th.slowest_round_s, received - asked_at)

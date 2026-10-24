@@ -148,6 +148,19 @@ def build_message(session: CaseSession, th: ThreadState, sheets, email: Email | 
     return Checked(message, tuple(problems))
 
 
+def reserve(session: CaseSession, th: ThreadState, message: dict) -> dict:
+    """Right before the POST, under the case lock: drop arguments another thread cited meanwhile and mark this
+    message's IDs as used. Threads prepare their e-mails in parallel; without this two bidders could both cite the
+    same index pair in the same second (the arena then answers `duplicate`)."""
+    if not message.get("body"):
+        return message
+    body, cited, _ = clean_body(session, th, message["body"])
+    session.burned |= {r for r in cited if not r.startswith("offer:")}
+    th.cited_offers |= {r for r in cited if r.startswith("offer:")}
+    refs = [r for r in message.get("refs") or [] if r in cited][:MAX_REFS]
+    return {**message, "body": body or message["body"], "refs": refs}
+
+
 def accept_ok(session: CaseSession, th: ThreadState) -> bool:
     """The invariant every accept passes, re-checked at the last moment under the case lock."""
     return policy.acceptable(session, th)
