@@ -1,5 +1,11 @@
 # Open issues: orchestrator (Jeddou)
 
+Review update (24 October): see `orchestrator-review.md` for fixes and evidence. Recovery now counts
+timeout rounds (item 7), and sweep/rehearsal scripts exist (item 14). Attachment waiting is bounded;
+late or rejected close actions reconcile the live session. Sunday-release ingestion is tested locally.
+Hosted-arena and live-model checks still require credentials. The parallel probe reports a timing
+heuristic, not proof of server serialization; inspect results before enabling the experimental gate.
+
 What is not verified yet, what is an assumption, and what needs a decision from someone else. Written with the
 orchestrator PR (`feat/orchestrator`). Each item says how to close it. Newest decisions go to
 `docs/team/DECISIONS.md`, not here.
@@ -39,8 +45,8 @@ orchestrator PR (`feat/orchestrator`). Each item says how to close it. Newest de
 6. Policy thresholds are on the cost function's own scale: accept within 0.5 % of the band's target C; one counter
    after a final offer only if it is more than 2 % above target; a rival "could beat" a sheet if it can plausibly
    go 1 % lower; a rival with `p_room` < 0.2 counts as done. These are judgement calls, documented, few.
-7. **`moves_left` counts our messages only.** On the arena a timeout also uses a round. The kit has the same
-   approximation; the runner is built not to time out, so the effect should be small.
+7. **Resolved in review:** recovery includes server timeout rounds in `moves_left` and preserves the
+   server's remaining response clock. Regression tests cover resuming and uncertain POST responses.
 8. **Our `C_open` uses our supplier estimate** for the relationship charge; the arena uses the true values. A deal
    priced just under our `C_open` could sit just above the arena's in a stabilise / secure_supply case.
 
@@ -67,9 +73,8 @@ orchestrator PR (`feat/orchestrator`). Each item says how to close it. Newest de
 
 ## Not done from the orchestrator plan
 
-14. `scripts/sweep.py` (run + harvest + per-case delta table) and `scripts/rehearse.py`. Meanwhile: the kit's
-    `arena run` + `scripts/harvest.py --digest`, and the rehearsal commands in skill `final-runbook`. A two-wave
-    rehearsal on arena-sim is covered by `tests/test_orchestrator_runner.py`.
+14. **Resolved in review:** `scripts/sweep.py` saves per-run results/session snapshots and compares a baseline;
+    `scripts/rehearse.py` runs a self-contained two-wave simulator check. Hosted sweeps remain pending credentials.
 15. The `RoundFrame` contract additions in the plan were not proposed: the roles do not accept a frame argument,
     so the frame stays internal to the orchestrator (verdict, permissions, filtered claims). No `contracts.py`
     change in this PR.

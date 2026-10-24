@@ -58,7 +58,7 @@ FACT_KEYS = ("supplier", "supplier_id")
 
 
 def build(case: dict, package, supplier_id: str) -> Dossier:
-    facts = _fact_lines(case, supplier_id)
+    facts = [*_fact_lines(case, supplier_id), *_release_lines(package, supplier_id)]
     row = _one(package, "SELECT * FROM suppliers WHERE id = ?", supplier_id) if package else None
     if row is None:  # unknown to the data: only what the case itself says
         second = _second_source(case, package, supplier_id) if package else False
@@ -99,6 +99,26 @@ def _fact_lines(case: dict, supplier_id: str) -> list[str]:
     return lines
 
 
+def _release_lines(package, supplier_id: str) -> list[str]:
+    """Sunday news/letters are outside world.sqlite. Put them ahead of old evidence for the roles."""
+    rows = [
+        (fid, fact)
+        for fid, fact in (getattr(package, "release_facts", {}) or {}).items()
+        if any(fact.get(k) == supplier_id for k in FACT_KEYS)
+    ]
+    rows.sort(key=lambda item: str(item[1].get("date", "")), reverse=True)
+    lines = []
+    for fid, fact in rows[:MAX_DOCS]:
+        body = json.dumps(fact, ensure_ascii=False, default=str)
+        if fid.startswith(("doc:", "news:")):
+            try:
+                body += " " + package.document(fid)
+            except (OSError, ValueError, TypeError):
+                pass  # the structured release fact is still useful
+        lines.append(f"release fact {fid}: {body[:600]}")
+    return lines
+
+
 def _persona(scores: dict[str, int]) -> str:
     best = max(PERSONA_ORDER, key=lambda p: (scores.get(p, 0), -PERSONA_ORDER.index(p)))
     return best if scores.get(best, 0) >= MIN_PERSONA_SCORE else "unknown"
@@ -114,6 +134,13 @@ def _signals(package, sid: str, row: dict, scores: dict[str, int]) -> tuple[list
     """(signal lines, other notes): news, skonto and the letters and notes that hit a persona phrase score the
     personas and come first; notes without a hit go after the numbers."""
     lines = []
+    for fact in (getattr(package, "release_facts", {}) or {}).values():
+        if any(fact.get(k) == sid for k in FACT_KEYS) and (hit := TOPIC_SIGNALS.get(fact.get("topic"))):
+            scores[hit[0]] += hit[1]
+    for line in _release_lines(package, sid):
+        for persona, phrases in PHRASE_SIGNALS.items():
+            if any(phrase in line.lower() for phrase in phrases):
+                scores[persona] += 1
     for n in package.query(
         "SELECT id, date, topic, headline FROM news WHERE supplier_id = ? AND topic != 'noise' ORDER BY date DESC",
         (sid,),

@@ -14,6 +14,7 @@ claims list already filtered for IDs cited earlier in the case, so its claim ind
 cited once per case across all threads.
 """
 
+import copy
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -77,6 +78,7 @@ class RoleOutput:
     used: dict[str, str] = field(default_factory=dict)  # stage -> main | rule | timeout | error | skipped
     timings_ms: dict[str, int] = field(default_factory=dict)
     sheet_problems: tuple[str, ...] = ()
+    context: CaseContext | None = None  # exact claim menu whose indices the tactic refers to
 
 
 def keepalive_email(session: CaseSession, th: ThreadState) -> Email:
@@ -101,10 +103,12 @@ class RolePipeline:
     def round_context(self, session: CaseSession, th: ThreadState) -> CaseContext:
         """Claims refreshed from the threads (series the supplier named, rival offers), then filtered to what
         may still be cited to this supplier."""
-        ctx = session.ctx
+        with session.lock:
+            ctx = session.ctx
+            threads = {s: copy.deepcopy(t.events) for s, t in session.threads.items()}
         if hasattr(self.tools, "refresh"):
             try:
-                ctx = self.tools.refresh(ctx, {s: t.events for s, t in session.threads.items()})
+                ctx = self.tools.refresh(ctx, threads)
             except Exception:
                 log.exception("%s: tools.refresh failed - using the prepared claims", th.supplier_id)
             if ctx.bands is not session.ctx.bands:  # re-priced after a cost breakdown: the policy uses them too
@@ -133,6 +137,7 @@ class RolePipeline:
                 used[name] = "main"
                 return out
             except FutureTimeout:
+                future.cancel()  # queued work must not execute after this round has already fallen back
                 used[name] = "timeout"
                 log.warning("stage %s over %.1fs - rule twin", name, timeout)
             except Exception:
@@ -176,19 +181,20 @@ class RolePipeline:
         )  # fmt: skip
         if not isinstance(tactic, Tactic):
             tactic, used["choose"] = rule_tactic, "error"
-        read = reads.get(sid, read)  # the LLM strategist writes its refined read back into this dict
+        if used["choose"] == "main":
+            read = reads.get(sid, read)  # timed-out calls may mutate their private dict later: ignore them
         th.read = read
         n_claims = len(ctx.claims.get(sid, ()))
         tactic = policy.coerce_tactic(session, th, tactic, v, n_claims)
         if tactic.action == "accept":
-            return RoleOutput(tactic, None, None, fit, read, used, timings)
+            return RoleOutput(tactic, None, None, fit, read, used, timings, context=ctx)
 
         t0 = time.monotonic()
         plan = self._plan(ctx, session, th, events, tactic, read, used)
         sheets, sheet_problems = guard.check_sheets(session, th, plan.term_sheets)
         timings["plan"] = int((time.monotonic() - t0) * 1000)
         if not sheets:
-            return RoleOutput(tactic, None, None, fit, read, used, timings, tuple(sheet_problems))
+            return RoleOutput(tactic, None, None, fit, read, used, timings, tuple(sheet_problems), ctx)
         plan = OfferPlan(sid, tuple(sheets), tuple(session.cost(sid, s) for s in sheets), plan.rationale)
 
         email = self._stage(
@@ -198,11 +204,13 @@ class RolePipeline:
         )  # fmt: skip
         if not isinstance(email, Email):
             email, used["write"] = self.rule_writer.write(ctx, tactic, plan, events), "error"
-        return RoleOutput(tactic, plan, email, fit, read, used, timings, tuple(sheet_problems))
+        return RoleOutput(tactic, plan, email, fit, read, used, timings, tuple(sheet_problems), ctx)
 
-    def rule_email(self, session: CaseSession, th: ThreadState, tactic: Tactic, plan: OfferPlan) -> Email:
+    def rule_email(
+        self, session: CaseSession, th: ThreadState, tactic: Tactic, plan: OfferPlan, ctx: CaseContext | None = None
+    ) -> Email:
         """The template e-mail for a plan, with the same claims list the roles saw (used after a guard reject)."""
-        return self.rule_writer.write(self.round_context(session, th), tactic, plan, list(th.events))
+        return self.rule_writer.write(ctx or self.round_context(session, th), tactic, plan, list(th.events))
 
     # ---- helpers ------------------------------------------------------------------------------------
 

@@ -26,6 +26,7 @@ def call_json(complete, system: str, user: str, timeout_s: float) -> dict | None
     try:
         return parse(future.result(timeout=timeout_s))
     except FutureTimeout:
+        future.cancel()  # do not charge for stale queued work after returning a rule-based answer
         log.warning("LLM call over %.0fs - using the fallback", timeout_s)
     except Exception as e:  # provider error or unparsable reply
         log.warning("LLM call failed (%s) - using the fallback", e)

@@ -24,6 +24,7 @@ def pct(values: list[float], q: float) -> float:
 
 def report(rows: list[dict]) -> str:
     used, ms, rounds, claims, kinds = defaultdict(Counter), defaultdict(list), [], Counter(), Counter()
+    decisions = []
     for r in rows:
         kinds[r.get("kind")] += 1
         for stage, how in (r.get("stages") or {}).items():
@@ -32,6 +33,8 @@ def report(rows: list[dict]) -> str:
             ms[stage].append(t / 1000)
         if r.get("round_s") is not None:
             rounds.append(r["round_s"])
+        if r.get("decision_s") is not None:
+            decisions.append(r["decision_s"])
         for result, n in (r.get("claims") or {}).items():
             claims[result] += n
     lines = [f"decisions: {dict(kinds)}", "", f"{'stage':<8} {'p50 s':>7} {'p95 s':>7}  how it ran"]
@@ -40,6 +43,14 @@ def report(rows: list[dict]) -> str:
     if rounds:
         lines += ["", f"round (decision + reply): p50 {pct(rounds, 0.5):.1f}s  p95 {pct(rounds, 0.95):.1f}s  "
                   f"max {max(rounds):.1f}s  mean {statistics.mean(rounds):.1f}s"]  # fmt: skip
+    if decisions:
+        lines += [
+            "",
+            f"buyer time (receipt to send): p50 {pct(decisions, 0.5):.2f}s  "
+            f"p95 {pct(decisions, 0.95):.2f}s  max {max(decisions):.2f}s",
+            f"buyer time >= 48s budget: {sum(t >= 48 for t in decisions)}",
+        ]
+    lines.append("Supplier response time is excluded from the arena's 60-second buyer clock.")
     lines += ["", f"claim results: {dict(claims) or 'none'}"]
     if claims.get("contradicted"):
         lines.append("WARNING: contradicted claims cost trust - find the sentence in the trail and fix its source")

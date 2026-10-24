@@ -27,3 +27,11 @@ decision - why`. Changing `contracts.py` always needs an entry here.
   supplier, each term change against its quote that saves us money, in EUR and as a price per unit (lead time,
   ppm/chargeback, payment, Incoterm, volume, contract length, dates, clauses). For the strategist's explicit trades -
   the tools no longer impose lead time or ppm, they price them.
+
+- 2026-10-24 - Jeddou / Codex review (user-authorised cross-layer improvements) - Keep the existing
+  deterministic orchestrator and shared contracts. Reconcile uncertain moves from our own session/thread
+  history; only authoritative ended state terminates a case. Publish replies before clearing in-flight.
+  At the last-call cap only, prefer the best idle acceptable offer over a cheaper unavailable one.
+  Feed Sunday release evidence into dossiers and prevent old cached profiles overriding it; cancel
+  expired queued role calls. Small changes in kit data/resume and tools/roles are covered by regression
+  tests; implementation and limits are recorded in `docs/orchestrator-review.md`.

@@ -55,6 +55,7 @@ class RemoteTable:
         """Pick up a final session this team already started (e.g. after a crash): every thread
         so far, from the arena."""
         self.session_id = session_id
+        self.resumed = True
         log.info("resuming session %s", session_id)
         state = self.client.session(session_id)
         if state["status"] == "ended":

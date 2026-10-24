@@ -37,6 +37,8 @@ class ThreadState:
     # live only
     in_flight: bool = False  # our message is out, the supplier's reply has not come back yet
     errors: int = 0
+    timeout_rounds: int = 0  # server timeouts consume rounds without adding buyer messages
+    needs_refresh: bool = False  # an uncertain POST must be reconciled before another move
     rule_only_once: bool = False  # after a resume: the first answer uses rule twins only (the clock may be short)
     walk_hint: bool = False  # the strategist asked to walk away (the arbiter decides at case level)
     slowest_round_s: float = 0.0  # longest decision + reply so far on this thread
@@ -53,7 +55,7 @@ class ThreadState:
         return bool(self.events) and self.events[-1].get("from") != "buyer"
 
     def moves_left(self, case: dict) -> int:
-        return moves_left(case, self.events)
+        return max(0, moves_left(case, self.events) - self.timeout_rounds)
 
 
 class SendGate:
@@ -103,7 +105,7 @@ class CaseSession:
     # a cost breakdown the supplier sends replaces the data-based estimate (tools.supplier_from_thread)
     estimator: Callable[[str, list[dict]], dict | None] | None = None
     c_open: float = math.inf  # the cheapest opening sheet that keeps the must-haves, in our C
-    deadline: Callable[[], float | None] | None = None  # the wave's cap as time.time(), or None (practice)
+    deadline: float | Callable[[], float | None] | None = None  # epoch cap or a live cap supplier
     burned: set[str] = field(default_factory=set)  # data IDs already cited in this case (each counts once)
     offers: set[str] = field(default_factory=set)  # every supplier term sheet ID seen (citable as offer:)
     freeze: bool = False
@@ -151,7 +153,7 @@ class CaseSession:
     # ---- time ------------------------------------------------------------------------------------------
 
     def seconds_left(self) -> float | None:
-        cap = self.deadline() if callable(self.deadline) else None
+        cap = self.deadline() if callable(self.deadline) else self.deadline
         return None if cap is None else cap - time.time()
 
     def close_margin(self) -> float:

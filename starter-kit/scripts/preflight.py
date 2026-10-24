@@ -18,7 +18,6 @@ from arena_kit import ArenaClient
 from arena_kit.cli import load_env
 
 REQUIRED_ENV = ("ARENA_URL", "ARENA_API_KEY", "ARENA_DATA")
-LLM_ENV = ("LLM_MODEL", "ANTHROPIC_API_KEY")
 FEED = re.compile("|".join(["leader" + "board", "/" + "events", "/" + "screen", "/" + "results"]))
 
 
@@ -32,19 +31,26 @@ def main() -> None:
     load_env()
     p = argparse.ArgumentParser()
     p.add_argument("--sunday", action="store_true", help="the Sunday release must be present")
+    p.add_argument("--require-llm", action="store_true", help="fail if the chosen model/provider is not configured")
     args = p.parse_args()
     good = True
     missing = [k for k in REQUIRED_ENV if not os.environ.get(k)]
     good &= check("environment", not missing, f"missing {missing}" if missing else "names present")
-    llm_missing = [k for k in LLM_ENV if not os.environ.get(k)]
-    check("LLM configured", not llm_missing, f"missing {llm_missing}: roles run on rule twins" if llm_missing
-          else os.environ.get("LLM_MODEL", ""), required=False)  # fmt: skip
+    provider_key = "ANTHROPIC_API_KEY" if os.environ.get("LLM_PROVIDER") == "anthropic" else "LLM_API_KEY"
+    llm_missing = [k for k in ("LLM_MODEL", provider_key) if not os.environ.get(k)]
+    good &= check("LLM configured", not llm_missing, f"missing {llm_missing}" if llm_missing
+                  else os.environ.get("LLM_MODEL", ""), required=args.require_llm)  # fmt: skip
     try:
         client = ArenaClient()
         me = client.me()
         good &= check("arena key", True, f"team {me.get('team_name') or me.get('team') or '?'}")
-        open_practice = [s["session_id"] for s in client.sessions("practice") if s.get("status") == "open"]
-        good &= check("no open practice sessions", not open_practice, ", ".join(open_practice))
+        open_sessions = [
+            s["session_id"]
+            for set_ in ("practice", "sandbox")
+            for s in client.sessions(set_)
+            if s.get("status") == "open"
+        ]
+        good &= check("no open practice/sandbox sessions", not open_sessions, ", ".join(open_sessions))
     except Exception as e:  # noqa: BLE001 - report every failure the same way
         good &= check("arena key", False, str(e)[:200])
     data = Path(os.environ.get("ARENA_DATA", "data/package"))

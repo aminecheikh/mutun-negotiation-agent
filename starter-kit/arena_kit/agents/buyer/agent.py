@@ -143,7 +143,7 @@ class BuyerAgent:
                 return _accept(th)
             if out.plan is not None and out.email is not None:
                 checked = guard.build_message(s, th, out.plan.term_sheets, out.email) or guard.build_message(
-                    s, th, out.plan.term_sheets, self.pipeline.rule_email(s, th, out.tactic, out.plan)
+                    s, th, out.plan.term_sheets, self.pipeline.rule_email(s, th, out.tactic, out.plan, out.context)
                 )
                 if checked is not None:
                     return {"supplier_id": th.supplier_id, "message": checked.message}

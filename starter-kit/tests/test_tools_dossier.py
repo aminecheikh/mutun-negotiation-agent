@@ -80,6 +80,24 @@ def test_build_when_no_data_package_returns_a_bare_dossier():
     assert d.supplier_id == "sup:70110" and d.persona == "unknown" and d.evidence == ()
 
 
+def test_sunday_release_document_reaches_dossier_outside_original_database(tmp_path):
+    release = tmp_path / "release-sunday"
+    release.mkdir()
+    fact = {
+        "news:review-new": {
+            "supplier": "sup:70110",
+            "date": "2026-10-25",
+            "topic": "credit_watch",
+            "headline": "New liquidity restriction",
+        }
+    }
+    (release / "facts.json").write_text(json.dumps(fact), encoding="utf-8")
+    package = DataPackage(DATA, release=release)
+    d = dossier.build(BY_ID["case:P01"], package, "sup:70110")
+    assert any(line.startswith("release fact news:review-new:") and "liquidity" in line for line in d.evidence)
+    assert "payment_days" in d.levers
+
+
 @pytest.mark.parametrize("case", CASES, ids=[c["case_id"] for c in CASES])
 def test_build_when_any_case_keeps_its_invariants(case, package):
     for sid in [*case["suppliers"], "sup:99999"]:

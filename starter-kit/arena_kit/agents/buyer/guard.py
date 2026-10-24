@@ -130,7 +130,8 @@ def clean_body(session: CaseSession, th: ThreadState, body: str) -> tuple[str, s
         if kept or not line.strip():
             lines.append(" ".join(kept))
     text = re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
-    return text[:MAX_BODY], cited, problems
+    text = text[:MAX_BODY]
+    return text, set(ID_RE.findall(text)), problems
 
 
 def build_message(session: CaseSession, th: ThreadState, sheets, email: Email | None) -> Checked | None:
@@ -158,7 +159,13 @@ def reserve(session: CaseSession, th: ThreadState, message: dict) -> dict:
     session.burned |= {r for r in cited if not r.startswith("offer:")}
     th.cited_offers |= {r for r in cited if r.startswith("offer:")}
     refs = [r for r in message.get("refs") or [] if r in cited][:MAX_REFS]
-    return {**message, "body": body or message["body"], "refs": refs}
+    if len(body.split()) < MIN_WORDS:
+        body = (
+            "Dear Sir or Madam, thank you for your reply. Please review our proposed terms "
+            "and let us know which conditions you can confirm. Kind regards, Hollerau Purchasing"
+        )
+        refs = []
+    return {**message, "body": body, "refs": refs}
 
 
 def accept_ok(session: CaseSession, th: ThreadState) -> bool:

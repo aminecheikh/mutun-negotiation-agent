@@ -15,6 +15,7 @@ class OrchestratorConfig:
     strategist_timeout_s: float = 17.0  # outer bound around the strategist (roles use 15 s internally)
     writer_timeout_s: float = 16.0  # outer bound around the writer (roles use 15 s internally)
     min_llm_window_s: float = 6.0  # less time than this left: skip the LLM stage, use its rule twin
+    document_timeout_s: float = 8.0  # attachment enrichment must leave time to answer inside the 60 s clock
     keepalive_after_s: float = 40.0  # a parked thread gets a question this long after the supplier's reply
     keepalive_max: int = 2  # per thread; each one costs a message of the round limit
     # ---- case caps in the Live Final (kit play.py: close 90 s before the cap, or slowest round + 15 s) --

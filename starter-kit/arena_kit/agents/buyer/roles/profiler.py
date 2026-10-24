@@ -126,14 +126,15 @@ class LLMProfiler:
     def refine(self, case: dict, dossier: Dossier) -> Dossier:
         try:
             base = self.cache.get(dossier.supplier_id)
-            has_case_facts = any(line.startswith("case fact") for line in dossier.evidence)
+            has_case_facts = any(line.startswith(("case fact", "release fact")) for line in dossier.evidence)
             if base and not has_case_facts:
                 return apply(dossier, base)
             key = f"{dossier.supplier_id}:{evidence_key(dossier)}"
             if key not in self.live and self.complete is not None:
                 if fresh := self.profile(dossier, base):
                     self.live[key] = fresh
-            chosen = self.live.get(key) or base
+            # New evidence can invalidate yesterday's persona. On failure retain today's rule dossier.
+            chosen = self.live.get(key) or (base if not has_case_facts else None)
             return apply(dossier, chosen) if chosen else dossier
         except Exception as e:  # the rules' dossier is always a valid answer
             log.warning("%s: profiler failed (%r) - keeping the rules' dossier", dossier.supplier_id, e)
