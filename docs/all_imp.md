@@ -97,10 +97,45 @@ changes (merged into v2: credible first offers, no repeated price on a standstil
 **Tests.** `tests/test_v2_improve.py` (step cap, visible step, AC_next, ranking incl. rising drivers, precomputed
 blocks, frame guidance, enquiry figures); full suite 826 passed; simulator runner tests pass with the step cap.
 
-**Hosted arena, run 1 of 5:** running (Sun 25 Oct, ~00:30). Results below when done.
+**Hosted arena, run 1 of 5 (all 10 cases; the second half ran a few minutes later on `4973483`):**
+
+| Case | run 1 | run B (§3) | our best | |
+|---|---|---|---|---|
+| P01 | **0.790** | 0.647 | 0.906 | +0.14: AC_next closed at 133.99 instead of giving more |
+| P10 | **0.686** | 0.647 | 0.663 | **new best**: coverage package, 2 rounds |
+| P03 | 0.855 | 0.864 | 0.905 | flat |
+| P04 | 0.766 | 0.766 | 0.810 | unchanged |
+| P11 | 0.710 | 0.710 | 0.710 | unchanged |
+| P07 | 0.689 | 0.710 | 0.710 | -0.02 |
+| P05 | 0.352 | 0.346 | 0.455 | flat (RFQ) |
+| P18 | 0.406 | 0.411 | 0.497 | flat |
+| P02 | 0.311 | 0.352 | 0.356 | -0.04, inside this case's spread (.31-.36) |
+| P08 | **0.313** | 0.536 | 0.621 | **-0.22: the regression** |
+
+**Mean 58.8** (run B: 59.9). Two clear wins, one clear loss that outweighed them.
+
+**P08 diagnosed from the trail (this is the lesson of the run).** Our first counter was **5.62, only 7 %
+under its 6.05**; the best-ever session anchored at **4.84 (-20 %)** and the supplier then moved 11.6 % to
+5.35. From 5.62 there was nowhere to go: it answered 5.57, then held 5.65 and went final.
+
+The cause was my own addition: "first counters 4-8 % under the quote closed best" - a replay *average* that
+mixed cases with firm cost evidence and cases without. It overrode `tools/credibility`, which already sets the
+depth per supplier (down to the cost floor with a firm should-cost, within 8 % without). P08 has a should-cost
+floor of 4.76, so the credible anchor was 4.84; the prose talked the negotiator up to 5.62.
+
+**Fix (commit `7c01027`), generalising instead of fitting:**
+- The frame and prompts now say **anchor at the lowest credible price**; how deep that is stays the tool's job.
+- The negotiator's input carries the **offer engine's own paced counter**. The engine is credibility-aware *and*
+  C-aware: in squeeze cases (P02) it holds above the C minimum, where the credible price would be the wrong
+  anchor. Its price is the default unless the negotiator can say why this supplier needs another.
+- Also in: a tool turn is skipped when under 14 s remain (every live timeout came from a tool turn begun with
+  10-17 s left), and reports are asked to be concise.
+
+**Tests:** 829 pass, including a new check that the negotiator's input carries the engine's counter.
 
 ## Practice runs used for the improvement work (limit: 5)
 
 | # | When | Build | Mean | Notes |
 |---|---|---|---|---|
-| 1 | Sun 00:30 | 3ec8249 | pending | first run with concession discipline, ranked arguments, precomputed inputs |
+| 1 | Sun 00:15 | 3ec8249 / 4973483 | **58.8** | concession discipline, ranked arguments, precomputed inputs. P01 .65->.79, P10 new best .686; P08 .54->.31 from a too-shallow anchor |
+| 2 | Sun 00:50 | 7c01027 | running | anchor = credible price + the engine's counter; tool-turn skip |
