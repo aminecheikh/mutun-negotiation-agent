@@ -29,6 +29,7 @@ TERMS = {
     "incoterm", "index_clause", "tooling_eur", "ppm_commitment", "chargeback_eur_per_complaint",
 }  # fmt: skip
 COST_BREAKDOWN = "Could you send us a cost breakdown for this part?"
+ATTACHMENT_CHARS = 1500
 
 
 # ---- shared helpers (pure) ---------------------------------------------------------------------
@@ -162,7 +163,11 @@ def _thread_view(ctx: CaseContext, sid: str, events: list[dict], read: Behaviour
                 "claim_results": m.get("claim_results"),
                 "missing_fields": m.get("missing_fields"),
                 "signals": m.get("signals"),
-                "attachments": [a.get("name") for a in m.get("attachments") or []],
+                # a cost breakdown, 8D report or delivery schedule is the best evidence of its real position
+                "attachments": [
+                    {"name": a.get("name"), "text": str(a.get("text") or "")[:ATTACHMENT_CHARS]}
+                    for a in (m.get("attachments") or [])[:2]
+                ],
             }
             for m in theirs
         ],

@@ -41,6 +41,11 @@ READING A SUPPLIER (reads):
   commitment, capacity -> volume_per_year, contract_months; "from <date>" -> effective_date.
 - signals: 1-3 short quotes copied exactly from its e-mails that support the read.
 
+DOSSIER: evidence lines starting with "profile:" are traits our profiler found in the data, each with its
+source ID - e.g. "profile: hedged until 2027-03", "profile: pricing_committee", "profile: open_book". Read
+them first. ATTACHMENTS: when the supplier sends a cost breakdown, an 8D report or a delivery schedule, its
+text is in supplier_emails[].attachments - a cost breakdown shows where its real cost floor is; use it.
+
 PERSONAS AND THE EVIDENCE BEHIND THEM (the dossier evidence and its e-mails tell you which applies; a
 supplier can show several - combine the levers; if they conflict, follow the category goal):
 - cash_short ("pay earlier", "bank is watching", "cannot sign anything that lowers our margin", restructuring,

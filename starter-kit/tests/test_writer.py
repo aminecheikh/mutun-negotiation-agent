@@ -203,3 +203,8 @@ def test_writer_when_model_recalls_a_year_from_our_notes_keeps_it_but_not_other_
 def test_check_when_vague_data_talk_without_claim_reports_it():
     problems = run_check(body(CLAIM.sentence, "Comparable parts cost much less on the market."))
     assert any("data talk" in p for p in problems)
+
+
+def test_check_when_email_reveals_our_private_notes_reports_it():
+    problems = run_check(body(CLAIM.sentence, "We know your bank is watching, so faster payment should help."))
+    assert any("reveals our notes" in p for p in problems)

@@ -16,6 +16,7 @@ import threading
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 from ....cli import load_env
@@ -24,8 +25,9 @@ from ....data import DataPackage
 from ...llm import llm_from_env
 from ..tools import DataTools
 from .analyst import RuleAnalyst
+from .profiler import LLMProfiler
 from .strategist import LLMStrategist
-from .writer import LLMWriter, check
+from .writer import YEAR_RE, LLMWriter, check
 
 RUNS = Path("runs/sessions")
 
@@ -82,6 +84,7 @@ def points(threads: dict[str, list[dict]], n: int) -> list[dict[str, list[dict]]
 
 
 DATA_LOCK = threading.Lock()  # --lock: serialise data-package access to measure the roles alone
+PROFILER: dict = {}  # one profiler (cache + live results) for the whole bench, as one process in the final
 
 
 def one(case, cut, tools, complete, lock: bool) -> dict:
@@ -91,6 +94,8 @@ def one(case, cut, tools, complete, lock: bool) -> dict:
             ctx = tools.prepare(case, opening)
     else:
         ctx = tools.prepare(case, opening)
+    profiler = PROFILER.setdefault("p", LLMProfiler(complete))
+    ctx = replace(ctx, dossiers={sid: profiler.refine(case, d) for sid, d in ctx.dossiers.items()})
     live = {sid: ev for sid, ev in cut.items() if ev[-1].get("status") not in ("walked_away", "no_bid")}
     reads = {sid: RuleAnalyst().read(ctx, sid, ev, tools.fit_concessions(ctx, sid, ev)) for sid, ev in live.items()}
     t0 = time.monotonic()
@@ -115,7 +120,8 @@ def one(case, cut, tools, complete, lock: bool) -> dict:
     out["writer_llm"] = writer.last_used_model
     out["writer_rejected"] = writer.last_problems
     out["email"] = email.body
-    allowed = f"{events[-1].get('body') or ''}\n{tactic.question or ''}"
+    years = " ".join(YEAR_RE.findall(" ".join(ctx.dossiers[tactic.supplier_id].evidence)))
+    allowed = f"{events[-1].get('body') or ''}\n{tactic.question or ''}\n{years}"
     out["final_check"] = check(email.body, sentences, set(email.refs), allowed, case["title"])
     out["claims_sent"] = len(sentences)
     return out

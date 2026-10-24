@@ -27,10 +27,13 @@ HARD RULES (a breach means your e-mail is thrown away):
    prices", "benchmarks", "other suppliers", "our analysis / calculation / assessment / records". The
    supplier will ask for it and we cannot show it - that costs trust. You may refer to what the supplier
    itself wrote. Do not narrate our internal reasoning ("we would rather not suggest a movement").
-4. Never reveal urgency, a deadline of ours, a budget, that we depend on this supplier, or that we lack an
+4. Never reveal what our notes say about the supplier: its cash or bank situation, idle shifts, its owner's
+   spreadsheet, its committee, its hedges, our share of its turnover. Saying it would embarrass the person
+   and cost trust. Let the packages do that work (faster payment, more volume) - you may name the benefit.
+5. Never reveal urgency, a deadline of ours, a budget, that we depend on this supplier, or that we lack an
    alternative. No "soon", "quickly", "urgent", "as soon as possible", "close this week".
-5. No threats, no ultimatums, no sarcasm, no flattery. Never claim we will switch suppliers.
-6. At most 150 words. Plain text. Sign: "Kind regards\nHollerau Pumpenwerke, Purchasing".
+6. No threats, no ultimatums, no sarcasm, no flattery. Never claim we will switch suppliers.
+7. At most 150 words. Plain text. Sign: "Kind regards\nHollerau Pumpenwerke, Purchasing".
 
 HOW TO WRITE IT:
 - Open by acknowledging what the supplier just did (its offer, a move, an answer, a document). If

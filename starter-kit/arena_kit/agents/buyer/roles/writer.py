@@ -35,6 +35,15 @@ VAGUE_DATA = re.compile(
     r"should[- ]cost|cost picture|price indices|index data)\b",
     re.I,
 )
+# What our private notes know about the supplier; saying it embarrasses the person. Allowed only after the
+# supplier raised it itself.
+PRIVATE = re.compile(
+    r"\b(?:your (?:bank|banks|liquidity|cash (?:situation|position|problems?)|financial (?:situation|position)|"
+    r"credit (?:rating|index)|restructuring|spreadsheet|idle|short[- ]time)|bank is watching|short hours|"
+    r"idle (?:capacity|shifts?|machines?)|second shift|pricing committee|bought (?:\w+ )?forward|hedg\w*|"
+    r"share of your turnover|not strategic)\b",
+    re.I,
+)
 SIGNATURE = "Kind regards\nHollerau Pumpenwerke, Purchasing"
 
 # The template's tone per persona: an opening that acknowledges the supplier the way its persona wants.
@@ -134,6 +143,11 @@ def check(body: str, sentences: list[str], allowed_refs: set[str], supplier_text
     }
     if vague:
         problems.append(f"data talk without a claim: {sorted(vague)[:3]}")
+    private = {m.group(0).lower() for m in PRIVATE.finditer(rest)} - {
+        m.group(0).lower() for m in PRIVATE.finditer(supplier_text)
+    }
+    if private:
+        problems.append(f"reveals our notes about the supplier: {sorted(private)[:3]}")
     if len(body.split()) > MAX_WORDS:
         problems.append(f"too long: {len(body.split())} words")
     return problems
