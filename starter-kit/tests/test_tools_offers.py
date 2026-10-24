@@ -303,3 +303,17 @@ def test_c_minimum_floor_when_the_round_changes_stays_the_same_price(tools):
         for low, limit in ((120.0, 138.55), (121.5, 138.0), (122.3, 137.4))
     }
     assert len(floors) == 1
+
+
+def test_plan_when_supplier_offers_a_cheaper_alternative_sends_exactly_that_alternative(tools):
+    # Saed: send the supplier's cheaper alternative back as our sheet (it will agree to its own proposal)
+    case_id, sid, opening = P01
+    case = CASES[case_id]
+    events = [supplier_msg(sid, opening, 0)]
+    ctx = tools.prepare(case, {sid: events})
+    reply = supplier_msg(sid, {**opening, "unit_price": 136.0}, 1)
+    alternative = {**opening, "unit_price": 131.0, "payment_days": 30}
+    reply["term_sheets"].append({"term_sheet_id": f"offer:{sid[4:]}-1-a", "terms": alternative})
+    events = [*events, buyer_msg({**opening, "unit_price": 128.0}), reply]
+    plan = tools.plan_offers(ctx, sid, events, Tactic(sid, "send"), READ)
+    assert plan.term_sheets[0] == complete_offer(case, alternative)

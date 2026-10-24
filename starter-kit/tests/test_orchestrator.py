@@ -703,3 +703,29 @@ def test_others_settled_when_a_supplier_repeated_its_offer_counts_it_as_its_best
                 ours(15.2, extra={"lead_time_days": 42}), rfq_quote(B, 2, 17.0)]  # fmt: skip
     s = session_for(S02, {A: A_COUNTERED, B: b_events})
     assert policy.others_settled(s, s.threads[A])
+
+
+# ---- a cheaper alternative from the supplier is sent back ---------------------------------------------------------
+
+
+def with_cheaper_alternative(status: str):
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    reply = quote(SID, 1, 9.6, status)
+    reply["term_sheets"].append(
+        {"term_sheet_id": f"offer:{SID[4:]}-1-a", "terms": {"unit_price": 9.1, "payment_days": 30}}
+    )
+    th.events += [ours(8.5), reply]
+    observe.rebuild(s, th)
+    return s, th
+
+
+def test_verdict_when_a_final_offer_carries_a_cheaper_alternative_sends_that_alternative():
+    # Saed: P18 accepted the main sheet of a final offer while its alternative was cheaper for us (0.44 vs 0.47);
+    # only the standing (first) sheet can be accepted, so send exactly the alternative back - it proposed it
+    s, th = with_cheaper_alternative("final_offer")
+    alt = policy.cheaper_alternative(s, th)
+    assert alt is not None and alt["unit_price"] == 9.1
+    v = policy.verdict(s, th)
+    assert v.kind == "counter" and "alternative" in v.reason
+    assert policy.offers_more(s, th, [alt])  # its own proposal: more for it than our last sheet, not a push

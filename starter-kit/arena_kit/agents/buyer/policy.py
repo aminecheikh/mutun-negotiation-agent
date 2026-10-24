@@ -167,6 +167,10 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
     left = th.moves_left(case)
     if th.our_rounds == 0 and th.status != "agreed":
         return Verdict("counter", "first answer: never take the opening quote")
+    if left > 0 and th.status in ("open", "final_offer") and cheaper_alternative(session, th) is not None:
+        # only the standing (first) sheet can be accepted: send its cheaper proposal back, it will agree (Saed, P18)
+        return Verdict("counter", "its alternative sheet is cheaper for us: send exactly that alternative back",
+                       note="send its own alternative back unchanged - it proposed it")  # fmt: skip
     band = session.band(th.supplier_id)
     early = target_is_prior(session, th)
     meets = band is None or th.c <= band.c_target * (1 + cfg.accept_eps)  # our expectation: the band target
@@ -222,6 +226,21 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
         return Verdict("park", "freeze before the cap: an acceptable sheet is on the table")
     settled = others_settled(session, th)
     return Verdict("counter", "negotiate", accept_permitted=ok and cheaper is None and not early and settled)
+
+
+def cheaper_alternative(session: CaseSession, th: ThreadState) -> dict | None:
+    """The cheapest of the supplier's alternative sheets (its last e-mail) if it costs us less than its standing
+    sheet and passes our acceptability test - complete, ready to send back. None otherwise."""
+    last = th.events[-1] if th.events and th.events[-1].get("from") != "buyer" else {}
+    best, best_c = None, th.c * (1 - session.config.accept_eps)
+    for ts in (last.get("term_sheets") or [])[1:]:
+        terms = complete_offer(session.case, ts.get("terms") or {})
+        if terms.get("unit_price") is None or not must_haves_ok(session.case, terms, th.std):
+            continue
+        c = session.cost(th.supplier_id, terms)
+        if c < best_c and c < session.c_open and (session.c_alt is None or c <= session.c_alt):
+            best, best_c = terms, c
+    return best
 
 
 def repeated_offer(th: ThreadState) -> bool:

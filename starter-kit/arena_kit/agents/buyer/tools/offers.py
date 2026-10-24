@@ -49,6 +49,12 @@ def plan(
         sheet = complete_offer(case, theirs)
         return OfferPlan(supplier_id, (sheet,), (total_cost(case, sheet, std, supplier),), "no band: echo its terms")
     credible = ctx.credibility.get(supplier_id)
+    alternative = _cheaper_alternative(case, events, std, supplier)
+    if alternative is not None:  # its own cheaper proposal goes back unchanged: it will agree to it (Saed, P18)
+        c_alt = total_cost(case, alternative, std, supplier)
+        return OfferPlan(
+            supplier_id, (alternative,), (c_alt,), "its own alternative sheet is cheaper for us: sent back"
+        )
     price = next_price(case, band, events, credible.lowest_price if credible else 0.0)
     main = _main_sheet(case, band, theirs, price, std, supplier, _our_last_terms(events))
     main = _not_below_c_minimum(case, main, std, supplier, band, min(band.ceiling, theirs["unit_price"]))
@@ -121,6 +127,18 @@ def _not_below_c_minimum(case: dict, sheet: dict, std: dict, supplier, band, lim
     if floor <= sheet["unit_price"]:
         return sheet
     return complete_offer(case, {**sheet, "unit_price": round(min(floor, limit), 2)})
+
+
+def _cheaper_alternative(case: dict, events: list[dict], std: dict, supplier) -> dict | None:
+    """The supplier's cheapest alternative sheet in its last e-mail, if it costs us less than its main sheet."""
+    last = events[-1] if events and events[-1].get("from") != "buyer" else {}
+    sheets = [complete_offer(case, ts.get("terms") or {}) for ts in last.get("term_sheets") or []]
+    sheets = [s for s in sheets if s.get("unit_price") is not None and must_haves_ok(case, s, std)]
+    if len(sheets) < 2 or (last.get("term_sheets") or [{}])[0].get("terms", {}).get("unit_price") is None:
+        return None
+    main_c = total_cost(case, complete_offer(case, last["term_sheets"][0]["terms"]), std, supplier)
+    best = min(sheets[1:], key=lambda s: total_cost(case, s, std, supplier), default=None)
+    return best if best is not None and total_cost(case, best, std, supplier) < main_c else None
 
 
 def _our_last_terms(events: list[dict]) -> dict | None:
