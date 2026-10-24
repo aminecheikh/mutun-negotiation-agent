@@ -82,6 +82,12 @@ uv run arena me                                 # quota left
 - "It holds, but it does not change our calculation": verified data alone rarely moves price.
   Trades (payment days, contract length, volume, effective date) and the supplier's own cost drivers do.
 
+- Sandbox D02 (scaffold, 16:14): **an RFQ thread we do not answer times out.** Each thread has its own
+  60 s clock; `play()` sends one message per round, so the second bidder got 3 timeouts and walked away
+  (we lost our competition). Every live thread needs a message within 60 s of its supplier's reply.
+- Sandbox D02: concessions of +0.02-0.14 EUR per round on price alone made the supplier say "without any
+  movement on your side..."; it offered trades (standard lead time, more volume) that we never used.
+
 ## Conventions
 
 - Python 3.12, type hints on signatures, frozen dataclasses for shared types, ruff (line length 120).

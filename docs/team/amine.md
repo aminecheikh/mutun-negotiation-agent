@@ -11,7 +11,7 @@ Branch `feat/tools` · owns `starter-kit/arena_kit/agents/buyer/tools/` · skill
 | ID | Task | Status | Due |
 |---|---|---|---|
 | A1 | `bands.py`: floor (should-cost x country factor), fair (index pass-through), ceiling (alternative, fallback, rival quotes, C_open), target = min C incl. relationship term and index clause | todo | Sat 19:00 |
-| A2 | `offers.py`: anchor near floor, Boulware concession, 2-3 equal-C sheets trading price vs payment days / effective date / volume / contract length | todo | v0 19:00, v1 22:00 |
+| A2 | `offers.py`: anchor near floor, Boulware concession, 2-3 equal-C sheets trading price vs payment days / effective date / volume / lead time / Incoterm (D02: price-only steps of 0.02-0.14 EUR stalled the supplier) | todo | v0 19:00, v1 22:00 |
 | A3 | `claims.py`: claim sentences pre-checked against facts.json (supplier's own cost drivers first) | todo | Sat 22:00 |
 | A4 | `concession.py`: reservation estimate from the price path + prior from floor / history | todo | Sun 02:00 |
 | A5 | `dossier.py`: numbers (intel, invoices, scorecards, sourcing, history) + evidence lines with IDs for the Profiler | todo | Sun 02:00 |
