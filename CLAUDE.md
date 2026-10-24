@@ -116,6 +116,9 @@ uv run arena me                                 # quota left
   target while the supplier came down, then repeating our last sheets after its `final_offer`, made it walk
   away; we closed on the dearer rival. Every supplier move gets one back (capped at the midpoint), a re-priced
   band must reach the verdict at once, and the one counter to a final offer must offer it more.
+- Practice sweep (main 4c30c05, 50.2 vs 54.4): **a supplier's alternative sheets are offers.** P18 accepted the
+  main sheet (C 294k, 0.01) next to an alternative at C 274k (~0.30). And **our band target is an estimate**:
+  closing at it after one message capped P01/P03 at ~0.8 where the baseline got 0.91.
 
 ## Conventions
 

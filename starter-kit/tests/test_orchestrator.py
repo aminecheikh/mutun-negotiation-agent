@@ -10,11 +10,13 @@ import pytest
 
 from arena_kit.agents.buyer import guard, observe, policy
 from arena_kit.agents.buyer.agent import BuyerAgent
+from arena_kit.agents.buyer.arbiter import Arbiter
 from arena_kit.agents.buyer.config import OrchestratorConfig
-from arena_kit.agents.buyer.contracts import Email, Tactic
+from arena_kit.agents.buyer.contracts import ConcessionFit, Email, Tactic
 from arena_kit.agents.buyer.pipeline import keepalive_email
 from arena_kit.agents.buyer.telemetry import Telemetry
 from arena_kit.agents.buyer.tools import DataTools
+from arena_kit.client import ArenaError
 from arena_kit.data import DataPackage
 
 KIT = Path(__file__).parents[1]
@@ -446,3 +448,76 @@ def test_offers_more_when_counter_to_a_final_offer_repeats_our_sheets_is_false()
     th = s.threads[A]
     assert not policy.offers_more(s, th, [last])
     assert policy.offers_more(s, th, [{**last, "unit_price": 15.4}])
+
+
+# ---- the supplier's alternative sheets are offers too ---------------------------------------------------------
+
+
+def test_rebuild_when_supplier_sends_an_alternative_stands_on_its_first_sheet():
+    # practice P18 (5fe255084dc62c8c): accepting an alternative's ID got "422 not a standing offer in this
+    # session" (api.md: accept takes the supplier's standing term sheet) - the standing sheet is its first one
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    reply = quote(SID, 1, 9.8)
+    reply["term_sheets"].append({"term_sheet_id": f"offer:{SID[4:]}-1-a", "terms": {"unit_price": 9.1}})
+    th.events += [ours(8.5), reply]
+    observe.rebuild(s, th)
+    assert th.standing_id == f"offer:{SID[4:]}-1"
+
+
+class RefusingTable:
+    """The arena at the system boundary: refuses every closing action like P18's alternative accept."""
+
+    def __init__(self):
+        self.closes = 0
+
+    def close(self, supplier_id, message):
+        self.closes += 1
+        raise ArenaError(422, "not a standing offer in this session")
+
+    def result(self):
+        return None
+
+
+def test_try_accept_when_the_arena_refuses_never_offers_that_sheet_again():
+    # P18 (5fe255084dc62c8c): a refused accept was retried in a tight loop until the supplier's clock ran out
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    band = s.band(SID)
+    reply = quote(SID, 1, band.target)
+    reply["term_sheets"][0]["terms"] = dict(band.target_terms)
+    th.events += [ours(round(band.target * 0.9, 2)), reply]
+    observe.rebuild(s, th)
+    s.table = RefusingTable()
+    assert policy.acceptable(s, th)
+    assert not Arbiter(s).try_accept(th, "test")
+    assert not policy.acceptable(s, th) and policy.verdict(s, th).kind != "accept"
+    assert not Arbiter(s).try_accept(th, "again") and s.table.closes == 1
+
+
+# ---- the target is a prior in the first half of the rounds -------------------------------------------------------
+
+
+def at_target_thread(fit=None):
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    band = s.band(SID)
+    reply = quote(SID, 1, band.target)
+    reply["term_sheets"][0]["terms"] = dict(band.target_terms)  # it offers exactly our target package
+    th.events += [ours(round(band.target * 0.9, 2)), reply]
+    observe.rebuild(s, th)
+    th.fit = fit
+    return s, th
+
+
+def test_verdict_when_at_target_in_the_first_half_keeps_negotiating():
+    # practice P01/P03/P11 (4c30c05) closed at our band target after one message: target scores were 0.81, 0.84,
+    # 0.60 while the baseline reached 0.91 on P01/P03 - our target is an estimate the supplier's moves can beat
+    s, th = at_target_thread()
+    v = policy.verdict(s, th)
+    assert v.kind == "counter" and not v.accept_permitted
+
+
+def test_verdict_when_at_target_and_its_prices_show_no_room_accepts():
+    s, th = at_target_thread(ConcessionFit(SID, (10.0, 9.0), 8.9, -10.0, True, 0.05))
+    assert policy.verdict(s, th).kind == "accept"

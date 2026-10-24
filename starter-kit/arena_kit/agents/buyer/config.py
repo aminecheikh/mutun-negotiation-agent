@@ -33,6 +33,9 @@ class OrchestratorConfig:
     # assumption, not tuned: below a 1-in-5 chance of another >= 1 % step (tools.concession p_room) a rival counts
     # as done and no longer holds up an accept elsewhere
     low_room_probability: float = 0.2
+    # our offers reach the band target halfway through the rounds (tools.offers TARGET_BY_SHARE_OF_ROUNDS); before
+    # that the target is a prior: it closes a thread only when the supplier's own prices show no room left
+    prior_share_of_rounds: float = 0.5
     stuck_rounds: int = 3  # rounds of ours after which a supplier that stopped moving counts as stuck
     stuck_improvement: float = 0.001  # "stopped moving": its C fell by less than 0.1 % over its last two replies
     max_claims: int = 3  # api.md: at most 3 checked arguments per message
