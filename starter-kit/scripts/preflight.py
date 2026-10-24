@@ -57,7 +57,7 @@ def main() -> None:
                       required=args.sunday)  # fmt: skip
     except Exception as e:  # noqa: BLE001
         good &= check("data package", False, str(e)[:200])
-    roots = [Path("arena_kit/agents/buyer"), Path("scripts")]
+    roots = [Path("arena_kit/agents/buyer"), Path("arena_kit/agents/buyer_v2"), Path("scripts")]
     hits = [str(f) for root in roots for f in root.rglob("*.py") if FEED.search(f.read_text(encoding="utf-8"))]
     good &= check("agent never reads the live feed", not hits, ", ".join(hits))
     print("\npre-flight passed" if good else "\npre-flight FAILED")
