@@ -446,3 +446,20 @@ def test_offers_more_when_counter_to_a_final_offer_repeats_our_sheets_is_false()
     th = s.threads[A]
     assert not policy.offers_more(s, th, [last])
     assert policy.offers_more(s, th, [{**last, "unit_price": 15.4}])
+
+
+# ---- the supplier's alternative sheets are offers too ---------------------------------------------------------
+
+
+def test_rebuild_when_supplier_sends_a_cheaper_alternative_stands_on_it():
+    # practice P18 (bd4f12a1577269aa): we accepted its main sheet (C 294,209, score 0.01) while its alternative in
+    # the same e-mail cost C 273,512 - the standing sheet is the cheapest one it offered that keeps the must-haves
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    reply = quote(SID, 1, 9.8)
+    cheaper = {"term_sheet_id": f"offer:{SID[4:]}-1-a", "terms": {"unit_price": 9.1, "payment_days": 30}}
+    reply["term_sheets"].append(cheaper)
+    th.events += [ours(8.5), reply]
+    observe.rebuild(s, th)
+    assert th.standing_id == cheaper["term_sheet_id"]
+    assert th.c == pytest.approx(s.cost(SID, cheaper["terms"]))

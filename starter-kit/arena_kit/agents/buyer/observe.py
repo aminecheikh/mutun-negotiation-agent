@@ -10,6 +10,7 @@ import logging
 import math
 import re
 
+from ...cost import must_haves_ok
 from ...docs import standard_terms
 from ...play import ENDED, latest, standing
 from ..llm import ID_RE
@@ -51,19 +52,30 @@ def supplier_sheets(events: list[dict]) -> list[dict]:
     return out
 
 
+def best_offered(session: CaseSession, th: ThreadState, events: list[dict]) -> tuple[str | None, dict]:
+    """The supplier's standing sheet: the cheapest in C of the sheets in its last e-mail that keeps the must-haves
+    (its alternatives are offers we can accept too), else its first sheet."""
+    sheets = [ts for ts in latest(events).get("term_sheets") or [] if ts.get("terms", {}).get("unit_price") is not None]
+    valid = [ts for ts in sheets if must_haves_ok(session.case, ts["terms"], th.std)]
+    if not valid:
+        return standing(events)
+    best = min(valid, key=lambda ts: session.cost(th.supplier_id, ts["terms"]))
+    return best["term_sheet_id"], best["terms"]
+
+
 def rebuild(session: CaseSession, th: ThreadState) -> None:
     """Recompute the thread's derived fields from its e-mails (caller holds no lock: pure over `th.events`)."""
     events = th.events
     if not events:
         return
     last = latest(events)
-    sheet_id, terms = standing(events)
     th.std = standard_terms(events)
     if session.estimator is not None:
         try:
             session.estimates[th.supplier_id] = session.estimator(th.supplier_id, events)
         except Exception:  # an estimate is a refinement: without it C leaves the relationship charge out
             log.exception("%s: supplier estimate failed", th.supplier_id)
+    sheet_id, terms = best_offered(session, th, events)
     th.status = str(last.get("status") or "open")
     th.standing_id, th.standing_terms = sheet_id, dict(terms)
     th.alive = th.status not in ENDED
