@@ -7,7 +7,7 @@ Price of the main sheet, each round:
   time     anchor -> ceiling on a Boulware curve: (t / T) ** (1 / beta), beta < 1 holds early and concedes late
            (time-dependent tactics, Faratin, Sierra & Jennings 1998)
   pace     until our target, at least a linear step per round (reaching it halfway): visible movement
-  reply    at least what the supplier conceded in its last move (absolute tit-for-tat, same paper): "it gives
+  reply    at least what the supplier conceded on unchanged terms (absolute tit-for-tat, same paper): "it gives
            nothing without a move from you" - and matched moves meet at the midpoint, i.e. the target
   limits   never above the ceiling or its standing price, never below our previous offer
 The main sheet uses the band's target package (payment days, dates, clauses). Up to two more sheets change one
@@ -20,7 +20,7 @@ from ....docs import standard_terms
 from ....play import standing
 from ..contracts import BehaviourRead, CaseContext, OfferPlan, Tactic
 from .bands import HOLD_AT_STANDARD
-from .concession import supplier_prices
+from .concession import comparable_prices, supplier_prices
 
 BOULWARE_BETA = 0.5  # Faratin et al. 1998: beta < 1 is Boulware
 TIT_FOR_TAT = 1.0  # absolute tit-for-tat: match the supplier's last concession
@@ -80,8 +80,9 @@ def next_price(case: dict, band, events: list[dict]) -> float:
         if ours[-1] < band.target:  # a visible step every round until our target, even if it waits for us
             pace = (band.target - anchor) / max(horizon * TARGET_BY_SHARE_OF_ROUNDS, 1)
             price = max(price, min(ours[-1] + pace, band.target))
-        if len(theirs) >= 2 and theirs[-2] > theirs[-1]:
-            price = max(price, ours[-1] + TIT_FOR_TAT * (theirs[-2] - theirs[-1]))
+        comparable = comparable_prices(events)
+        if len(comparable) >= 2 and comparable[-2] > comparable[-1]:
+            price = max(price, ours[-1] + TIT_FOR_TAT * (comparable[-2] - comparable[-1]))
     return round(min(price, limit), 2)
 
 

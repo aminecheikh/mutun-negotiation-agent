@@ -1,15 +1,26 @@
 """S2 + S3 (owner: Saed): the one-call LLM strategist, its safety net and the rule-based fallback it uses."""
 
+import copy
 import json
 import time
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from arena_kit.agents.buyer.contracts import BehaviourRead, Claim, ConcessionFit
 from arena_kit.agents.buyer.roles import LLMStrategist, RuleAnalyst, RuleStrategist
 from arena_kit.agents.buyer.roles.analyst import wants_from
-from arena_kit.agents.buyer.roles.strategist import negotiable_levers, refined_read, safe
+from arena_kit.agents.buyer.roles.strategist import (
+    _thread_view,
+    accept_ready,
+    negotiable_levers,
+    refined_read,
+    safe,
+    standing_c,
+)
 from arena_kit.agents.buyer.tools import DataTools
+from arena_kit.cost import closing_terms, total_cost
 
 CASE = json.loads((Path(__file__).parents[1] / "arena_kit/sim_cases/S01.json").read_text())
 SID = "sup:70270"
@@ -46,6 +57,42 @@ def rule_read(ctx, threads):
 
 def rule_tactic(ctx, threads):
     return RuleStrategist().choose(ctx, threads, rule_read(ctx, threads))
+
+
+@pytest.mark.parametrize("goal", ["stabilise", "secure_supply"])
+def test_strategist_cost_and_target_acceptance_include_supplier_relationship(goal):
+    case = copy.deepcopy(CASE)
+    case["buyer"].update(category_goal=goal, relationship_eur_per_point=1000, sustainable_margin_pct=8)
+    events = [supplier(), buyer(), supplier(price=16.5, n=1)]
+    ctx = DataTools().prepare(case, {SID: events})
+    terms = events[-1]["term_sheets"][0]["terms"]
+    estimate = {"full_cost": 18, "interest_rate": 0.08, "standard": closing_terms(case, terms)}
+    base = total_cost(case, terms)
+    expected = total_cost(case, terms, supplier=estimate)
+    assert expected > base
+    ctx = replace(
+        ctx, supplier_estimates={SID: estimate}, bands={SID: replace(ctx.bands[SID], c_target=(base + expected) / 2)}
+    )
+    assert standing_c(ctx, events, SID) == expected
+    assert not accept_ready(ctx, SID, events)
+    read = rule_read(ctx, {SID: events})[SID]
+    assert _thread_view(ctx, SID, events, read, set())["standing"]["c"] == round(expected)
+
+
+def test_standing_cost_uses_each_bidders_own_estimate():
+    case = copy.deepcopy(CASE)
+    case["buyer"].update(category_goal="stabilise", relationship_eur_per_point=1000, sustainable_margin_pct=8)
+    events = [supplier()]
+    ctx = DataTools().prepare(case, {SID: events})
+    standard = closing_terms(case, events[0]["term_sheets"][0]["terms"])
+    ctx = replace(
+        ctx,
+        supplier_estimates={
+            "sup:low-cost": {"full_cost": 10, "interest_rate": 0.08, "standard": standard},
+            "sup:squeezed": {"full_cost": 20, "interest_rate": 0.08, "standard": standard},
+        },
+    )
+    assert standing_c(ctx, events, "sup:low-cost") < standing_c(ctx, events, "sup:squeezed")
 
 
 # ---- safe(): the model can never break policy ---------------------------------------------------

@@ -61,6 +61,21 @@ def with_alternative(case: dict, price: float) -> dict:
     return out
 
 
+def test_round_context_uses_the_arbiters_current_supplier_estimate():
+    from arena_kit.agents.buyer.pipeline import RolePipeline
+    from arena_kit.agents.buyer.roles.strategist import standing_c
+    from arena_kit.cost import closing_terms
+
+    case = copy.deepcopy(S01)
+    case["buyer"].update(category_goal="secure_supply", relationship_eur_per_point=1000, sustainable_margin_pct=8)
+    s = session_for(case, {SID: [quote(SID, 0, 17.4), ours(15), quote(SID, 1, 16)]})
+    th = s.threads[SID]
+    s.estimates[SID] = {"full_cost": 18, "interest_rate": 0.08, "standard": closing_terms(case, th.standing_terms)}
+    ctx = RolePipeline(DataTools(), None, None, None).round_context(s, th)
+    assert standing_c(ctx, th.events, SID) == s.cost(SID, th.standing_terms)
+    assert ctx.supplier_estimates == s.estimates and ctx.supplier_estimates is not s.estimates
+
+
 # ---- acceptability and verdicts ------------------------------------------------------------------------
 
 

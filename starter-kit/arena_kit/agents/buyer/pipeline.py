@@ -107,6 +107,7 @@ class RolePipeline:
         with session.lock:
             ctx = session.ctx
             threads = {s: copy.deepcopy(t.events) for s, t in session.threads.items()}
+            estimates = copy.deepcopy(session.estimates)
         if hasattr(self.tools, "refresh"):
             try:
                 ctx = self.tools.refresh(ctx, threads)
@@ -122,7 +123,9 @@ class RolePipeline:
             for c in ctx.claims.get(sid, ())
             if c.favours_buyer and all(guard.cite_problem(session, th, r) is None for r in c.refs)
         )
-        return replace(ctx, claims={**ctx.claims, sid: usable})
+        # Use exactly the estimator inputs that valued this observed standing
+        # sheet for the arbiter; roles must not silently omit relationship cost.
+        return replace(ctx, claims={**ctx.claims, sid: usable}, supplier_estimates=estimates)
 
     # ---- stages -------------------------------------------------------------------------------------
 

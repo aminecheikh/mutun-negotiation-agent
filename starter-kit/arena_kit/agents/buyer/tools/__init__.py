@@ -28,16 +28,21 @@ class DataTools:
             claims=self._claims(case, threads),
             c_alternative=bands.alternative_cost(case),
             trades=self._trades(case, threads),
+            supplier_estimates={sid: self.supplier_from_thread(case, sid, ev) for sid, ev in threads.items()},
         )
 
     def refresh(self, ctx: CaseContext, threads: dict[str, list[dict]]) -> CaseContext:
         """Each round: claims follow the threads (series the supplier names, rival offers, its asked price).
-        Bands and trades are re-priced only once a supplier has sent its cost breakdown; otherwise they stay as
-        prepared. Cheap (milliseconds); the writer's guard enforces 'each ID once per case'."""
+        Bands and trades are re-priced when a supplier states cost drivers or sends a cost breakdown; otherwise
+        they stay as prepared. The writer's guard enforces 'each ID once per case'."""
         ctx = replace(ctx, claims=self._claims(ctx.case, threads))
-        if any(signals.read(ev, self.package).breakdown_cost for ev in threads.values()):
+        evidence = [signals.read(ev, self.package) for ev in threads.values()]
+        if any(sig.breakdown_cost or sig.driver_shares for sig in evidence):
             ctx = replace(
-                ctx, bands=bands.price_bands(ctx.case, threads, self.package), trades=self._trades(ctx.case, threads)
+                ctx,
+                bands=bands.price_bands(ctx.case, threads, self.package),
+                trades=self._trades(ctx.case, threads),
+                supplier_estimates={sid: self.supplier_from_thread(ctx.case, sid, ev) for sid, ev in threads.items()},
             )
         return ctx
 

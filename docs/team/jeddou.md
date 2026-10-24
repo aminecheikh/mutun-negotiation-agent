@@ -6,12 +6,12 @@ How it works: the module docstrings (start with `runner.py`, then `policy.py`). 
 
 ## Now
 
-- Claude's PR #1 and the team's follow-up through `1dde1b2` integrated locally without conflicts.
-  Follow-up review is on `fix/orchestrator-review`, including the previously unpublished review fixes.
-  Subject validation and final-body citation reservation now have regression coverage.
-  Independent review fixes, release evidence ingestion, sweep and local rehearsal tooling completed;
-  see `docs/orchestrator-review.md`. Next: configure the final machine's credentials, run live-model
-  sandbox checks and a controlled hosted sweep. No hosted quota used by this review.
+- PR #2 (`fix/orchestrator-review`) includes the earlier recovery/guard fixes and the negotiation review.
+  Fetched all branches and merged Saed's `5e44a84`. Price estimates now respect units and recent evidence;
+  concession inference separates package changes; roles and arbiter share relationship-cost inputs.
+  The strategist prompt uses live evidence rather than practice percentages or expected closing rounds.
+  Local validation and limitations are recorded in `docs/orchestrator-review.md`; hosted score and model
+  latency validation still require credentials. No hosted quota consumed by this review.
 
 ## Tasks
 
@@ -26,6 +26,18 @@ How it works: the module docstrings (start with `runner.py`, then `policy.py`). 
 | J6 | Preflight, self-contained rehearsal, README run section, freeze, runner | local rehearsal and documentation done; final-machine preflight/freeze pending | Sun 10:30-13:15 |
 
 ## Asks to others
+
+- @amine @saed - user-authorised integration review adds the optional/default-empty
+  `CaseContext.supplier_estimates` field so standing C in the strategist includes the same relationship
+  charge as tools and the arbiter. Tools prepare/refresh it and the live pipeline snapshots current estimates.
+  No existing positional argument changes. See `DECISIONS.md` and the new review section.
+- @amine - estimates now normalise per-part price units, ignore incomparable currency/invalid rows, and
+  select the newest usable own cost evidence. Valid stated drivers refresh bands; bundle weights are not
+  guessed. Fit and tit-for-tat compare unchanged non-price terms only. New synthetic regressions exercise
+  unseen suppliers, row order, units, malformed shares and package changes; no practice-score tuning.
+- @saed - merged `5e44a84`, retained the one-thread role view and clarified that the arbiter compares bidders.
+  Removed practice percentages/fixed closing-round expectations; personas remain hypotheses to revise.
+  Strategist standing-C, acceptance and ordering now include the supplied relationship-cost estimate.
 
 - @saed - follow-up review reuses your writer text validator for email subjects in the orchestrator
   guard; the writer prompt now explicitly keeps claims/figures out of the subject. Keep-alive subjects
@@ -61,6 +73,12 @@ How it works: the module docstrings (start with `runner.py`, then `policy.py`). 
   Full suite: 443 passed, 2 optional skips; Ruff lint and format checks passed.
   Final-machine preflight still needs arena/model configuration and Sunday's release.
 
+- 2026-10-24 negotiation review - merged Saed's `5e44a84` and extended PR #2 with unit-aware estimates,
+  latest cost evidence, driver validation/refresh, comparable-package concession inference, consistent
+  relationship C in the strategist, and a prompt free of practice-specific percentage/round expectations.
+  35 new tests; full suite 478 passed, 2 optional skips, Ruff clean. Local rehearsal: 6/6, zero timeouts/caps,
+  51 verified claims, no duplicates/contradictions. No hosted quota or model calls; credentials/release pending.
+
 ## Runs
 
 | When | Commit | Cases | Sessions | Mean | Notes |
@@ -69,3 +87,4 @@ How it works: the module docstrings (start with `runner.py`, then `policy.py`). 
 | Sat 21:40 | 0046f39 + roles (local) | arena-sim S01-S03, real data | 0 (local) | 73.1 | scripted sim supplier: not comparable with hosted scores; 27 claims, all verified |
 | Sat review | working tree based on d05f691 | local 2-wave rehearsal, S01-S03 | 0 (local) | not a hosted benchmark | 6/6 closed before cap; 0 timeouts; 53 verified claims, 0 duplicates/contradictions |
 | Sat follow-up | working tree based on ec25076 | local 2-wave rehearsal, S01-S03 | 0 (local) | not a hosted benchmark | 6/6 closed before cap; 0 timeouts; 48 verified claims, 0 duplicates/contradictions |
+| Sat negotiation review | working tree based on 85de429 | local 2-wave rehearsal, S01-S03 | 0 (local) | not a hosted benchmark | 6/6 closed; 0 timeouts/caps; 51 verified claims, 0 duplicates/contradictions |

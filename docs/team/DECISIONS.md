@@ -43,3 +43,11 @@ decision - why`. Changing `contracts.py` always needs an entry here.
   checks to outgoing subjects as well as body checks, including keep-alives; keep all claim IDs in the
   checked body. Align the writer prompt with that boundary. Reserve citations only after the final body
   fallback so removed evidence remains usable. No shared contracts changed.
+
+- 2026-10-24 - Jeddou / Codex negotiation review (user-authorised cross-layer improvements) - Merge Saed's
+  `5e44a84`; preserve one thread per role call and case-level arbitration. Normalise cost evidence by price
+  unit, validate cost shares, refresh stated drivers, and compare concessions only on unchanged terms.
+  Add `CaseContext.supplier_estimates: dict[str, dict | None]` with an empty default, after existing fields.
+  Tools populate it; the live pipeline snapshots the arbiter's estimates; the strategist includes relationship
+  cost in acceptance/ranking and model input. Existing constructors remain compatible. Remove practice-fitted
+  numerical expectations from the strategist prompt. Evidence and limits: `docs/orchestrator-review.md`.

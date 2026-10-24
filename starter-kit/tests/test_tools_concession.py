@@ -49,6 +49,25 @@ def test_fit_when_only_the_opening_is_known_falls_back_to_the_floor_or_none():
     assert fit("sup:x", events([140.0])).reservation_estimate is None
 
 
+@pytest.mark.parametrize(
+    "field, old, new",
+    [
+        ("payment_days", 60, 10),
+        ("contract_months", 12, 36),
+        ("incoterm", "DAP", "EXW"),
+        ("volume_per_year", 1000, 5000),
+    ],
+)
+def test_fit_restarts_when_price_buys_different_terms(field, old, new):
+    history = events([200, 195, 190, 120, 118])
+    supplier_messages = [m for m in history if m["from"] != "buyer"]
+    for n, message in enumerate(supplier_messages):
+        message["term_sheets"][0]["terms"][field] = old if n < 3 else new
+    actual = fit("sup:unseen", history, floor=100)
+    fresh = fit("sup:unseen", events([120, 118]), floor=100)
+    assert actual == fresh
+
+
 def test_fit_when_any_path_never_estimates_above_its_last_price():
     rng = random.Random(7)
     for _ in range(200):

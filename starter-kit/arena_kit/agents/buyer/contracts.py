@@ -108,6 +108,7 @@ class CaseContext:
     claims: dict[str, tuple[Claim, ...]]  # per supplier
     c_alternative: float | None
     trades: dict[str, tuple[Trade, ...]] = field(default_factory=dict)  # per supplier, biggest saving first
+    supplier_estimates: dict[str, dict | None] = field(default_factory=dict)  # private inputs to relationship cost
 
 
 # ---- roles layer (LLM, owner: roles) -----------------------------------------------------------

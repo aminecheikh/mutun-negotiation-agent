@@ -31,8 +31,32 @@ def supplier_prices(events: list[dict]) -> tuple[float, ...]:
     return tuple(prices)
 
 
+def comparable_prices(events: list[dict]) -> tuple[float, ...]:
+    """The latest uninterrupted price path on unchanged non-price terms.
+
+    A cheaper quote paid for by earlier payment, more volume or different freight
+    is a trade, not evidence of a lower reservation price on the old package.
+    Missing/changed fields conservatively restart learning instead of assuming
+    they have no value. The opening anchor still uses the full price history.
+    """
+    prices, previous = [], None
+    for message in events:
+        if message.get("from") == "buyer":
+            continue
+        for sheet in (message.get("term_sheets") or [])[:1]:
+            terms = sheet.get("terms") or {}
+            if terms.get("unit_price") is None:
+                continue
+            non_price = {k: v for k, v in terms.items() if k != "unit_price"}
+            if non_price != previous:
+                prices = []
+            prices.append(float(terms["unit_price"]))
+            previous = non_price
+    return tuple(prices)
+
+
 def fit(supplier_id: str, events: list[dict], floor: float | None = None, round_limit: int = 10) -> ConcessionFit:
-    prices = supplier_prices(events)
+    prices = comparable_prices(events)
     steps = [a - b for a, b in zip(prices, prices[1:], strict=False)]
     last_step = steps[-1] / prices[-2] * 100 if steps and prices[-2] else None
     shrinking = len(steps) >= 2 and all(later <= earlier for earlier, later in zip(steps, steps[1:], strict=False))
