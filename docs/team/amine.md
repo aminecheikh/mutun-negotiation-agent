@@ -33,6 +33,9 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 - @saed (20:30): `roles/playbook.md` on feat/roles-saeb has a table of practice suppliers (Brandlhuber 70110, Nordmark 70510 ...). Keep the general rules ("over-ask vs fair price -> ...", "already below should-cost -> don't squeeze") but don't feed practice names or numbers to the prompts: the final's suppliers are new (CLAUDE.md "Generalise, don't overfit"). The tools now compute those numbers for any supplier (`band.fair`, `band.floor`, `dossier`).
 
 - @jeddou (21:00): **guard fix (J2)** - `guard.accept_ok` computes C without our supplier estimate, so in stabilise / secure_supply cases it ignores the squeeze penalty (the slide's "supplier's health"). Use `tools.supplier_from_thread(case, sid, events)` as the 4th argument of `total_cost` there, like the offer engine does.
+
+- @jeddou @saed (22:40): **LLM client retries timeouts** - `arena_kit/agents/llm.py:60` `anthropic.Anthropic(timeout=45.0)` keeps the SDK default `max_retries=2`, so one call can hold a worker of the 32-thread pool in `roles/llm.py` ~135 s after `call_json` fell back; with 10 cases the pool fills and every role falls back. Fix: `max_retries=0` and a client timeout just under the role budget (`docs/research/04-llm-agent-engineering.md`).
+- @jeddou @saed (22:40): `docs/research/README.md` lists candidate actions per owner from the web research (AC_next / AC_combi acceptance in code, round k/10 in prompts, option-ID menu for the strategist, datamarked supplier text, Writer checklist). Pick what fits your lane; cross-lane ones go to DECISIONS.md.
 - @saed (21:00): **`ctx.trades[supplier_id]`** is live: each term change worth money to us, e.g. lead time 56 -> 28 days = EUR x, or EUR y per unit. The strategist can trade those explicitly ("can you do 28 days? we can move on price"); the tools never impose lead time or ppm.
 
 - @saed (21:40): re your D01 test (0.11): that run used the **old placeholder** offers (branch older than main). Fixed on main now: every sheet covers the full need (no 12-of-24 months), a visible step every round until our target even when the supplier waits, your strategist's `Tactic.levers` each get an equal-cost sheet (fields must be negotiable with `term_options`), no sheet that "pays" for less coverage or sits far under our anchor. Please `git merge main` and re-run D01 (free) - expected path vs. its 51.90: 44.30, 45.30, 46.26, 47.22 ... with a 45-day alternative.
@@ -54,6 +57,10 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 - 21:00 - A8 signals.py (supplier-stated cost shares, cost breakdown -> floor, `refresh` re-prices) + levers.py (`ctx.trades`): every term on Tacto's "Why every term costs money" slide is now priced; 332 tests
 
 - 21:40 - from Saed's D01 replay: thread-safe package (18/19 parallel crashes -> 0), coverage search without a cost estimate, visible step per round to target, strategist levers in sheets, no less-coverage / non-credible variants; sandbox fixtures saved; 337 tests
+
+- 22:30 - web research by 4 agents in `docs/research/` (LLM negotiators, strategy algorithms, procurement
+  practice, LLM engineering) + README index with candidate actions per owner; 2 citations spot-checked
+  (arXiv 2402.15813, 2601.13206); kit `llm.py` retry/timeout issue confirmed in code
 
 ## Runs
 
