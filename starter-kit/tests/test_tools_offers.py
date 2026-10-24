@@ -49,7 +49,13 @@ def test_plan_when_first_round_anchors_so_the_midpoint_is_the_target(tools):
     ctx, plans = play_rounds(tools, CASES[case_id], sid, opening, [138.55])
     band = ctx.bands[sid]
     expected = max(2 * band.target - 138.55, band.floor * (1 - offers.MAX_ANCHOR_BELOW_FLOOR_PCT / 100))
-    assert plans[0].term_sheets[0]["unit_price"] == pytest.approx(expected, abs=0.011)
+    main = plans[0].term_sheets[0]
+    # P01 is a stabilise case: below the C minimum the squeeze charge makes a lower price dearer, so the anchor may
+    # only rise above the midpoint anchor where that lowers our C
+    supplier = tools.supplier(ctx, sid, opening)
+    at_anchor = {**main, "unit_price": round(expected, 2)}
+    assert main["unit_price"] >= expected - 0.011
+    assert total_cost(CASES[case_id], main, None, supplier) <= total_cost(CASES[case_id], at_anchor, None, supplier)
 
 
 def test_plan_when_rounds_pass_concedes_monotonically_within_ceiling_and_their_price(tools):
@@ -240,3 +246,43 @@ def test_plan_when_above_target_and_supplier_moves_we_still_move(tools):
               supplier_msg(D02_J1, {**D02_STANDING, "unit_price": 15.3}, 2)]  # fmt: skip
     plan = tools.plan_offers(ctx, D02_J1, events, Tactic(D02_J1, "send"), READ)
     assert 14.9 < plan.term_sheets[0]["unit_price"] <= (14.9 + 15.3) / 2 + 0.005
+
+
+# ---- sweep 885eec2 -----------------------------------------------------------------------------------------------
+
+
+def test_plan_when_stabilise_supplier_is_below_its_cost_offers_a_sheet_cheaper_than_its_own(tools):
+    # P02 (a3d4f84f7d5954f7) scored 0: the supplier priced under its plant should-cost, so in C (squeeze charge
+    # included) every price below the C minimum costs more than its own sheet - we sent 3 e-mails without a sheet
+    case = CASES["case:P02"]
+    sid = "sup:70510"
+    opening = {"unit_price": 370.96, "payment_days": 30, "index_clause": None}
+    events = [supplier_msg(sid, opening, 0)]
+    ctx = tools.prepare(case, {sid: events})
+    supplier = tools.supplier_from_thread(case, sid, events)
+    plan = tools.plan_offers(ctx, sid, events, Tactic(sid, "send"), READ)
+    assert plan.c_values[0] < total_cost(case, opening, None, supplier)
+
+
+@pytest.mark.parametrize("case", list(CASES.values()), ids=list(CASES))
+def test_plan_when_any_case_never_offers_a_price_below_where_c_stops_falling(tools, case):
+    # a lower price that costs us more C (the squeeze charge) is never worth offering
+    base = case["buyer"].get("current_unit_price") or case["buyer"]["fallback_unit_price"]
+    opening = complete_offer(case, {"unit_price": round(base * 1.06, 2)})
+    sid = case["suppliers"][0]
+    ctx, plans = play_rounds(tools, case, sid, opening, [opening["unit_price"]])
+    supplier = tools.supplier(ctx, sid, opening)
+    main = plans[0].term_sheets[0]
+    higher = {**main, "unit_price": round(main["unit_price"] * 1.01, 2)}
+    if higher["unit_price"] <= opening["unit_price"]:  # within what we may offer (never above its own price)
+        assert total_cost(case, main, None, supplier) <= total_cost(case, higher, None, supplier) + 0.01
+
+
+def test_plan_when_supplier_does_not_move_never_repeats_our_price(tools):
+    # P11 (ac175e43e80a8f6f) and P05: the same offer three rounds running while the supplier stood still; it went
+    # final - "it gives nothing without a move from you" (the brief), and its standstill says our target was low
+    case_id, sid, opening = D01
+    ctx, plans = play_rounds(tools, SANDBOX[case_id], sid, opening, [52.9] * 8)
+    ours = [p.term_sheets[0]["unit_price"] for p in plans]
+    for before, after in zip(ours, ours[1:], strict=False):
+        assert after > before or after >= 52.9 - 0.005  # a visible step, unless we already reached its price

@@ -79,6 +79,7 @@ class Arbiter:
         self.telemetry.round(
             case_id=s.case.get("case_id"), supplier_id=th.supplier_id, kind="close", reason=reason,
             action=message["action"]["type"], c=th.c, c_open=s.c_open, c_alt=s.c_alt,
+            since_reply_s=round(time.monotonic() - th.received_at, 1),  # how long the supplier's offer waited for us
         )  # fmt: skip
         s.finish(result, reason)
         return True

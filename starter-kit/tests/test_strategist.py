@@ -310,6 +310,47 @@ def test_choose_when_trades_priced_shows_them_with_their_euro_value():
     ]  # 0.21 on its 17.40: comparable with its own price steps
 
 
+# ---- a refused accept still sends a full offer; each supplier alone -------------------------------------------
+
+
+def test_safe_when_model_accepts_keeps_its_levers_claims_and_question_for_a_refused_accept():
+    # audit: a policy-refused accept became a price-only send with no claims or question ("without movement...")
+    ctx, threads = setup([supplier(), buyer(), supplier(16.9, n=1)])
+    raw = {"supplier_id": SID, "action": "accept", "levers": ["unit_price", "payment_days"], "claims": [0],
+           "question": "Which payment term would help you most?"}  # fmt: skip
+    tactic = safe(ctx, threads, raw, rule_tactic(ctx, threads))
+    assert tactic.action in ("accept", "send")  # safe() or the policy may refuse the accept: either way a full offer
+    assert "payment_days" in tactic.levers and tactic.claims == (0,) and tactic.question
+
+
+def test_accept_ready_when_at_target_in_the_first_half_keeps_trading():
+    # as policy.target_is_prior (f28e992): the rule fallback must not accept at our estimated target early
+    ctx, threads = setup([supplier(), buyer(), supplier(12.0, n=1)])  # far below any target
+    assert not accept_ready(ctx, SID, threads[SID])
+
+
+def test_accept_ready_when_its_prices_show_no_room_accepts_at_target():
+    ctx, threads = setup([supplier(), buyer(), supplier(12.0, n=1)])
+    ctx = replace(ctx, fits={SID: ConcessionFit(SID, (17.4, 12.0), 11.9, -31.0, True, 0.05)})
+    assert accept_ready(ctx, SID, threads[SID])
+
+
+def test_strategist_prompt_never_brings_in_another_supplier():
+    # organisers: no inter-supplier comparison - one supplier per call, nothing about rivals
+    text = LLMStrategist(None).system.lower()  # the whole system prompt, the embedded analyst guide included
+    assert "rival" not in text and "rfq" not in text and "every open supplier" not in text
+    assert "never mention" in text and "another supplier" in text
+
+
+def test_choose_when_credibility_known_shows_the_lowest_credible_price_and_why():
+    from arena_kit.agents.buyer.contracts import Credibility
+
+    ctx, threads = setup([supplier()])
+    cred = Credibility(SID, 16.01, None, "no cost evidence: at most 8 % under its current offer")
+    view = seen_thread(replace(ctx, credibility={SID: cred}), threads)
+    assert view["credibility"] == {"lowest_price": 16.01, "evidence_pct": None, "reason": cred.reason}
+
+
 def test_llm_strategist_prompt_embeds_analyst_guide():
     system = LLMStrategist(None).system
     assert "{analyst}" not in system

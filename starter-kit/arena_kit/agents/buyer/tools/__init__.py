@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from ....docs import standard_terms
 from ..contracts import BehaviourRead, CaseContext, ConcessionFit, OfferPlan, Tactic
-from . import bands, claims, concession, dossier, levers, offers, signals
+from . import bands, claims, concession, credibility, dossier, levers, offers, signals
 from .safe_package import thread_safe
 
 
@@ -21,7 +21,7 @@ class DataTools:
         self.package = thread_safe(package)  # DataPackage behind a lock (parallel cases), or None
 
     def prepare(self, case: dict, threads: dict[str, list[dict]]) -> CaseContext:
-        return CaseContext(
+        ctx = CaseContext(
             case=case,
             dossiers={sid: dossier.build(case, self.package, sid) for sid in case["suppliers"]},
             bands=bands.price_bands(case, threads, self.package),
@@ -29,6 +29,7 @@ class DataTools:
             c_alternative=bands.alternative_cost(case),
             trades=self._trades(case, threads),
         )
+        return replace(ctx, credibility=self._credibility(ctx, threads))
 
     def refresh(self, ctx: CaseContext, threads: dict[str, list[dict]]) -> CaseContext:
         """Each round: claims follow the threads (series the supplier names, rival offers, its asked price).
@@ -39,7 +40,18 @@ class DataTools:
             ctx = replace(
                 ctx, bands=bands.price_bands(ctx.case, threads, self.package), trades=self._trades(ctx.case, threads)
             )
-        return ctx
+        return replace(ctx, credibility=self._credibility(ctx, threads))
+
+    def _credibility(self, ctx: CaseContext, threads: dict[str, list[dict]]) -> dict:
+        """Per supplier with a price: the lowest credible offer from our cost evidence and its latest price."""
+        out = {}
+        for sid, events in threads.items():
+            prices, band = concession.supplier_prices(events), ctx.bands.get(sid)
+            if not prices or band is None:
+                continue
+            estimate = bands.cost_estimate(ctx.case, self.package, sid, signals.read(events, self.package))
+            out[sid] = credibility.assess(sid, band.floor, prices[-1], estimate)
+        return out
 
     def _claims(self, case: dict, threads: dict[str, list[dict]]) -> dict:
         return {sid: claims.candidates(case, self.package, sid, threads) for sid in case["suppliers"]}

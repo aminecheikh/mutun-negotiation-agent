@@ -38,7 +38,8 @@ VAGUE_DATA = re.compile(
     r"our (?:data|analysis|analyses|records|research|figures|estimates?|calculations?|assessment|cost model)|"
     r"should[- ]cost|cost picture|price indices|index data|"
     r"vergleichbare[nr]? (?:teile\w*|wellen|gussteile\w*|lieferanten|angebote\w*|preise\w*)|marktpreis\w*|"
-    r"marktniveau\w*|andere[nr]? (?:lieferanten|anbieter\w*)|wettbewerber\w*|konkurrenz\w*|"
+    r"marktniveau\w*|andere[nrm]? (?:lieferant\w*|anbieter\w*)|wettbewerber\w*|konkurrenz\w*|"
+    r"another (?:supplier|bidder|vendor|source|offer|quote)|alternative (?:suppliers?|sources?)|second source|"
     r"unsere[rnm]? (?:daten|analysen?|unterlagen|berechnung\w*|kalkulation\w*|einschätzung\w*|kostenmodell\w*)|"
     r"preisindizes|indexdaten)\b",
     re.I,
@@ -343,7 +344,7 @@ class LLMWriter:
             default=str,
         )
         self.last_problems, self.last_used_model = [], False
-        reply = call_json(self.complete, self.system, user, TIMEOUT_S, salvage=email_from_text)
+        reply = call_json(self.complete, self.system, user, TIMEOUT_S, name="writer", salvage=email_from_text)
         if not isinstance(reply, dict) or not isinstance(reply.get("body"), str) or not reply["body"].strip():
             return fallback
         body = reply["body"].strip()

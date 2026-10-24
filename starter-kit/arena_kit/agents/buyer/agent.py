@@ -24,6 +24,7 @@ from .config import OrchestratorConfig
 from .contracts import CaseContext
 from .pipeline import RolePipeline, keepalive_email
 from .roles import LLMProfiler, LLMStrategist, LLMWriter, PassthroughProfiler, RuleAnalyst, RuleStrategist
+from .roles.llm import converse_from_env
 from .state import CaseSession, NoGate, SendGate, ThreadState
 from .telemetry import Telemetry
 from .tools import DataTools
@@ -208,13 +209,16 @@ def buyer_factory(package=None):
     # the client gives up when the orchestrator stops waiting, so a late call frees its worker (llm.py pool)
     budget = max(config.strategist_timeout_s, config.writer_timeout_s)
     complete = llm_from_env(timeout_s=budget) if os.environ.get("LLM_MODEL") else None
+    # the strategist calls tools (price a package, preview the offer engine, read the thread, look up data)
+    converse = converse_from_env(timeout_s=config.strategist_tools_timeout_s)
+    if converse is not None:
+        config = replace(config, strategist_timeout_s=config.strategist_tools_timeout_s)
     tools = DataTools(safe)
     profiler = LLMProfiler(complete)
 
     def new_agent() -> BuyerAgent:
-        return BuyerAgent(
-            tools, profiler, RuleAnalyst(), LLMStrategist(complete), LLMWriter(complete), safe, config, telemetry
-        )
+        strategist = LLMStrategist(complete, converse=converse, tools=tools)
+        return BuyerAgent(tools, profiler, RuleAnalyst(), strategist, LLMWriter(complete), safe, config, telemetry)
 
     return new_agent
 

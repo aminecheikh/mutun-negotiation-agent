@@ -10,6 +10,10 @@ orchestrator passes in, so `tools.plan_offers` uses it. Every answer goes throug
 an accept of the opening quote (the score's zero line), a walk without a cheaper alternative or a question
 with figures never reaches the supplier. No model, a late model or a broken answer gives `RuleStrategist`,
 which follows the same policy without an LLM.
+
+With tool calling on (`converse`, Anthropic only, BUYER_LLM_TOOLS=1 by default) the model may first call the
+read-only tools in `toolbox.py` - price a package, preview the offer engine, read the whole thread, look up a
+data row - for one turn, then answers with the same JSON. One deadline (TOOLS_TIMEOUT_S) covers both calls.
 """
 
 import json
@@ -22,12 +26,15 @@ from ....cost import total_cost
 from ....docs import standard_terms
 from ....play import latest, moves_left, standing
 from ...llm import ID_RE
+from ..config import OrchestratorConfig
 from ..contracts import BehaviourRead, CaseContext, Claim, Tactic
 from .analyst import wants_from
-from .llm import call_json, prompt
+from .llm import call_json, call_json_with_tools, prompt
+from .toolbox import StrategistToolbox
 
 log = logging.getLogger("arena")
 TIMEOUT_S = 15.0  # the writer takes up to 15 s after this; the move limit is 60 s
+TOOLS_TIMEOUT_S = 22.0  # with tool calling: one tool turn is a second model call (config.strategist_timeout_s)
 TERMS = {
     "unit_price", "payment_days", "volume_per_year", "contract_months", "effective_date", "lead_time_days",
     "incoterm", "index_clause", "tooling_eur", "ppm_commitment", "chargeback_eur_per_complaint",
@@ -176,8 +183,10 @@ def accept_ready(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
     if moves_left(ctx.case, events) <= LAST_MESSAGES:
         return c < alt
     # At the target is not enough: the practice sweep closed P01 after one round at 0.65 while the supplier was
-    # still offering alternatives. Accept at the target only once its price path says it has stopped moving.
-    return band is not None and c <= band.c_target and not still_moving(ctx, sid)
+    # still offering alternatives. Accept at the target only once its price path says it has stopped moving -
+    # and, as the policy (target_is_prior), never in the first half of the rounds while its prices show room.
+    early = target_is_prior(ctx, sid, events)
+    return band is not None and c <= band.c_target and not still_moving(ctx, sid) and not early
 
 
 def at_floor(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
@@ -200,6 +209,18 @@ def still_moving(ctx: CaseContext, sid: str) -> bool:
     return fit.last_step_pct >= MOVING_STEP_PCT and not fit.shrinking
 
 
+def target_is_prior(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
+    """As policy.target_is_prior: in the first half of the rounds our target is an estimate the supplier's moves
+    can beat, unless its own prices show no room left (ConcessionFit.p_room)."""
+    cfg = OrchestratorConfig()
+    if latest(events).get("status") != "open":
+        return False
+    if moves_left(ctx.case, events) <= ctx.case.get("round_limit", 10) * cfg.prior_share_of_rounds:
+        return False
+    fit = ctx.fits.get(sid)
+    return fit is None or fit.p_room is None or fit.p_room >= cfg.low_room_probability
+
+
 def walk_allowed(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
     """Only when our alternative is cheaper than the supplier's standing offer and it is not moving any more."""
     if ctx.c_alternative is None:
@@ -218,11 +239,6 @@ class RuleStrategist:
 
     def choose(self, ctx: CaseContext, threads: dict[str, list[dict]], reads: dict[str, BehaviourRead]) -> Tactic:
         sid, events = the_thread(threads)
-        if accept_ready(ctx, sid, events):
-            status, left = latest(events).get("status"), moves_left(ctx.case, events)
-            return Tactic(sid, "accept", rationale=f"rule: accept ({status}, {left} messages left)")
-        if walk_allowed(ctx, sid, events):
-            return Tactic(sid, "walk_away", rationale="rule: our alternative beats its standing offer")
         first = our_messages(events) == 0
         read = reads.get(sid)
         dossier = ctx.dossiers.get(sid)
@@ -232,6 +248,12 @@ class RuleStrategist:
             levers = negotiable_levers(ctx, (*levers, "payment_days", "contract_months", "effective_date"))
         levers = lever_floor(ctx, sid, events, levers)
         claims = tuple(i for i, _ in usable_claims(ctx, sid, cited_refs(events))[: 3 if first else 2])
+        # accept and walk carry the send's levers and claims: if the policy refuses them, the send is full
+        if accept_ready(ctx, sid, events):
+            status, left = latest(events).get("status"), moves_left(ctx.case, events)
+            return Tactic(sid, "accept", levers, claims, None, f"rule: accept ({status}, {left} messages left)")
+        if walk_allowed(ctx, sid, events):
+            return Tactic(sid, "walk_away", levers, claims, None, "rule: our alternative beats its standing offer")
         return Tactic(sid, "send", levers, claims, None, "rule: trade price against what it values")
 
 
@@ -269,6 +291,7 @@ def _thread_view(ctx: CaseContext, sid: str, events: list[dict], read: Behaviour
             {**asdict(t), "price_pct": _price_pct(t.per_unit, terms.get("unit_price"))}
             for t in ctx.trades.get(sid, ())[:MAX_TRADES]
         ],
+        "credibility": _credibility_view(ctx.credibility.get(sid)),
         "supplier_emails": [
             {
                 "status": m.get("status"),
@@ -295,6 +318,11 @@ def _thread_view(ctx: CaseContext, sid: str, events: list[dict], read: Behaviour
 def _price_pct(per_unit: float, price) -> float | None:
     """A trade's value as a share of the supplier's price: comparable with its own steps (concession)."""
     return round(per_unit / price * 100, 2) if isinstance(price, int | float) and price > 0 else None
+
+
+def _credibility_view(cred) -> dict | None:
+    return None if cred is None else {"lowest_price": cred.lowest_price, "evidence_pct": cred.evidence_pct,
+                                      "reason": cred.reason}  # fmt: skip
 
 
 def _case_view(ctx: CaseContext) -> dict:
@@ -373,21 +401,44 @@ def safe(ctx: CaseContext, threads: dict[str, list[dict]], raw: dict, rule: Tact
         return Tactic(sid, "accept", rationale="safe: no messages left - accept or the guard walks")
     if action == "send" and accept_ready(ctx, sid, events) and latest(events).get("status") == "agreed":
         return Tactic(sid, "accept", rationale="safe: supplier agreed to our terms")
-    if action != "send":
-        return Tactic(sid, action, rationale=rationale)
-    return Tactic(sid, "send", levers or ("unit_price",), claims, question, rationale)
+    # an accept or walk the policy refuses becomes a send: it keeps the model's (else the rule's) levers, claims
+    # and question, never a bare price-only message
+    if not claims and rule.supplier_id == sid:
+        claims = rule.claims
+    if not question and rule.supplier_id == sid:
+        question = rule.question
+    return Tactic(sid, action, levers or ("unit_price",), claims, question, rationale)
 
 
 class LLMStrategist:
-    def __init__(self, complete=None, fallback: RuleStrategist | None = None, timeout_s: float = TIMEOUT_S):
-        self.complete, self.timeout_s = complete, timeout_s
+    def __init__(
+        self,
+        complete=None,
+        fallback: RuleStrategist | None = None,
+        timeout_s: float | None = None,
+        converse=None,
+        tools=None,
+    ):
+        """`converse` (roles.llm.converse_from_env) turns on tool calling; `tools` is the orchestrator's DataTools,
+        whose offer engine, supplier estimate and data package the toolbox uses. Without `converse`: one call."""
+        self.complete, self.converse, self.tools = complete, converse, tools
+        self.timeout_s = timeout_s or (TOOLS_TIMEOUT_S if converse is not None else TIMEOUT_S)
         self.fallback = fallback or RuleStrategist()
         # S2+S3 in one call: the analyst's reading guide (prompts/analyst.md) sits inside the strategist prompt
         self.system = prompt("strategist").replace("{analyst}", prompt("analyst").strip())
+        if converse is not None:
+            self.system += "\n\n" + prompt("strategist_tools").strip()
+
+    def _toolbox(self, ctx: CaseContext, threads: dict[str, list[dict]], reads) -> StrategistToolbox:
+        t = self.tools
+        return StrategistToolbox(
+            ctx, threads, reads, plan_offers=getattr(t, "plan_offers", None),
+            supplier_of=getattr(t, "supplier_from_thread", None), package=getattr(t, "package", None),
+        )  # fmt: skip
 
     def choose(self, ctx: CaseContext, threads: dict[str, list[dict]], reads: dict[str, BehaviourRead]) -> Tactic:
         rule = self.fallback.choose(ctx, threads, reads)
-        if self.complete is None:
+        if self.complete is None and self.converse is None:
             return rule
         sid, events = the_thread(threads)
         read = reads.get(sid) or BehaviourRead(sid, 0.5, 0.2, (), ())
@@ -400,7 +451,14 @@ class LLMStrategist:
             ensure_ascii=False,
             default=str,
         )
-        reply = call_json(self.complete, self.system, user, self.timeout_s)
+        toolbox = None
+        if self.converse is not None:
+            toolbox = self._toolbox(ctx, threads, reads)
+            reply = call_json_with_tools(self.converse, self.system, user, toolbox, self.timeout_s, name="strategist")
+        else:
+            reply = call_json(self.complete, self.system, user, self.timeout_s, name="strategist")
+        if toolbox is not None and toolbox.calls:
+            log.info("strategist called tools: %s", ", ".join(toolbox.calls))
         if not isinstance(reply, dict) or not isinstance(reply.get("tactic"), dict):
             return rule
         try:

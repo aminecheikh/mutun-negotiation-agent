@@ -13,7 +13,7 @@ from arena_kit.agents.buyer.agent import BuyerAgent
 from arena_kit.agents.buyer.arbiter import Arbiter
 from arena_kit.agents.buyer.config import OrchestratorConfig
 from arena_kit.agents.buyer.contracts import ConcessionFit, Email, Tactic
-from arena_kit.agents.buyer.pipeline import keepalive_email
+from arena_kit.agents.buyer.pipeline import keepalive_email, keepalive_message
 from arena_kit.agents.buyer.telemetry import Telemetry
 from arena_kit.agents.buyer.tools import DataTools
 from arena_kit.client import ArenaError
@@ -87,7 +87,8 @@ def test_verdict_when_supplier_agreed_to_our_sheet_accepts():
     assert v.kind == "accept" and "agreed" in v.reason
 
 
-def test_verdict_when_rival_can_still_go_lower_parks_the_final_offer():
+def test_verdict_when_another_supplier_may_still_go_lower_accepts_this_final_offer():
+    # no inter-supplier comparison (organisers): a thread is never held back by what another supplier might do
     s = session_for(
         S02,
         {
@@ -97,7 +98,7 @@ def test_verdict_when_rival_can_still_go_lower_parks_the_final_offer():
     )
     v = policy.verdict(s, s.threads[A])
     assert policy.acceptable(s, s.threads[A])
-    assert v.kind == "park" and "plausibly" in v.reason
+    assert v.kind == "accept"
 
 
 def test_verdict_when_rival_is_at_its_final_offer_too_accepts_the_cheaper():
@@ -215,14 +216,13 @@ def test_clean_body_removes_unknown_and_duplicate_ids_extra_arguments_and_leaks(
     assert any("more than 3 arguments" in p for p in problems) and any("leak" in p for p in problems)
 
 
-def test_clean_body_allows_a_rival_offer_once_per_supplier_but_never_its_own():
+def test_clean_body_never_cites_another_suppliers_offer_nor_its_own():
+    # no inter-supplier comparison (organisers): another bidder's offer never reaches a supplier
     s = session_for(S02, {A: [rfq_quote(A, 0, 17.2)], B: [rfq_quote(B, 0, 17.5)]})
     rival, own = f"offer:{A[4:]}-0", f"offer:{B[4:]}-0"
     body = f"We hold an offer at EUR 17.20 ({rival}). Your offer stands at EUR 17.50 ({own}). Please review it."
     text, cited, _ = guard.clean_body(s, s.threads[B], body)
-    assert rival in text and own not in text and cited == {rival}
-    s.threads[B].cited_offers.add(rival)
-    assert rival not in guard.clean_body(s, s.threads[B], body)[0]
+    assert rival not in text and own not in text and cited == set()
 
 
 def test_build_message_when_the_body_is_cut_too_short_returns_none():
@@ -303,7 +303,7 @@ def test_verdict_when_a_cheaper_acceptable_sheet_exists_never_accepts_the_dearer
     b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 16.4, "agreed")]
     s = session_for(S02, {A: a_events, B: b_events})
     v = policy.verdict(s, s.threads[B])
-    assert v.kind == "park" and A in v.reason  # B agreed, but A's acceptable sheet is cheaper
+    assert v.kind == "park"  # B agreed, but A's acceptable sheet is cheaper: we sign A, not B
     assert policy.verdict(s, s.threads[A]).kind == "accept"
 
 
@@ -359,13 +359,10 @@ def test_reserve_when_two_threads_cite_the_same_id_only_the_first_keeps_it():
     assert known <= s.burned
 
 
-def test_rival_with_no_room_left_in_its_price_path_does_not_hold_up_an_accept():
-    from arena_kit.agents.buyer.contracts import ConcessionFit
-
+def test_verdict_when_another_supplier_has_room_does_not_hold_up_an_accept():
     b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0)]
     s = session_for(S02, {A: A_COUNTERED, B: b_events})
-    assert policy.verdict(s, s.threads[A]).kind == "park"  # without evidence, B's band target says it may go lower
-    s.threads[B].fit = ConcessionFit(B, (17.5, 17.0), 16.9, 2.9, True, p_room=0.05)
+    s.threads[B].fit = ConcessionFit(B, (17.5, 17.0), 14.0, 2.9, False, p_room=0.9)  # B could go far lower
     assert policy.verdict(s, s.threads[A]).kind == "accept"
 
 
@@ -521,3 +518,85 @@ def test_verdict_when_at_target_in_the_first_half_keeps_negotiating():
 def test_verdict_when_at_target_and_its_prices_show_no_room_accepts():
     s, th = at_target_thread(ConcessionFit(SID, (10.0, 9.0), 8.9, -10.0, True, 0.05))
     assert policy.verdict(s, th).kind == "accept"
+
+
+# ---- every message carries an offer ----------------------------------------------------------------------------
+
+
+def test_keepalive_message_when_our_last_offer_still_stands_sends_it_again():
+    # sweep 4c30c05: 7 of 28 messages carried no term sheet; a message without a package gets "without movement
+    # from your side" (practice replays) - a keep-alive repeats our last offer, which still stands
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    th.events += [ours(8.5), quote(SID, 1, 9.8)]
+    observe.rebuild(s, th)
+    message = keepalive_message(s, th)
+    assert [ts["terms"]["unit_price"] for ts in message["term_sheets"]] == [8.5]
+    assert "proposal" in message["body"].lower()
+
+
+def test_keepalive_message_after_a_final_offer_sends_no_sheet():
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    th.events += [ours(8.5), quote(SID, 1, 9.8, "final_offer")]
+    observe.rebuild(s, th)
+    assert keepalive_message(s, th)["term_sheets"] == []
+
+
+def test_stuck_when_we_sent_no_sheets_is_not_the_supplier_standing_still():
+    # P02 (a3d4f84f7d5954f7): three e-mails without a sheet, the supplier asked for a concrete proposal and did not
+    # move; `stuck` read that as "no progress" and the case walked away (Saed's ask, 19:28)
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    question = {"from": "buyer", "subject": "Re", "body": "A question.", "term_sheets": [], "refs": []}
+    for n in range(1, 4):
+        th.events += [question, quote(SID, n, 10.0)]
+    observe.rebuild(s, th)
+    assert not policy.stuck(s, th)
+    for n in range(4, 7):
+        th.events += [ours(8.0 + n * 0.1), quote(SID, n, 10.0)]
+    observe.rebuild(s, th)
+    assert policy.stuck(s, th)  # three real offers it did not answer: now it is standing still
+
+
+def test_keepalive_message_when_supplier_agreed_resends_the_sheet_it_agreed_to():
+    # organisers: treat each supplier as its own conversation and submit an offer to each. P05 (d353d958b3a96e12)
+    # held two agreed suppliers with keep-alives that carried no sheet (ours were no cheaper than what they agreed to)
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    th.events += [ours(8.5), quote(SID, 1, 8.5, "agreed")]
+    observe.rebuild(s, th)
+    message = keepalive_message(s, th)
+    assert [ts["terms"]["unit_price"] for ts in message["term_sheets"]] == [8.5]
+
+
+class AgreeingTable:
+    """The arena at the system boundary: the supplier agrees to our sheet; the accept succeeds."""
+
+    def __init__(self):
+        self.closed = []
+
+    def send(self, supplier_id, message):
+        sheet = {"term_sheet_id": f"offer:{supplier_id[4:]}-9", "terms": message["term_sheets"][0]["terms"]}
+        return {"from": "sales", "status": "agreed", "term_sheets": [sheet], "attachments": [], "body": "Agreed."}
+
+    def close(self, supplier_id, message):
+        self.closed.append(message["action"])
+        return {"ended": True, "deal": True}
+
+    def result(self):
+        return {"ended": True, "deal": True}
+
+
+def test_send_when_the_supplier_agrees_accepts_at_once():
+    # P05 (d353d958b3a96e12): the accept of an agreement went out 46 s after the reply and the offer was stale
+    # (422); the user: when a supplier agrees to our offer, take it - right away
+    from arena_kit.agents.buyer.runner import ThreadWorker
+
+    agent = BuyerAgent(DataTools(), None, None, None, None, None, OrchestratorConfig(), Telemetry("off"))
+    s = agent.open_case(S01, {SID: [quote(SID, 0, 10.0)]})
+    s.table = AgreeingTable()
+    th = s.threads[SID]
+    message = {"subject": "Re", "body": "Our proposal.", "term_sheets": [{"terms": {"unit_price": 9.0}}], "refs": []}
+    ThreadWorker(agent, s, Arbiter(s)).send(th, message, "counter")
+    assert s.ended and s.table.closed == [{"type": "accept", "term_sheet_id": f"offer:{SID[4:]}-9"}]

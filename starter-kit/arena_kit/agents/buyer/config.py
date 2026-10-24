@@ -13,6 +13,9 @@ class OrchestratorConfig:
     # ---- time per message (brief §5: 60 s per message, counted from the supplier's reply) ---------------
     move_budget_s: float = 48.0  # our receipt of a reply -> our message leaves; 12 s cushion for network/server
     strategist_timeout_s: float = 17.0  # outer bound around the strategist (roles use 15 s internally)
+    # with tool calling (roles.llm, BUYER_LLM_TOOLS): one tool turn is a second model call; the role stops at 22 s.
+    # 24 + writer 16 still fits the 48 s budget, and the writer gets whatever the strategist leaves
+    strategist_tools_timeout_s: float = 24.0
     writer_timeout_s: float = 16.0  # outer bound around the writer (roles use 15 s internally)
     min_llm_window_s: float = 6.0  # less time than this left: skip the LLM stage, use its rule twin
     keepalive_after_s: float = 40.0  # a parked thread gets a question this long after the supplier's reply
@@ -24,7 +27,6 @@ class OrchestratorConfig:
     last_call_s: float = 30.0  # accept the best acceptable sheet whatever is in flight, else walk
     # ---- accept / counter / walk -----------------------------------------------------------------------
     accept_eps: float = 0.005  # a standing sheet within 0.5 % of the band's target C is the target
-    rival_beat_margin: float = 0.01  # another thread "could beat" a sheet if it can plausibly go 1 % lower in C
     rival_in_flight_margin: float = 0.03  # an unanswered rival within 3 % may still come back cheaper
     final_counter_gap: float = 0.02  # one counter after a final offer only if it is > 2 % above our target C
     final_counter_min_moves: int = 2
