@@ -8,7 +8,7 @@ from pathlib import Path
 from arena_kit.agents.buyer.contracts import BehaviourRead, Claim, ConcessionFit
 from arena_kit.agents.buyer.roles import LLMStrategist, RuleAnalyst, RuleStrategist
 from arena_kit.agents.buyer.roles.analyst import wants_from
-from arena_kit.agents.buyer.roles.strategist import refined_read, safe
+from arena_kit.agents.buyer.roles.strategist import negotiable_levers, refined_read, safe
 from arena_kit.agents.buyer.tools import DataTools
 
 CASE = json.loads((Path(__file__).parents[1] / "arena_kit/sim_cases/S01.json").read_text())
@@ -212,3 +212,12 @@ def test_llm_strategist_when_fields_are_malformed_never_raises():
         tactic = LLMStrategist(lambda s, u, a=answer: json.dumps(a)).choose(ctx, threads, reads)
         assert tactic.supplier_id == SID and tactic.action in ("send", "accept")
         assert all(isinstance(i, int) and not isinstance(i, bool) for i in tactic.claims)
+
+
+def test_negotiable_levers_when_every_index_path_rises_drops_index_clause():
+    ctx, _ = setup([supplier()])
+    case = {**ctx.case, "negotiable": [*ctx.case["negotiable"], "index_clause"]}
+    rising = replace(ctx, case={**case, "buyer": {**case["buyer"], "index_paths": {"AS-14404": 0.06}}})
+    falling = replace(ctx, case={**case, "buyer": {**case["buyer"], "index_paths": {"AS-14404": -0.04}}})
+    assert "index_clause" not in negotiable_levers(rising, ["unit_price", "index_clause"])
+    assert "index_clause" in negotiable_levers(falling, ["unit_price", "index_clause"])

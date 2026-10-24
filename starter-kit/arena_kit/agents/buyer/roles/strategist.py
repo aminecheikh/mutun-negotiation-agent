@@ -73,8 +73,17 @@ def usable_claims(ctx: CaseContext, sid: str, used: set[str]) -> list[tuple[int,
     return sorted(out, key=lambda ic: -ic[1].strength)
 
 
+def index_clause_helps(ctx: CaseContext) -> bool:
+    """An index clause lowers C only if some index the case knows is expected to fall; on rising paths it
+    bought a low base price and lost the case (practice: score 0)."""
+    paths = (ctx.case.get("buyer") or {}).get("index_paths") or {}
+    return any(isinstance(v, int | float) and v < 0 for v in paths.values())
+
+
 def negotiable_levers(ctx: CaseContext, levers) -> tuple[str, ...]:
     allowed = set(ctx.case.get("negotiable") or ()) | {"unit_price"}
+    if not index_clause_helps(ctx):
+        allowed.discard("index_clause")
     return tuple(dict.fromkeys(lever for lever in levers if lever in allowed and lever in TERMS))
 
 
@@ -194,6 +203,8 @@ def _case_view(ctx: CaseContext) -> dict:
         "need_per_year": buyer.get("need_per_year"),
         "horizon_years": buyer.get("horizon_years"),
         "alternative": {"kind": alt.get("kind"), "c": None if ctx.c_alternative is None else round(ctx.c_alternative)},
+        "index_paths": buyer.get("index_paths"),  # expected index moves over the horizon: + rises, - falls
+        "index_risk_pct": buyer.get("index_risk_pct"),
         "round_limit": case.get("round_limit", 10),
     }
 

@@ -71,6 +71,29 @@ supplier can show several - combine the levers; if they conflict, follow the cat
   it - lead with the strongest index claims and ask for its cost breakdown.
 - unknown: read its e-mails; start with a balanced package and learn from which sheet it answers.
 
+WHAT MOVED SUPPLIERS IN PRACTICE (60 exchanges from the practice replays, generalised - the final's suppliers
+are new, the behaviour is the same):
+- A message that moves only price - or has no package at all - gets "Without movement from your side we
+  cannot move either" and a zero step; in a multi-supplier case a thread left without a package walked away.
+  Every send carries packages that move at least one non-price term.
+- Round 1 decides most of the deal: three packages on different terms got the biggest step (about +2.4 %);
+  later steps shrink to about 0.5 % and suppliers go final around round 3-5. Put your best probe in round 1.
+- The supplier tells you what it values: "building on your third package" -> next round, build on that
+  package's terms. "Alternatively, with payment in X days / a contract of X months: EUR Y" and "a binding
+  higher volume would help - which volume can you commit to?" are offers: answer them with a package on
+  exactly that term.
+- Verified data mostly gets "it holds, but it does not change our calculation". It moved price only when the
+  supplier did not know it ("we did not know that - a fair point": owners who do not follow the market, and
+  quality data in a quality case). Cite each fact once, early; a repeat gets "already taken into account".
+- A head-office price freeze charges for longer payment ("accommodating 90-day terms necessitates a higher
+  price"): with a freeze, trade contract length and volume, not payment days.
+- Cash-short suppliers said it plainly: "faster payment would help us more than anything" - lead with a
+  shorter payment term; quality or volume levers alone moved them 0 %.
+- A full order book charges for speed: asking a shorter lead time or more volume raised the price. Secure
+  coverage at its standard lead time.
+- "agreed" in round 1 means we offered too much - most often an index clause on a rising index path. Prefer a
+  fixed price whenever the case's index path rises; propose a clause only when the index is expected to fall.
+
 DECIDING (tactic):
 1. send is the default. Every send trades something the supplier values (its wants and levers) against
    something we value (price first). A move on price alone gets "without any movement on your side"; a

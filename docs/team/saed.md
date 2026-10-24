@@ -4,7 +4,7 @@ Branch `feat/roles-saeb` · owns `starter-kit/arena_kit/agents/buyer/roles/` (co
 
 ## Now
 
-- S1-S4 done and benched with the real model (no quota). Next: S5 playbook from the 22:00 sweep replays.
+- S5 v1 in the strategist prompt (from 15 sessions); refresh after the 22:00 sweep. S7 pitch next.
 
 ## Tasks
 
@@ -13,8 +13,8 @@ Branch `feat/roles-saeb` · owns `starter-kit/arena_kit/agents/buyer/roles/` (co
 | S1 | Writer v1 (`prompts/writer.md`): tone per persona, no numbers of its own, no leaks; offline test on recorded threads in `runs/sessions/` | done | Sat 19:00 |
 | S2 | Strategist as an LLM call (`prompts/strategist.md`) returning `Tactic`; `RuleStrategist` stays the fallback | done | Sat 22:00 |
 | S3 | Analyst as an LLM call (`prompts/analyst.md`) returning `BehaviourRead`; numbers only from `ConcessionFit` | done - merged into the S2 call (see Log 17:05) | Sat 22:00 |
-| S4 | Profiler (`prompts/profiler.md`): persona + levers from dossier evidence, precomputed for all 46 suppliers, cached | done - `LLMProfiler`, `profiles.json` (Log 17:55) | Sun 02:00 |
-| S5 | Playbook: what moved / backfired per persona, mined from `runs/digest-practice.md`, fed to the strategist | todo | Sun 02:00 |
+| S4 | Profiler (`prompts/profiler.md`): persona + levers from dossier evidence, precomputed for all 46 suppliers, cached | done - `LLMProfiler`, `profiles.json` (Log 17:45) | Sun 02:00 |
+| S5 | Playbook: what moved / backfired per persona, mined from `runs/digest-practice.md`, fed to the strategist | v1 done - refresh after the 22:00 sweep (Log 17:50) | Sun 02:00 |
 | S6 | Latency: measure each role at 10 parallel cases; with Jeddou decide whether analyst + strategist become one call | done - one call is right: strategist median 4.0 s / p90 7.3 s, writer 4.1 s / 7.6 s at 10 in parallel (Log 17:15) | Sat 22:00 |
 | S7 | Pitch slides: architecture + one replay walked through | todo | Sun 11:00 |
 
@@ -35,7 +35,8 @@ Branch `feat/roles-saeb` · owns `starter-kit/arena_kit/agents/buyer/roles/` (co
 - 17:05 - writer: packages are described from the real sheets (`movement()`), never from intended levers; "we moved" only when our price rose; the supplier's step is acknowledged - D01 showed the template claiming trades the sheet did not contain - full suite 72 passed, 1 skipped
 - 17:15 - real-model bench (`roles/bench.py`, recorded threads, 10 in parallel, no quota): strategist answer used 40/40, writer 23/24 (1 timeout at 15 s -> template), 0 unsafe e-mails, 0 errors; writer now rejects "we have moved" when our price did not rise; strategist survives malformed model fields (lists/numbers/null) - role tests 34 passed
 - 17:31 - merged main (tools v1) into `feat/roles-saeb`: 342 passed. Real-model bench with real claims/bands: 40/40 strategist, 40 claims cited verbatim in 25 e-mails, 0 unsafe; writer now also rejects data talk without a claim ("comparable parts", "market prices", "our analysis") - Amine's D02 ask - and allows years recalled from our own notes. `playbook.md` marked reference-only (Amine's ask): prompts carry only general rules, no practice names or figures; cited IDs are tracked once per case (`cited_refs`).
-- 17:55 - S4 profiler: `LLMProfiler` judges the rules' dossier (persona, levers) and adds traits the rules cannot express as `profile:` evidence lines (hedged until YYYY-MM, uninformed_owner, open_book, pricing_committee, price_freeze, not_strategic, partnership_memory ...), every trait backed by an evidence ID. `profiles.json` precomputed for 46/46 suppliers in 28 s (no quota); spot checks match the data (70520 hedged 2027-03 + committee; 70420 price freeze 2027-12; 70150 cash need + idle + open book). Live call only for case facts. Strategist now reads attachment text (cost breakdown = cost floor); writer rejects revealing our private notes (bank, idle shifts, spreadsheet, hedges) - real-model bench: 40/40 strategist, 26/27 writer, 42 claims cited, 0 unsafe - 351 passed
+- 17:45 - S4 profiler: `LLMProfiler` judges the rules' dossier (persona, levers) and adds traits the rules cannot express as `profile:` evidence lines (hedged until YYYY-MM, uninformed_owner, open_book, pricing_committee, price_freeze, not_strategic, partnership_memory ...), every trait backed by an evidence ID. `profiles.json` precomputed for 46/46 suppliers in 28 s (no quota); spot checks match the data (70520 hedged 2027-03 + committee; 70420 price freeze 2027-12; 70150 cash need + idle + open book). Live call only for case facts. Strategist now reads attachment text (cost breakdown = cost floor); writer rejects revealing our private notes (bank, idle shifts, spreadsheet, hedges) - real-model bench: 40/40 strategist, 26/27 writer, 42 claims cited, 0 unsafe - 351 passed
+- 17:50 - S5 v1: `roles/mine.py` turns harvested replays into exchanges (what we traded -> its price step, status, reasons). 60 exchanges / 15 sessions: price-only moves 0.27 % mean step vs 0.9-2.5 % when a term is traded; payment days most effective (1.36 %, n=27); round 1 with 3 packages gets the biggest step (~2.4 %), then ~0.5 %, final at r3-5; verified data mostly "does not change our calculation" except uninformed owners and quality data; price freeze charges for longer payment; cash-short: "faster payment would help us more than anything"; full order book raised price for shorter lead time; "agreed" in r1 = index clause on a rising path (P02/P18/P08). Written as general rules into `prompts/strategist.md` (no supplier names); strategist now sees `index_paths` and never proposes an index clause when every path rises; writer answers "which volume?" by pointing to the package. Bench: 43/43 strategist, 29/30 writer, 46 claims, 0 unsafe - 352 passed
 
 ## Runs
 

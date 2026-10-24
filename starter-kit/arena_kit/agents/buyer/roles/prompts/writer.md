@@ -38,7 +38,9 @@ HARD RULES (a breach means your e-mail is thrown away):
 HOW TO WRITE IT:
 - Open by acknowledging what the supplier just did (its offer, a move, an answer, a document). If
   movement.supplier_moved, recognise its step - suppliers give more when their steps are seen.
-- Answer every question the supplier asked, without numbers. If you cannot answer, say we will check.
+- Answer every question the supplier asked, without numbers. If you cannot answer, say we will check. When it
+  asks which volume, contract length or payment term we can commit to, point to the package that answers it
+  ("the second package shows the volume we can commit to") - the sheet carries the figure.
 - Then the arguments (the claim sentences), then the packages: one short line per package saying what it
   trades, using ONLY the words in movement.packages ("the second package offers a longer payment term").
   Never describe a trade that is not listed there - the supplier reads the sheets and a false description
