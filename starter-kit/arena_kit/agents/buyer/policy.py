@@ -196,6 +196,14 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
                 return Verdict("park", f"{forced[0]}, waiting for the other suppliers' best offers")
             return Verdict("counter", f"{forced[0]}, the other suppliers have not given their best offers yet")
         return Verdict("accept", forced[0])
+    if ok and th.status == "agreed":
+        # it accepted our own sheet, and our offers never go below an earlier one: it cannot go lower from our side.
+        # Never raise our offer to it (P05: 35.03 agreed, we sent 35.15); take it once it wins the comparison
+        if cheaper is not None:
+            return Verdict("park", "agreed, but a cheaper acceptable sheet is on the table")
+        if left > 0 and not session.in_close_window() and not others_settled(session, th):
+            return Verdict("park", "agreed, waiting for the other suppliers' best offers")
+        return Verdict("accept", "supplier agreed to our sheet: it cannot go lower, within our margin")
     if left <= 0:
         return Verdict("dead", "no messages left and the sheet is not acceptable")
     if th.status == "final_offer":
@@ -214,15 +222,13 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
 
 
 def others_settled(session: CaseSession, th: ThreadState) -> bool:
-    """Every other live supplier has given its best offer: a final offer, an agreement that meets our expectation
-    (the band target), or no messages left. One supplier: trivially true."""
+    """Every other live supplier has given its best offer: a final offer, an agreement to our sheet, or no
+    messages left. One supplier: trivially true."""
     for other in session.alive():
         if other is th or other.status == "final_offer" or other.moves_left(session.case) <= 0:
             continue
-        band = session.band(other.supplier_id)
         if other.status == "agreed" and acceptable(session, other):
-            if band is None or other.c <= band.c_target * (1 + session.config.accept_eps):
-                continue
+            continue  # it accepted our own sheet: its best answer to our offer
         return False
     return True
 

@@ -147,6 +147,11 @@ class ThreadWorker:
                 with s.gate(asked_at):
                     reply = s.table.send(th.supplier_id, message)
             except ArenaError as e:
+                if e.status == 422 and "round limit" in str(e.detail).lower():
+                    # "accept the standing term sheet or walk away": no message can go out - the policy decides
+                    log.warning("%s/%s: round limit reached - no more messages", s.case["case_id"], th.supplier_id)
+                    th.exhausted = True
+                    return
                 if e.status == 422:  # invalid message, nothing happened, no round used: repair once
                     log.warning("%s/%s: 422 %s - repairing", s.case["case_id"], th.supplier_id, e.detail)
                     message = guard.hard_repair(s, th, message)

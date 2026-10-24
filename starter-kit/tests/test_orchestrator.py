@@ -614,8 +614,73 @@ def test_verdict_when_supplier_agrees_at_or_below_our_target_accepts():
     assert policy.verdict(s, th).kind == "accept"
 
 
-def test_verdict_when_supplier_agrees_above_our_target_does_not_force_the_accept():
-    # the user: accept an agreement only if it meets our expectation (our band target)
+def test_verdict_when_one_supplier_agrees_above_our_target_accepts_within_our_margin():
+    # the user: one supplier - accept when it cannot go lower and the deal is within our margin. It accepted our own
+    # sheet and our offers never go below an earlier one, so it cannot go lower from our side
     s, th = agreed_thread(1.05)
-    v = policy.verdict(s, th)
-    assert v.kind != "accept" and "agreed" not in v.reason
+    assert policy.acceptable(s, th)
+    assert policy.verdict(s, th).kind == "accept"
+
+
+def test_others_settled_when_a_supplier_agreed_above_our_target_counts_it_as_its_best():
+    # P05 (02111fa2d1c4eb09): the cheapest supplier gave its final offer and waited while another kept agreeing
+    # to our sheet above its band target - an agreement is that supplier's best answer to our offer: settled
+    b_events = [rfq_quote(B, 0, 17.5), ours(17.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0, "agreed")]
+    s = session_for(S02, {A: A_COUNTERED, B: b_events})
+    assert s.threads[B].c > s.band(B).c_target  # agreed, but above our target
+    assert policy.others_settled(s, s.threads[A])
+
+
+def test_plan_offers_when_supplier_agreed_never_raises_our_offer():
+    # P05 (02111fa2d1c4eb09): we sent 35.15 to a supplier that had agreed to 35.03 - never pay more than an agreement
+    b_events = [rfq_quote(B, 0, 17.5), ours(17.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0, "agreed")]
+    s = session_for(S02, {A: A_COUNTERED, B: b_events})
+    assert s.threads[B].c > s.band(B).c_target  # agreed above our target
+    assert policy.verdict(s, s.threads[B]).kind != "counter"
+
+
+class RoundLimitTable:
+    """The arena when a thread has used its rounds: every message is refused, the standing sheet can be accepted."""
+
+    def __init__(self):
+        self.sent, self.closed = 0, []
+
+    def send(self, supplier_id, message):
+        self.sent += 1
+        raise ArenaError(422, "round limit reached: accept the standing term sheet or walk away")
+
+    def close(self, supplier_id, message):
+        self.closed.append(message["action"])
+        return {"ended": True, "deal": True}
+
+    def result(self):
+        return {"ended": True, "deal": True}
+
+
+def test_send_when_the_round_limit_is_reached_stops_sending_and_lets_the_policy_close():
+    # P05 (02111fa2d1c4eb09): the arena said "round limit reached: accept the standing term sheet or walk away";
+    # we re-sent three times, gave up on the thread, and the case timed out at 0
+    from arena_kit.agents.buyer.runner import ThreadWorker
+
+    agent = BuyerAgent(DataTools(), None, None, None, None, None, OrchestratorConfig(), Telemetry("off"))
+    s = agent.open_case(S01, {SID: [quote(SID, 0, 10.0), ours(8.0), quote(SID, 1, 9.0)]})
+    s.table = RoundLimitTable()
+    th = s.threads[SID]
+    message = {"subject": "Re", "body": "Our proposal.", "term_sheets": [{"terms": {"unit_price": 8.2}}], "refs": []}
+    ThreadWorker(agent, s, Arbiter(s)).send(th, message, "counter")
+    assert s.table.sent == 1 and th.moves_left(S01) == 0
+    assert policy.verdict(s, th).kind in ("accept", "dead")  # no messages left: take it if acceptable, never resend
+
+
+def test_close_when_the_arena_says_the_thread_ended_marks_it_dead():
+    # P05: accepts on a supplier that had walked were retried every second ("the thread ... has ended")
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+
+    class EndedTable(RoundLimitTable):
+        def close(self, supplier_id, message):
+            raise ArenaError(422, f"the thread with {supplier_id} has ended (supplier_walked)")
+
+    s.table = EndedTable()
+    Arbiter(s)._close(th, {"action": {"type": "accept", "term_sheet_id": "offer:x"}}, "test")
+    assert not th.alive

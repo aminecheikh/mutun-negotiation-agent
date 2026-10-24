@@ -74,6 +74,8 @@ class Arbiter:
             log.warning("%s: closing action refused (%s): %s", s.case["case_id"], e.status, e.detail)
             if message["action"].get("term_sheet_id"):  # never retry it: the thread counters or waits instead
                 th.refused.add(message["action"]["term_sheet_id"])
+            if "has ended" in str(e.detail):  # the supplier walked or the thread closed: stop counting on it
+                th.alive = False
             return False
         log.info("%s: %s (C %s)", s.case["case_id"], reason, None if th.c == float("inf") else round(th.c))
         self.telemetry.round(
