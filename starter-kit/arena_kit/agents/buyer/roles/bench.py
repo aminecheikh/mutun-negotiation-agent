@@ -1,4 +1,4 @@
-﻿"""Offline bench for the LLM roles (owner: Saed; S6): replay recorded threads through the strategist and the
+"""Offline bench for the LLM roles (owner: Saed; S6): replay recorded threads through the strategist and the
 writer with the real model, N in parallel like the Live Final, and report latency, how often the model's
 answer was used (not a fallback) and why the writer's check rejected e-mails. No arena session is used.
 
