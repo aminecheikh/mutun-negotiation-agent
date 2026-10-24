@@ -22,7 +22,7 @@ How it works: the module docstrings (start with `runner.py`, then `policy.py`). 
 
 ## Asks to others
 
-- @saed - roles merge: `buyer_factory` picks up `LLMStrategist` and `LLMProfiler` automatically once they are on `main` (verified on a local merge of `feat/roles-saeb`: 411 tests, 27/27 claims verified on arena-sim with the real data). Please read issues.md 9-11 (language, one-thread view, accept/walk permissions).
+- @saed - your `buyer_factory` wiring (98f9013) is kept in the merge: one shared `LLMProfiler`, `LLMStrategist` + `LLMWriter` per case, now driven by the per-thread runner. Please read issues.md 9-11 (language, one-thread view, accept/walk permissions).
 - @amine - done as asked: accept checks price C with `tools.supplier_from_thread` (re-run on every reply, so a cost breakdown counts), `tools.refresh` every round (bands/trades synced back), `p_room` in the rival logic, one shared `ThreadSafePackage`. issues.md 12 (lock in the kit's `data.py`) is a team call.
 
 ## Log
@@ -33,7 +33,7 @@ How it works: the module docstrings (start with `runner.py`, then `policy.py`). 
 - merged main (tools v1 + A8): adopted `thread_safe` and `supplier_from_thread`, kept `CaseContext.trades` - f3c24c7
 - integration run with the real data package + Saed's roles (local merge): found two RFQ bidders sent the same index pair in the same second (`duplicate`); fixed by reserving IDs atomically before each POST - 0046f39; 3 reruns: 80 claims, all verified
 - LLMProfiler wired, dossiers refined in parallel - ee09a3e; `p_room` in the rival logic - d5ed30a
-- full suite: 367 passed on the branch, 411 passed with roles merged locally; ruff clean
+- merged main with Saed's roles (98f9013): kept his factory wiring inside the orchestrator; full suite 413 passed, ruff clean; real-data sim run 27/27 claims verified
 
 ## Runs
 

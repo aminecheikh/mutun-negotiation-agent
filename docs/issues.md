@@ -60,11 +60,10 @@ orchestrator PR (`feat/orchestrator`). Each item says how to close it. Newest de
 12. **@Amine @Saed - the kit's `DataPackage` lock.** The agent is safe: `DataTools` wraps the package in
     `ThreadSafePackage` and the orchestrator shares that one object. Saed's bench uses the raw package, so a lock
     inside the kit's `arena_kit/data.py` would also protect other callers; it is a kit change, so a team decision.
-13. **@team - roles not on `main` yet.** `buyer_factory` uses `LLMStrategist` and `LLMProfiler` when the roles package
-    exports them; on today's `main` it falls back to the rule strategist and the passthrough profiler. Verified on a
-    local merge of `feat/roles-saeb` (not pushed): 411 tests pass, the factory builds `LLMProfiler`,
-    `LLMStrategist` and `LLMWriter`, and the three sim cases with the real data sent 27 claims, all `verified`.
-    Until roles merge, the rule strategist on `main` never cites claims.
+13. **Roles wiring (resolved in this PR's merge with `main`).** Saed wired `LLMProfiler` and `LLMStrategist` into
+    `buyer_factory` on `main` while this branch rewrote `agent.py`; the merge keeps his wiring (one profiler shared
+    by all cases for its profile cache, a strategist and a writer per case) inside the new orchestrator. Verified on
+    the merged branch: 413 tests pass; the three arena-sim cases with the real data sent 27 claims, all `verified`.
 
 ## Not done from the orchestrator plan
 

@@ -1,0 +1,1354 @@
+{
+ "sup:70110": {
+  "confidence": 0.8,
+  "decisive": [
+   "2026-09-17 meeting_note 'Visit by the owner': Visit by the owner of Gießerei Brandlhuber GmbH & Co. KG. He reminded us that in 2022 they kept supplying at the old price for a quarter and said he expects partnership in return. (doc:20260917-70110-M3)",
+   "Past renewals (part:310010): 2025 asked +2.1% settled -1.4%; 2025 asked +1.5% settled -1.4%; 2024 asked +2.6% settled -0.1% - note: accepted below full cost to keep the volume",
+   "family GmbH & Co. KG founded 1921, 185 staff, turnover 25-50 M EUR, equity 24.7%, credit index 222, 12 months ago 222 (sup:70110)"
+  ],
+  "levers": [
+   "contract_months",
+   "volume_per_year",
+   "effective_date"
+  ],
+  "persona": "partner",
+  "traits": [
+   {
+    "id": "doc:20260917-70110-M3",
+    "trait": "partnership_memory",
+    "until": null,
+    "why": "Owner reminded us that in 2022 they kept supplying at the old price and expects partnership in return"
+   },
+   {
+    "id": "doc:20260909-70110-M4",
+    "trait": "uninformed_owner",
+    "until": null,
+    "why": "Owner admitted he has not followed material and energy prices since the 2022 peak"
+   },
+   {
+    "id": "doc:20260824-70110-M1",
+    "trait": "uninformed_owner",
+    "until": null,
+    "why": "Works from his own spreadsheet, last updated two years ago"
+   },
+   {
+    "id": "sc:70110@2026Q3",
+    "trait": "quality_problem",
+    "until": null,
+    "why": "Amber scorecard: OTD 85.2%, 712 ppm, 1 overdue 8D"
+   }
+  ]
+ },
+ "sup:70120": {
+  "confidence": 0.75,
+  "decisive": [
+   "2026-07-19 meeting_note 'Visit by the owner': Visit by the owner of Eisengießerei Velkenreith GmbH. He reminded us that in 2022 they kept supplying at the old price for a quarter and said he expects partnership in return. (doc:20260719-70120-M1)",
+   "Past renewals (part:310030): 2025 asked +2.6% settled -1.4%; 2025 asked +3.2% settled +0%; 2024 asked +2% settled +0% - note: accepted below full cost to keep the volume",
+   "family GmbH founded 1936, 240 staff, turnover 25-50 M EUR, equity 38.5%, credit index 239, 12 months ago 239 (sup:70120)"
+  ],
+  "levers": [
+   "contract_months",
+   "volume_per_year",
+   "payment_days"
+  ],
+  "persona": "partner",
+  "traits": [
+   {
+    "id": "doc:20260719-70120-M1",
+    "trait": "partnership_memory",
+    "until": null,
+    "why": "Owner recalled supplying at the old price in 2022 and expects partnership in return"
+   },
+   {
+    "id": "sc:70120@2026Q3",
+    "trait": "quality_problem",
+    "until": null,
+    "why": "Amber scorecard: OTD 74.5% against a 95% target, 734 ppm, both worse than a year ago"
+   }
+  ]
+ },
+ "sup:70130": {
+  "confidence": 0.75,
+  "decisive": [
+   "2026-08-02 call_note 'Liquidity': Call with the managing director of Gießerei Wimbacher GmbH: he asked twice whether we could pay earlier and said the bank is watching every month. 'I cannot sign anything that lowers our margin now.' (doc:20260802-70130-M1)",
+   "2026-06-02 meeting_note 'Supplier visit': Visit at Gießerei Wimbacher GmbH: half the shop floor was idle, two shifts are on short hours, and the MD spoke mostly about cash and the banks. (doc:20260602-70130-M4)"
+  ],
+  "levers": [
+   "payment_days",
+   "volume_per_year",
+   "contract_months",
+   "unit_price"
+  ],
+  "persona": "cash_short",
+  "traits": [
+   {
+    "id": "doc:20260802-70130-M1",
+    "trait": "cash_need",
+    "until": null,
+    "why": "MD asked twice for earlier payment, bank watching monthly, cannot sign margin cuts"
+   },
+   {
+    "id": "doc:20260602-70130-M4",
+    "trait": "idle_capacity",
+    "until": null,
+    "why": "half the shop floor idle, two shifts on short hours"
+   },
+   {
+    "id": "news:20260322-05",
+    "trait": "succession",
+    "until": null,
+    "why": "owner seeks a successor"
+   },
+   {
+    "id": "doc:20260911-70130-M3",
+    "trait": "not_strategic",
+    "until": null,
+    "why": "reviewing small accounts, focusing on customers with volume"
+   }
+  ]
+ },
+ "sup:70140": {
+  "confidence": 0.8,
+  "decisive": [
+   "2026-07-15 call_note 'Liquidity': Call with the managing director of Odlewnia Kalwisz Sp. z o.o.: he asked twice whether we could pay earlier and said the bank is watching every month. 'I cannot sign anything that lowers our... (doc:20260715-70140-M1)",
+   "2026-09-11 news (restructuring): Odlewnia Kalwisz Sp. z o.o. restructures (news:20260911-28)"
+  ],
+  "levers": [
+   "payment_days",
+   "effective_date",
+   "unit_price"
+  ],
+  "persona": "cash_short",
+  "traits": [
+   {
+    "id": "doc:20260715-70140-M1",
+    "trait": "cash_need",
+    "until": null,
+    "why": "MD asked twice for earlier payment, bank watching monthly; restructuring news"
+   },
+   {
+    "id": "sc:70140@2026Q3",
+    "trait": "quality_problem",
+    "until": null,
+    "why": "Red scorecard: OTD 63.5 %, 2376 ppm"
+   }
+  ]
+ },
+ "sup:70150": {
+  "confidence": 0.85,
+  "decisive": [
+   "2026-08-04 call_note 'Liquidity': Call with the managing director of Tarsevi Döküm Sanayi A.Ş.: he asked twice whether we could pay earlier and said the bank is watching every month. 'I cannot sign anything that lowers our margin... (doc:20260804-70150-M4)",
+   "2026-08-09 news (restructuring): Tarsevi Döküm Sanayi A.Ş. restructures (news:20260809-22)",
+   "2026-06-10 meeting_note 'Supplier visit': Visit at Tarsevi Döküm Sanayi A.Ş.: half the shop floor was idle, two shifts are on short hours, and the MD spoke mostly about cash and the banks. (doc:20260610-70150-M1)"
+  ],
+  "levers": [
+   "payment_days",
+   "volume_per_year",
+   "contract_months",
+   "unit_price"
+  ],
+  "persona": "cash_short",
+  "traits": [
+   {
+    "id": "doc:20260804-70150-M4",
+    "trait": "cash_need",
+    "until": null,
+    "why": "MD asked twice for earlier payment; bank watching monthly; restructuring news"
+   },
+   {
+    "id": "doc:20260610-70150-M1",
+    "trait": "idle_capacity",
+    "until": null,
+    "why": "Half the shop floor idle, two shifts on short hours"
+   },
+   {
+    "id": "doc:20260418-70150-M2",
+    "trait": "open_book",
+    "until": null,
+    "why": "Owner offered to walk us through hourly rates and material"
+   },
+   {
+    "id": "sc:70150@2026Q3",
+    "trait": "quality_problem",
+    "until": null,
+    "why": "Red scorecard: OTD 52%, 2652 ppm, worse than a year before"
+   }
+  ]
+ },
+ "sup:70160": {
+  "confidence": 0.4,
+  "decisive": [
+   "Past renewals (part:310051): 2025 asked -1.1% settled -2.3%; 2024 asked +1% settled -0.3%; 2023 asked -2.6% settled -5.1% - note: accepted below full cost to keep the volume"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "unit_price"
+  ],
+  "persona": "partner",
+  "traits": []
+ },
+ "sup:70170": {
+  "confidence": 0.55,
+  "decisive": [
+   "2026-05-12 meeting_note 'Supplier day': At our supplier day Slévárna Vrbenský s.r.o. said Hollerau is an important reference customer for them. (doc:20260512-70170-M2)",
+   "family s.r.o. founded 1997, 150 staff, turnover 5-10 M EUR, equity 36.4%, credit index 239, 12 months ago 239 (sup:70170)"
+  ],
+  "levers": [
+   "contract_months",
+   "volume_per_year",
+   "ppm_commitment"
+  ],
+  "persona": "partner",
+  "traits": [
+   {
+    "id": "sc:70170@2026Q3",
+    "trait": "quality_problem",
+    "until": null,
+    "why": "Scorecard red: OTD 91.7% and 5682 ppm, against 100% / 0 ppm a year before; 2 supplier-caused complaints."
+   }
+  ]
+ },
+ "sup:70180": {
+  "confidence": 0.7,
+  "decisive": [
+   "2026-09-24 meeting_note 'Visit by the owner': Visit by the owner of Feinguss Allgäu-Reiter GmbH. He reminded us that in 2022 they kept supplying at the old price for a quarter and said he expects partnership in return. (doc:20260924-70180-M1)",
+   "family GmbH founded 1962, 160 staff, turnover 10-25 M EUR, equity 25.0%, credit index 244, 12 months ago 244 (sup:70180)"
+  ],
+  "levers": [
+   "contract_months",
+   "volume_per_year",
+   "payment_days"
+  ],
+  "persona": "partner",
+  "traits": [
+   {
+    "id": "doc:20260924-70180-M1",
+    "trait": "partnership_memory",
+    "until": null,
+    "why": "Owner recalled supplying at the old price in 2022 and expects partnership in return"
+   },
+   {
+    "id": "sc:70180@2026Q3",
+    "trait": "quality_problem",
+    "until": null,
+    "why": "Amber scorecard: OTD 73.1%, 526 ppm, 1 overdue 8D"
+   }
+  ]
+ },
+ "sup:70190": {
+  "confidence": 0.5,
+  "decisive": [
+   "2026-06-23 call_note 'Material purchasing': Call with Gießerei Pfaffenreuth GmbH: they bought their electricity forward until December 2028 and said the market price is 'not our reality' before then. (doc:20260623-70190-M1)",
+   "family GmbH founded 1949, 95 staff, turnover 10-25 M EUR, equity 33.9%, credit index 227, 12 months ago 227 (sup:70190)"
+  ],
+  "levers": [
+   "effective_date",
+   "contract_months",
+   "volume_per_year"
+  ],
+  "persona": "unknown",
+  "traits": [
+   {
+    "id": "doc:20260623-70190-M1",
+    "trait": "hedged",
+    "until": "2028-12",
+    "why": "Bought electricity forward until December 2028; market price 'not our reality' before then"
+   },
+   {
+    "id": "sc:70190@2026Q3",
+    "trait": "quality_problem",
+    "until": null,
+    "why": "Amber scorecard, OTD 85.1%, 715 ppm, overdue 8D, 13 complaints"
+   }
+  ]
+ },
+ "sup:70210": {
+  "confidence": 0.62,
+  "decisive": [
+   "2026-07-22 call_note 'Capacity': Call with sales at Zerspanung Dralveck GmbH: they could take additional parts at short notice; the second shift has been on hold since spring. (doc:20260722-70210-M2)",
+   "2026-09-10 meeting_note 'Supplier day': At our supplier day Zerspanung Dralveck GmbH said Hollerau is an important reference customer for them. (doc:20260910-70210-M3)",
+   "founder GmbH founded 1991, 22 staff, turnover 2-5 M EUR, equity 43.6%, credit index 249, 12 months ago 249 (sup:70210)"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "unit_price",
+   "payment_days"
+  ],
+  "persona": "price_fighter",
+  "traits": [
+   {
+    "id": "doc:20260722-70210-M2",
+    "trait": "idle_capacity",
+    "until": null,
+    "why": "Second shift on hold since spring; can take additional parts at short notice"
+   },
+   {
+    "id": "doc:20260908-70210-M1",
+    "trait": "uninformed_owner",
+    "until": null,
+    "why": "Owner has not followed material and energy prices since the 2022 peak; his office manager does the costing"
+   }
+  ]
+ },
+ "sup:70220": {
+  "confidence": 0.65,
+  "decisive": [
+   "2026-03-20 news (full_order_book): CNC-Technik Obermaier & Huber GmbH fully booked into next year (news:20260320-04)",
+   "Scorecard amber: OTD 56.0% (below our 95% target), 731 ppm, 0 overdue 8D (sc:70220@2026Q3); a year before 70.8% / 1068 ppm (sc:70220@2025Q3)"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "lead_time_days"
+  ],
+  "persona": "full_order_book",
+  "traits": [
+   {
+    "id": "news:20260320-04",
+    "trait": "capacity_squeeze",
+    "until": null,
+    "why": "Press reports it is fully booked into next year. Its on-time delivery is only 56% against our 95% target."
+   }
+  ]
+ },
+ "sup:70230": {
+  "confidence": 0.4,
+  "decisive": [
+   "2026-08-12 email 'Overdue invoices': Several of our invoices are overdue again. We ask you to keep to the agreed payment terms; otherwise we will have to review our conditions. (doc:20260812-70230-P)",
+   "We paid its 76 invoices of the last 12 months -3 days vs due on average, skonto taken 41x (e.g. inv:5105005342)",
+   "family KG founded 1985, 14 staff, turnover 0-2 M EUR, equity 37.3%, credit index 255, 12 months ago 255 (sup:70230)"
+  ],
+  "levers": [
+   "payment_days",
+   "effective_date",
+   "unit_price",
+   "volume_per_year",
+   "contract_months"
+  ],
+  "persona": "unknown",
+  "traits": [
+   {
+    "id": "doc:20260809-70230-M3",
+    "trait": "open_book",
+    "until": null,
+    "why": "The owner offered to walk us through hourly rates and material costs."
+   },
+   {
+    "id": "doc:20260724-70230-M1",
+    "trait": "uninformed_owner",
+    "until": null,
+    "why": "The owner admitted he has not followed material and energy prices since the 2022 peak; his office manager does the costi"
+   },
+   {
+    "id": "doc:20260812-70230-P",
+    "trait": "cash_need",
+    "until": null,
+    "why": "Weak signal: it complains of overdue invoices and offers skonto. Our payment data and its stable credit index contradict"
+   }
+  ]
+ },
+ "sup:70240": {
+  "confidence": 0.6,
+  "decisive": [
+   "2026-07-10 news (full_order_book): Strojírna Hrvelec s.r.o. fully booked into next year (news:20260710-18)",
+   "Scorecard amber: OTD 62.5% (below our 95% target), 980 ppm, 0 overdue 8D (sc:70240@2026Q3); a year before 84.0% / 2300 ppm (sc:70240@2025Q3)"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "lead_time_days"
+  ],
+  "persona": "full_order_book",
+  "traits": [
+   {
+    "id": "news:20260710-18",
+    "trait": "capacity_squeeze",
+    "until": null,
+    "why": "News reports it is fully booked into next year; OTD has fallen to 62.5%"
+   },
+   {
+    "id": "sc:70240@2026Q3",
+    "trait": "quality_problem",
+    "until": null,
+    "why": "Amber scorecard with OTD 62.5% vs our 95% target, plus 3 supplier-caused complaints in 12 months"
+   }
+  ]
+ },
+ "sup:70250": {
+  "confidence": 0.65,
+  "decisive": [
+   "2026-07-23 call_note 'Capacity': Call with sales at Drehteile Fuchsreiter GmbH: they could take additional parts at short notice; the second shift has been on hold since spring. (doc:20260723-70250-M1)",
+   "2026-03-09 news (free_capacity): Drehteile Fuchsreiter GmbH looks for new customers (news:20260309-03)",
+   "2026-08-18 email 'Overdue invoices': Several of our invoices are overdue again. We ask you to keep to the agreed payment terms; otherwise we will have to review our conditions. (doc:20260818-70250-P)"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "payment_days",
+   "effective_date"
+  ],
+  "persona": "price_fighter",
+  "traits": [
+   {
+    "id": "doc:20260723-70250-M1",
+    "trait": "idle_capacity",
+    "until": null,
+    "why": "Second shift on hold since spring; can take extra parts at short notice; looking for new customers"
+   }
+  ]
+ },
+ "sup:70260": {
+  "confidence": 0.55,
+  "decisive": [
+   "2026-03-22 meeting_note 'Visit by the owner': Visit by the owner of Mechanik Tauvelt GmbH. He reminded us that in 2022 they kept supplying at the old price for a quarter and said he expects partnership in return. (doc:20260322-70260-M4)",
+   "2026-05-22 meeting_note 'Customer portfolio': The sales director of Mechanik Tauvelt GmbH said they are reviewing small accounts and will focus on customers with volume. (doc:20260522-70260-M3)",
+   "2026-02-12 call_note 'Price discussion': Call with the owner of Mechanik Tauvelt GmbH: he offered to walk us through their calculation (hourly rates and material) if that helps to settle prices. (doc:20260212-70260-M1)"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "unit_price"
+  ],
+  "persona": "partner",
+  "traits": [
+   {
+    "id": "doc:20260322-70260-M4",
+    "trait": "partnership_memory",
+    "until": null,
+    "why": "Owner recalled supplying at the old price in 2022 and expects partnership in return"
+   },
+   {
+    "id": "doc:20260212-70260-M1",
+    "trait": "open_book",
+    "until": null,
+    "why": "Owner offered to walk us through hourly rates and material costs"
+   },
+   {
+    "id": "doc:20260522-70260-M3",
+    "trait": "not_strategic",
+    "until": null,
+    "why": "Most recent note: reviewing small accounts and focusing on customers with volume; we are 1.9% of its turnover"
+   }
+  ]
+ },
+ "sup:70270": {
+  "confidence": 0.6,
+  "decisive": [
+   "2026-03-18 meeting_note 'Visit by the owner': Visit by the owner of Obrábění Kraslin s.r.o.. He reminded us that in 2022 they kept supplying at the old price for a quarter and said he expects partnership in return. (doc:20260318-70270-M3)",
+   "founder s.r.o. founded 2008, 30 staff, turnover 2-5 M EUR, equity 44.8%, credit index 245, 12 months ago 245 (sup:70270)"
+  ],
+  "levers": [
+   "contract_months",
+   "volume_per_year",
+   "effective_date"
+  ],
+  "persona": "partner",
+  "traits": [
+   {
+    "id": "doc:20260318-70270-M3",
+    "trait": "partnership_memory",
+    "until": null,
+    "why": "Owner recalled supplying at the old price in 2022 and expects partnership in return"
+   },
+   {
+    "id": "doc:20260809-70270-M1",
+    "trait": "uninformed_owner",
+    "until": null,
+    "why": "Owner works from his own spreadsheet, last updated two years ago, so data arguments can disarm him"
+   },
+   {
+    "id": "doc:20260223-70270-M2",
+    "trait": "not_strategic",
+    "until": null,
+    "why": "Sales director said they are reviewing small accounts and will focus on customers with volume; we are 2.7% of its turnov"
+   }
+  ]
+ },
+ "sup:70280": {
+  "confidence": 0.8,
+  "decisive": [
+   "2026-07-07 call_note 'Liquidity': Call with the managing director of Wälzhammer Präzision GmbH: he asked twice whether we could pay earlier and said the bank is watching every month. 'I cannot sign anything that lowers our margin... (doc:20260707-70280-M1)",
+   "2026-07-25 news (credit_watch): Wälzhammer Präzision GmbH under pressure (news:20260725-20)",
+   "2026-09-26 news (short_time_work): Wälzhammer Präzision GmbH introduces short-time work (news:20260926-38)"
+  ],
+  "levers": [
+   "payment_days",
+   "volume_per_year",
+   "contract_months",
+   "effective_date"
+  ],
+  "persona": "cash_short",
+  "traits": [
+   {
+    "id": "doc:20260707-70280-M1",
+    "trait": "cash_need",
+    "until": null,
+    "why": "The managing director asked twice to be paid earlier, said the bank watches every month and offers 3% skonto. A credit w"
+   },
+   {
+    "id": "doc:20260619-70280-M2",
+    "trait": "idle_capacity",
+    "until": null,
+    "why": "The second shift has been on hold since spring and short-time work was introduced in 2026-09."
+   }
+  ]
+ },
+ "sup:70290": {
+  "confidence": 0.5,
+  "decisive": [
+   "2026-03-23 news (big_order): Feinmechanik Rottaler GmbH wins large hydraulics contract (news:20260323-06)"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "lead_time_days"
+  ],
+  "persona": "full_order_book",
+  "traits": [
+   {
+    "id": "news:20260323-06",
+    "trait": "capacity_squeeze",
+    "until": null,
+    "why": "won a large hydraulics contract that will fill a 25-staff plant"
+   }
+  ]
+ },
+ "sup:70295": {
+  "confidence": 0.6,
+  "decisive": [
+   "2026-04-19 call_note 'Capacity': Call with sales at Drehzentrum Ilzauer GmbH: they could take additional parts at short notice; the second shift has been on hold since spring. (doc:20260419-70295-M5)",
+   "2026-05-14 news (free_capacity): Drehzentrum Ilzauer GmbH looks for new customers (news:20260514-12)",
+   "2026-09-09 meeting_note 'Visit by the owner': The owner of Drehzentrum Ilzauer GmbH admitted he had not followed his material and energy prices closely since the 2022 peak; his office manager does the costing. (doc:20260909-70295-M4)"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "payment_days",
+   "unit_price"
+  ],
+  "persona": "price_fighter",
+  "traits": [
+   {
+    "id": "doc:20260419-70295-M5",
+    "trait": "idle_capacity",
+    "until": null,
+    "why": "Second shift on hold since spring; can take extra parts at short notice; public search for new customers."
+   },
+   {
+    "id": "doc:20260909-70295-M4",
+    "trait": "uninformed_owner",
+    "until": null,
+    "why": "Owner admits he has not followed material and energy prices since the 2022 peak, so cost data can disarm price claims."
+   },
+   {
+    "id": "sc:70295@2026Q3",
+    "trait": "quality_problem",
+    "until": null,
+    "why": "Amber scorecard: OTD 84.4%, 1000 ppm, 2 overdue 8D, 20 complaints in 12 months."
+   }
+  ]
+ },
+ "sup:70310": {
+  "confidence": 0.4,
+  "decisive": [
+   "family GmbH founded 1982, 70 staff, turnover 5-10 M EUR, equity 24.1%, credit index 232, 12 months ago 232 (sup:70310)",
+   "We paid its 28 invoices of the last 12 months +6 days vs due on average, skonto taken 0x (e.g. inv:5105005170)",
+   "Scorecard red: OTD 63.0% (below our 95% target), 4118 ppm, 0 overdue 8D (sc:70310@2026Q3); a year before 62.1% / 1871 ppm (sc:70310@2025Q3)"
+  ],
+  "levers": [
+   "ppm_commitment",
+   "chargeback_eur_per_complaint",
+   "unit_price",
+   "contract_months"
+  ],
+  "persona": "unknown",
+  "traits": [
+   {
+    "id": "sc:70310@2026Q3",
+    "trait": "quality_problem",
+    "until": null,
+    "why": "Scorecard is red: OTD 63.0%, ppm rose from 1871 to 4118, and there were 7 supplier-caused complaints in 12 months. We es"
+   }
+  ]
+ },
+ "sup:70320": {
+  "confidence": 0.6,
+  "decisive": [
+   "family GmbH founded 1968, 110 staff, turnover 10-25 M EUR, equity 25.6%, credit index 251, 12 months ago 251 (sup:70320)",
+   "Scorecard green: OTD 88.0% (below our 95% target), 949 ppm, 0 overdue 8D (sc:70320@2026Q3); a year before 84.6% / 0 ppm (sc:70320@2025Q3)"
+  ],
+  "levers": [],
+  "persona": "unknown",
+  "traits": []
+ },
+ "sup:70330": {
+  "confidence": 0.6,
+  "decisive": [
+   "2026-02-06 call_note 'Capacity': Call with sales at Lasertechnik Varnoszeg Kft.: they could take additional parts at short notice; the second shift has been on hold since spring. (doc:20260206-70330-M1)"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "unit_price",
+   "ppm_commitment"
+  ],
+  "persona": "price_fighter",
+  "traits": [
+   {
+    "id": "doc:20260206-70330-M1",
+    "trait": "idle_capacity",
+    "until": null,
+    "why": "can take additional parts at short notice; second shift on hold since spring"
+   },
+   {
+    "id": "sc:70330@2026Q3",
+    "trait": "quality_problem",
+    "until": null,
+    "why": "amber scorecard, OTD 70.8%, 1879 ppm, worse than a year before"
+   }
+  ]
+ },
+ "sup:70340": {
+  "confidence": 0.6,
+  "decisive": [
+   "2026-04-18 meeting_note 'Supplier day': At our supplier day Metallbau Steinfelder KG said Hollerau is an important reference customer for them. (doc:20260418-70340-M3)",
+   "Past renewals (part:330020): 2025 asked +0.2% settled -1.3%; 2025 asked +3.2% settled +0%; 2024 asked +2.1% settled +0%",
+   "We bought EUR 386,528 from it in FY2026 = 11.0% of its turnover (sup:70340)"
+  ],
+  "levers": [
+   "contract_months",
+   "volume_per_year",
+   "unit_price"
+  ],
+  "persona": "partner",
+  "traits": [
+   {
+    "id": "doc:20260728-70340-M1",
+    "trait": "uninformed_owner",
+    "until": null,
+    "why": "Owner prices from his own spreadsheet, last updated two years ago, so index data can disarm his arguments"
+   },
+   {
+    "id": "doc:20260721-70340-M2",
+    "trait": "open_book",
+    "until": null,
+    "why": "Owner offered to walk us through his calculation of hourly rates and material"
+   }
+  ]
+ },
+ "sup:70350": {
+  "confidence": 0.85,
+  "decisive": [
+   "2026-09-12 call_note 'Liquidity': Call with the managing director of Oberflächentechnik Weißacher GmbH: he asked twice whether we could pay earlier and said the bank is watching every month. 'I cannot sign anything that lowers our... (doc:20260912-70350-M1)",
+   "2026-09-04 news (credit_downgrade): Credit agency lowers rating of Oberflächentechnik Weißacher GmbH (news:20260904-26)",
+   "It offers 2% skonto within 10 days, net 30 (sup:70350)"
+  ],
+  "levers": [
+   "payment_days",
+   "effective_date",
+   "unit_price"
+  ],
+  "persona": "cash_short",
+  "traits": [
+   {
+    "id": "doc:20260912-70350-M1",
+    "trait": "cash_need",
+    "until": null,
+    "why": "MD asked twice for earlier payment, bank watching monthly, cannot accept lower margin"
+   },
+   {
+    "id": "news:20260904-26",
+    "trait": "cash_need",
+    "until": null,
+    "why": "Credit rating lowered; credit index worsened from 248 to 343"
+   },
+   {
+    "id": "sc:70350@2026Q3",
+    "trait": "quality_problem",
+    "until": null,
+    "why": "Red scorecard: OTD 53.8%, 5556 ppm, worsening vs a year before"
+   }
+  ]
+ },
+ "sup:70360": {
+  "confidence": 0.6,
+  "decisive": [
+   "2026-05-27 call_note 'Capacity': Call with sales at Kantteile Strasser GmbH: they could take additional parts at short notice; the second shift has been on hold since spring. (doc:20260527-70360-M2)",
+   "Sourcing - part:330030: sup:70360 active 50%, sup:70340 active 50%",
+   "2026-08-12 meeting_note 'Supplier day': At our supplier day Kantteile Strasser GmbH said Hollerau is an important reference customer for them. (doc:20260812-70360-M3)"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "unit_price",
+   "ppm_commitment"
+  ],
+  "persona": "price_fighter",
+  "traits": [
+   {
+    "id": "doc:20260527-70360-M2",
+    "trait": "idle_capacity",
+    "until": null,
+    "why": "Second shift on hold since spring. Can take extra parts at short notice."
+   },
+   {
+    "id": "doc:20260606-70360-M1",
+    "trait": "uninformed_owner",
+    "until": null,
+    "why": "Owner works from his own spreadsheet, last updated two years ago, and asked where our index figures come from."
+   },
+   {
+    "id": "sc:70360@2026Q3",
+    "trait": "quality_problem",
+    "until": null,
+    "why": "Amber scorecard: OTD 76% against our 95% target, 762 ppm, one overdue 8D."
+   }
+  ]
+ },
+ "sup:70410": {
+  "confidence": 0.6,
+  "decisive": [
+   "2026-08-22 news (allocation): Dichtungswerk Ravensteiner GmbH allocates volumes (news:20260822-23)",
+   "Scorecard green: OTD 79.5% (below our 95% target), 270 ppm, 0 overdue 8D (sc:70410@2026Q3); a year before 78.7% / 476 ppm (sc:70410@2025Q3)"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "lead_time_days",
+   "index_clause"
+  ],
+  "persona": "full_order_book",
+  "traits": [
+   {
+    "id": "news:20260822-23",
+    "trait": "capacity_squeeze",
+    "until": null,
+    "why": "Most recent news says it allocates volumes; OTD 79.5% is well below target"
+   },
+   {
+    "id": "doc:20260310-70410-M1",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "Price changes above 2% need approval from its pricing committee"
+   }
+  ]
+ },
+ "sup:70420": {
+  "confidence": 0.8,
+  "decisive": [
+   "2026-08-23 meeting_note 'Annual review': Annual review with Gleitring-Systeme Kaltenbrunn AG. Their sales director said there is no room on price this year: head office has frozen all price reductions until December 2027. He was open on... (doc:20260823-70420-M1)",
+   "Sourcing - part:340012: sup:70420 active 100%",
+   "2026-03-02 meeting_note 'Annual review': Annual review with Gleitring-Systeme Kaltenbrunn AG. Their key account manager explained that price changes above 2 % need the approval of their pricing committee, which meets every two weeks. (doc:20260302-70420-M2)"
+  ],
+  "levers": [
+   "contract_months",
+   "payment_days",
+   "lead_time_days",
+   "index_clause"
+  ],
+  "persona": "monopolist",
+  "traits": [
+   {
+    "id": "doc:20260823-70420-M1",
+    "trait": "price_freeze",
+    "until": "2027-12",
+    "why": "head office froze all price reductions until December 2027"
+   },
+   {
+    "id": "doc:20260302-70420-M2",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "price changes above 2 % need pricing committee approval"
+   },
+   {
+    "id": "sup:70420",
+    "trait": "not_strategic",
+    "until": null,
+    "why": "our spend is only 0.2% of its turnover"
+   }
+  ]
+ },
+ "sup:70430": {
+  "confidence": 0.55,
+  "decisive": [
+   "2026-05-15 meeting_note 'Customer portfolio': The sales director of Elasto-Dicht Hermannsdorfer GmbH said they are reviewing small accounts and will focus on customers with volume. (doc:20260515-70430-M1)",
+   "Sourcing - part:340020: sup:70430 active 100%",
+   "We bought EUR 46,359 from it in FY2026 = 0.2% of its turnover (sup:70430)"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "unit_price"
+  ],
+  "persona": "monopolist",
+  "traits": [
+   {
+    "id": "doc:20260515-70430-M1",
+    "trait": "not_strategic",
+    "until": null,
+    "why": "Most recent signal (May 2026): it is reviewing small accounts and focusing on customers with volume. We are 0.2% of its "
+   },
+   {
+    "id": "doc:20260326-70430-M2",
+    "trait": "open_book",
+    "until": null,
+    "why": "In March 2026 the owner offered to walk us through hourly rates and material costs to settle prices."
+   }
+  ]
+ },
+ "sup:70440": {
+  "confidence": 0.6,
+  "decisive": [
+   "2026-09-10 meeting_note 'Commercial terms': Kohlering-Technik Pirkheim GmbH stated that standard items are not discounted; only multi-year volume agreements change prices. (doc:20260910-70440-M1)",
+   "2026-05-24 meeting_note 'Annual review': Annual review with Kohlering-Technik Pirkheim GmbH. Their key account manager explained that price changes above 2 % need the approval of their pricing committee, which meets every two weeks. (doc:20260524-70440-M2)",
+   "2026-08-27 news (allocation): Kohlering-Technik Pirkheim GmbH allocates volumes (news:20260827-25)"
+  ],
+  "levers": [
+   "contract_months",
+   "volume_per_year",
+   "lead_time_days"
+  ],
+  "persona": "monopolist",
+  "traits": [
+   {
+    "id": "doc:20260910-70440-M1",
+    "trait": "volume_discounts_only",
+    "until": null,
+    "why": "Stated that standard items are not discounted and that only multi-year volume agreements change prices"
+   },
+   {
+    "id": "doc:20260524-70440-M2",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "Price changes above 2% need approval from its pricing committee, which meets every two weeks"
+   },
+   {
+    "id": "news:20260827-25",
+    "trait": "capacity_squeeze",
+    "until": null,
+    "why": "Press reports it is allocating volumes"
+   }
+  ]
+ },
+ "sup:70510": {
+  "confidence": 0.5,
+  "decisive": [
+   "2026-04-10 meeting_note 'Annual review': Annual review with Antriebstechnik Nordmark AG. Their key account manager explained that price changes above 2 % need the approval of their pricing committee, which meets every two weeks. (doc:20260410-70510-M1)",
+   "We bought EUR 3,213,573 from it in FY2026 = 0.2% of its turnover (sup:70510)",
+   "group AG founded 1911, 4800 staff, turnover >1000 M EUR, equity 29.1%, credit index 147, 12 months ago 147 (sup:70510)"
+  ],
+  "levers": [
+   "effective_date",
+   "contract_months",
+   "volume_per_year",
+   "index_clause"
+  ],
+  "persona": "monopolist",
+  "traits": [
+   {
+    "id": "doc:20260410-70510-M1",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "Its key account manager said price changes above 2% need approval from a pricing committee that meets every two weeks. T"
+   }
+  ]
+ },
+ "sup:70520": {
+  "confidence": 0.6,
+  "decisive": [
+   "2026-04-26 meeting_note 'Annual review': Annual review with Vesmo Elektromotory a.s.. Their key account manager explained that price changes above 2 % need the approval of their pricing committee, which meets every two weeks. (doc:20260426-70520-M5)",
+   "2026-04-13 meeting_note 'Customer portfolio': The sales director of Vesmo Elektromotory a.s. said they are reviewing small accounts and will focus on customers with volume. (doc:20260413-70520-M2)",
+   "Sourcing - part:350012: sup:70520 active 100%, sup:70510 qualified 0%"
+  ],
+  "levers": [
+   "effective_date",
+   "volume_per_year",
+   "contract_months"
+  ],
+  "persona": "monopolist",
+  "traits": [
+   {
+    "id": "doc:20260701-70520-M4",
+    "trait": "hedged",
+    "until": "2027-03",
+    "why": "Copper bought forward until March 2027; market price is 'not our reality' before then"
+   },
+   {
+    "id": "doc:20260426-70520-M5",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "Price changes above 2 % need approval from a pricing committee that meets every two weeks"
+   },
+   {
+    "id": "doc:20260413-70520-M2",
+    "trait": "not_strategic",
+    "until": null,
+    "why": "Reviewing small accounts and focusing on customers with volume; we are 1.2% of its turnover"
+   }
+  ]
+ },
+ "sup:70530": {
+  "confidence": 0.6,
+  "decisive": [
+   "2026-08-26 meeting_note 'Annual review': Annual review with Selvbrunn Drive Systems GmbH. Their sales director said there is no room on price this year: head office has frozen all price reductions until December 2027. He was open on... (doc:20260826-70530-M1)",
+   "2026-09-09 meeting_note 'Annual review': Annual review with Selvbrunn Drive Systems GmbH. Their key account manager explained that price changes above 2 % need the approval of their pricing committee, which meets every two weeks. (doc:20260909-70530-M2)"
+  ],
+  "levers": [
+   "payment_days",
+   "contract_months",
+   "volume_per_year",
+   "lead_time_days",
+   "effective_date"
+  ],
+  "persona": "monopolist",
+  "traits": [
+   {
+    "id": "doc:20260826-70530-M1",
+    "trait": "price_freeze",
+    "until": "2027-12",
+    "why": "Head office froze all price reductions until December 2027"
+   },
+   {
+    "id": "doc:20260909-70530-M2",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "Price changes above 2 % need approval from a pricing committee that meets every two weeks"
+   },
+   {
+    "id": "sup:70530",
+    "trait": "not_strategic",
+    "until": null,
+    "why": "Our purchases are only 0.3% of its turnover"
+   }
+  ]
+ },
+ "sup:70540": {
+  "confidence": 0.55,
+  "decisive": [
+   "2026-03-02 news (chip_shortage): Konvertek Antriebselektronik GmbH warns of longer delivery times (news:20260302-01)",
+   "2026-02-23 meeting_note 'Customer portfolio': The sales director of Konvertek Antriebselektronik GmbH said they are reviewing small accounts and will focus on customers with volume. (doc:20260223-70540-M2)"
+  ],
+  "levers": [
+   "lead_time_days",
+   "volume_per_year",
+   "contract_months"
+  ],
+  "persona": "full_order_book",
+  "traits": [
+   {
+    "id": "doc:20260711-70540-M3",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "Price changes above 2% need approval from a pricing committee that meets every two weeks"
+   },
+   {
+    "id": "doc:20260223-70540-M2",
+    "trait": "not_strategic",
+    "until": null,
+    "why": "Reviewing small accounts and focusing on customers with volume; we are only 0.6% of its turnover"
+   },
+   {
+    "id": "news:20260302-01",
+    "trait": "capacity_squeeze",
+    "until": null,
+    "why": "Chip shortage, warns of longer delivery times; OTD of 81.5% is below our target"
+   }
+  ]
+ },
+ "sup:70550": {
+  "confidence": 0.4,
+  "decisive": [
+   "2026-04-17 meeting_note 'Annual review': Annual review with Platinenwerk Lausitz GmbH. Their key account manager explained that price changes above 2 % need the approval of their pricing committee, which meets every two weeks. (doc:20260417-70550-M1)",
+   "Past renewals (part:350030): 2025 asked +2.1% settled +0.4%; 2024 asked -0.5% settled -2%; 2023 asked +1.2% settled -1.8% - note: accepted below full cost to keep the volume",
+   "2026-09-19 letter 'Price adjustment from 01 January 2027': Dear Sir or Madam, we have supplied Hollerau Pumpenwerke reliably for many years. Owing to the strong rise in copper and electronic component prices, we are forced to adjust our prices for Control... (doc:20260919-70550-P17)"
+  ],
+  "levers": [],
+  "persona": "unknown",
+  "traits": [
+   {
+    "id": "doc:20260417-70550-M1",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "Its key account manager said price changes above 2% need approval from its pricing committee, which meets every two week"
+   }
+  ]
+ },
+ "sup:70560": {
+  "confidence": 0.5,
+  "decisive": [
+   "2026-06-17 call_note 'Material purchasing': Call with Kabelwerk Rhönsberg GmbH: they bought their copper forward until March 2027 and said the market price is 'not our reality' before then. (doc:20260617-70560-M1)",
+   "2026-04-15 meeting_note 'Annual review': Annual review with Kabelwerk Rhönsberg GmbH. Their key account manager explained that price changes above 2 % need the approval of their pricing committee, which meets every two weeks. (doc:20260415-70560-M2)"
+  ],
+  "levers": [
+   "effective_date",
+   "index_clause",
+   "contract_months"
+  ],
+  "persona": "unknown",
+  "traits": [
+   {
+    "id": "doc:20260617-70560-M1",
+    "trait": "hedged",
+    "until": "2027-03",
+    "why": "bought copper forward until March 2027, market price 'not our reality'"
+   },
+   {
+    "id": "doc:20260415-70560-M2",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "price changes above 2 % need pricing committee approval"
+   }
+  ]
+ },
+ "sup:70570": {
+  "confidence": 0.7,
+  "decisive": [
+   "2026-09-27 meeting_note 'Annual review': Annual review with Sensorik Ammertal GmbH. Their sales director said there is no room on price this year: head office has frozen all price reductions until December 2027. He was open on payment... (doc:20260927-70570-M1)",
+   "2026-03-14 meeting_note 'Annual review': Annual review with Sensorik Ammertal GmbH. Their key account manager explained that price changes above 2 % need the approval of their pricing committee, which meets every two weeks. (doc:20260314-70570-M2)",
+   "Sourcing - part:350050: sup:70570 active 100%"
+  ],
+  "levers": [
+   "payment_days",
+   "contract_months",
+   "volume_per_year",
+   "effective_date"
+  ],
+  "persona": "monopolist",
+  "traits": [
+   {
+    "id": "doc:20260927-70570-M1",
+    "trait": "price_freeze",
+    "until": "2027-12",
+    "why": "head office froze all price reductions until December 2027; open on payment terms"
+   },
+   {
+    "id": "doc:20260314-70570-M2",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "price changes above 2 % need pricing committee approval"
+   },
+   {
+    "id": "news:20260622-16",
+    "trait": "new_owner",
+    "until": null,
+    "why": "acquired by an investor in June 2026"
+   }
+  ]
+ },
+ "sup:70580": {
+  "confidence": 0.6,
+  "decisive": [
+   "2026-09-26 meeting_note 'Account review': Their new sales director said Hollerau's volumes are 'not strategic' for Motorenwerk Saalach GmbH any more; replies have become slower since the summer. (doc:20260926-70580-M1)",
+   "2026-09-08 meeting_note 'Customer portfolio': The sales director of Motorenwerk Saalach GmbH said they are reviewing small accounts and will focus on customers with volume. (doc:20260908-70580-M3)",
+   "2026-03-22 meeting_note 'Annual review': Annual review with Motorenwerk Saalach GmbH. Their key account manager explained that price changes above 2 % need the approval of their pricing committee, which meets every two weeks. (doc:20260322-70580-M2)"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "payment_days"
+  ],
+  "persona": "monopolist",
+  "traits": [
+   {
+    "id": "doc:20260926-70580-M1",
+    "trait": "not_strategic",
+    "until": null,
+    "why": "New sales director calls our volumes 'not strategic'; replies have been slower since the summer. We are only 0.6% of its"
+   },
+   {
+    "id": "doc:20260322-70580-M2",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "Price changes above 2% need approval from its pricing committee."
+   }
+  ]
+ },
+ "sup:70610": {
+  "confidence": 0.7,
+  "decisive": [
+   "2026-05-14 call_note 'Capacity': Call with sales at Schraubenhandel Leitner & Sohn GmbH: they could take additional parts at short notice; the second shift has been on hold since spring. (doc:20260514-70610-M3)",
+   "Sourcing - part:360030: sup:70610 active 50%, sup:70630 active 50%"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "unit_price"
+  ],
+  "persona": "price_fighter",
+  "traits": [
+   {
+    "id": "doc:20260514-70610-M3",
+    "trait": "idle_capacity",
+    "until": null,
+    "why": "second shift on hold since spring, can take additional parts at short notice"
+   },
+   {
+    "id": "doc:20260513-70610-M1",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "price changes above 2% need approval of their pricing committee"
+   }
+  ]
+ },
+ "sup:70620": {
+  "confidence": 0.7,
+  "decisive": [
+   "2026-09-17 meeting_note 'Account review': Their new sales director said Hollerau's volumes are 'not strategic' for Wälzlager-Zentrum Süd GmbH any more; replies have become slower since the summer. (doc:20260917-70620-M4)",
+   "2026-06-27 meeting_note 'Commercial terms': Wälzlager-Zentrum Süd GmbH stated that standard items are not discounted; only multi-year volume agreements change prices. (doc:20260627-70620-M2)",
+   "Sourcing - part:360022: sup:70620 active 100%"
+  ],
+  "levers": [
+   "contract_months",
+   "volume_per_year",
+   "payment_days",
+   "effective_date"
+  ],
+  "persona": "monopolist",
+  "traits": [
+   {
+    "id": "doc:20260917-70620-M4",
+    "trait": "not_strategic",
+    "until": null,
+    "why": "New sales director called our volumes 'not strategic'; replies slower since summer; we are 0.5% of its turnover and have"
+   },
+   {
+    "id": "doc:20260627-70620-M2",
+    "trait": "volume_discounts_only",
+    "until": null,
+    "why": "Standard items are not discounted; only multi-year volume agreements change prices"
+   },
+   {
+    "id": "doc:20260616-70620-M6",
+    "trait": "open_book",
+    "until": null,
+    "why": "Owner offered to walk us through hourly rates and material; this predates the 'not strategic' shift, so it may no longer"
+   }
+  ]
+ },
+ "sup:70630": {
+  "confidence": 0.75,
+  "decisive": [
+   "2026-07-24 meeting_note 'Annual review': Annual review with Normteile Brucker KG. Their sales director said there is no room on price this year: head office has frozen all price reductions until December 2027. He was open on payment... (doc:20260724-70630-M1)",
+   "2026-09-23 meeting_note 'Annual review': Annual review with Normteile Brucker KG. Their key account manager explained that price changes above 2 % need the approval of their pricing committee, which meets every two weeks. (doc:20260923-70630-M4)",
+   "2026-03-27 meeting_note 'Commercial terms': Normteile Brucker KG stated that standard items are not discounted; only multi-year volume agreements change prices. (doc:20260327-70630-M2)"
+  ],
+  "levers": [
+   "payment_days",
+   "contract_months",
+   "volume_per_year",
+   "effective_date"
+  ],
+  "persona": "monopolist",
+  "traits": [
+   {
+    "id": "doc:20260923-70630-M4",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "price changes above 2 % need approval from a pricing committee that meets every two weeks"
+   },
+   {
+    "id": "doc:20260724-70630-M1",
+    "trait": "price_freeze",
+    "until": "2027-12",
+    "why": "head office froze all price reductions until December 2027; open on payment terms"
+   },
+   {
+    "id": "doc:20260327-70630-M2",
+    "trait": "volume_discounts_only",
+    "until": null,
+    "why": "standard items are not discounted; only multi-year volume agreements change prices"
+   }
+  ]
+ },
+ "sup:70640": {
+  "confidence": 0.6,
+  "decisive": [
+   "2026-07-15 call_note 'Capacity': Call with sales at Kugellager-Vertrieb Inntal GmbH: they could take additional parts at short notice; the second shift has been on hold since spring. (doc:20260715-70640-M4)",
+   "2026-08-19 meeting_note 'Customer portfolio': The sales director of Kugellager-Vertrieb Inntal GmbH said they are reviewing small accounts and will focus on customers with volume. (doc:20260819-70640-M1)",
+   "Sourcing - part:360021: sup:70640 active 60%, sup:70620 active 40%"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "unit_price"
+  ],
+  "persona": "price_fighter",
+  "traits": [
+   {
+    "id": "doc:20260715-70640-M4",
+    "trait": "idle_capacity",
+    "until": null,
+    "why": "Second shift on hold since spring; can take extra parts at short notice"
+   },
+   {
+    "id": "doc:20260512-70640-M2",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "Price changes above 2 % need pricing committee approval"
+   },
+   {
+    "id": "doc:20260819-70640-M1",
+    "trait": "not_strategic",
+    "until": null,
+    "why": "Reviewing small accounts and focusing on volume customers; we are 0.3% of its turnover"
+   }
+  ]
+ },
+ "sup:70650": {
+  "confidence": 0.55,
+  "decisive": [
+   "2026-06-02 meeting_note 'Account review': Their new sales director said Hollerau's volumes are 'not strategic' for Verbindungstechnik Mairhofer GmbH any more; replies have become slower since the summer. (doc:20260602-70650-M4)",
+   "2026-05-11 meeting_note 'Customer portfolio': The sales director of Verbindungstechnik Mairhofer GmbH said they are reviewing small accounts and will focus on customers with volume. (doc:20260511-70650-M2)",
+   "Sourcing - part:360011: sup:70650 active 100%"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "payment_days",
+   "lead_time_days"
+  ],
+  "persona": "monopolist",
+  "traits": [
+   {
+    "id": "doc:20260602-70650-M4",
+    "trait": "not_strategic",
+    "until": null,
+    "why": "New sales director (2026-06) called our volumes 'not strategic'; replies slower since summer"
+   },
+   {
+    "id": "doc:20260327-70650-M3",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "Price changes above 2% need pricing committee approval"
+   },
+   {
+    "id": "doc:20260411-70650-M5",
+    "trait": "idle_capacity",
+    "until": null,
+    "why": "Second shift on hold since spring; can take extra parts at short notice (older signal, superseded in weight by later not"
+   }
+  ]
+ },
+ "sup:70710": {
+  "confidence": 0.45,
+  "decisive": [
+   "2026-04-21 call_note 'Price discussion': Call with the owner of Edelstahl-Service Donautal GmbH: he offered to walk us through their calculation (hourly rates and material) if that helps to settle prices. (doc:20260421-70710-M2)",
+   "2026-07-06 letter 'Material costs': Dear Sir or Madam, for your information: our nickel and alloys requirement is covered at fixed prices until March 2027. Market movements reach our costs only after that. Yours faithfully,... (doc:20260706-70710-M1)",
+   "group GmbH founded 1970, 350 staff, turnover 100-250 M EUR, equity 33.9%, credit index 177, 12 months ago 177 (sup:70710)"
+  ],
+  "levers": [
+   "effective_date",
+   "unit_price",
+   "contract_months"
+  ],
+  "persona": "unknown",
+  "traits": [
+   {
+    "id": "doc:20260706-70710-M1",
+    "trait": "hedged",
+    "until": "2027-03",
+    "why": "Nickel and alloys bought at fixed prices until March 2027, so AS-14404 index arguments will not move it before then."
+   },
+   {
+    "id": "doc:20260421-70710-M2",
+    "trait": "open_book",
+    "until": null,
+    "why": "The owner offered to walk us through his calculation (hourly rates and material); ask for the cost breakdown."
+   }
+  ]
+ },
+ "sup:70720": {
+  "confidence": 0.6,
+  "decisive": [
+   "2026-09-24 meeting_note 'Supplier day': At our supplier day Stahlhandel Rupprecht-Kessel GmbH said Hollerau is an important reference customer for them. (doc:20260924-70720-M1)",
+   "Past renewals (part:370020): 2025 asked -0.8% settled -2.3%; 2025 asked +0% settled -2.3%; 2024 asked +1.5% settled +0%",
+   "2026-07-12 call_note 'Price discussion': Call with the owner of Stahlhandel Rupprecht-Kessel GmbH: he offered to walk us through their calculation (hourly rates and material) if that helps to settle prices. (doc:20260712-70720-M3)"
+  ],
+  "levers": [
+   "contract_months",
+   "volume_per_year",
+   "index_clause",
+   "unit_price"
+  ],
+  "persona": "partner",
+  "traits": [
+   {
+    "id": "doc:20260712-70720-M3",
+    "trait": "open_book",
+    "until": null,
+    "why": "Owner offered to walk us through hourly rates and material in its calculation"
+   }
+  ]
+ },
+ "sup:70730": {
+  "confidence": 0.5,
+  "decisive": [
+   "2026-08-06 call_note 'Price discussion': Call with the owner of Inox Center Ostalpen GmbH: he offered to walk us through their calculation (hourly rates and material) if that helps to settle prices. (doc:20260806-70730-M3)",
+   "private GmbH founded 1995, 150 staff, turnover 50-100 M EUR, equity 34.2%, credit index 167, 12 months ago 167 (sup:70730)"
+  ],
+  "levers": [
+   "effective_date",
+   "unit_price",
+   "index_clause",
+   "contract_months"
+  ],
+  "persona": "unknown",
+  "traits": [
+   {
+    "id": "doc:20260806-70730-M3",
+    "trait": "open_book",
+    "until": null,
+    "why": "owner offered to walk us through hourly rates and material"
+   },
+   {
+    "id": "doc:20260727-70730-M1",
+    "trait": "hedged",
+    "until": "2027-01",
+    "why": "nickel and alloys bought forward until January 2027, market price 'not our reality'"
+   },
+   {
+    "id": "doc:20260308-70730-M2",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "price changes above 2 % need pricing committee approval"
+   }
+  ]
+ },
+ "sup:70740": {
+  "confidence": 0.5,
+  "decisive": [
+   "2026-09-16 meeting_note 'Customer portfolio': The sales director of Blankstahl Werdenfels GmbH said they are reviewing small accounts and will focus on customers with volume. (doc:20260916-70740-M5)",
+   "2026-08-12 meeting_note 'Annual review': Annual review with Blankstahl Werdenfels GmbH. Their key account manager explained that price changes above 2 % need the approval of their pricing committee, which meets every two weeks. (doc:20260812-70740-M3)",
+   "Sourcing - part:370011: sup:70740 active 100%"
+  ],
+  "levers": [
+   "volume_per_year",
+   "contract_months",
+   "index_clause",
+   "unit_price"
+  ],
+  "persona": "monopolist",
+  "traits": [
+   {
+    "id": "doc:20260916-70740-M5",
+    "trait": "not_strategic",
+    "until": null,
+    "why": "Repeated statement that it is reviewing small accounts and focusing on volume customers; we are 0.4% of its turnover."
+   },
+   {
+    "id": "doc:20260812-70740-M3",
+    "trait": "pricing_committee",
+    "until": null,
+    "why": "Price changes above 2% need committee approval, so move in small steps."
+   },
+   {
+    "id": "doc:20260904-70740-M1",
+    "trait": "open_book",
+    "until": null,
+    "why": "The owner offered to walk us through hourly rates and material costs."
+   }
+  ]
+ }
+}

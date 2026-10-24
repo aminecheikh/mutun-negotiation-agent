@@ -19,11 +19,11 @@ from dataclasses import replace
 from ...docs import standard_terms
 from ...play import live_threads
 from ..llm import llm_from_env
-from . import guard, observe, policy, roles
+from . import guard, observe, policy
 from .config import OrchestratorConfig
 from .contracts import CaseContext
 from .pipeline import RolePipeline, keepalive_email
-from .roles import LLMWriter, PassthroughProfiler, RuleAnalyst, RuleStrategist
+from .roles import LLMProfiler, LLMStrategist, LLMWriter, PassthroughProfiler, RuleAnalyst, RuleStrategist
 from .state import CaseSession, NoGate, SendGate, ThreadState
 from .telemetry import Telemetry
 from .tools import DataTools
@@ -199,21 +199,20 @@ def _summary(decision: dict) -> str:
 
 
 def buyer_factory(package=None):
-    """`--agent buyer`: one BuyerAgent per case, sharing the data package (behind the tools' lock: one SQLite
-    connection, up to 10 cases in parallel), the LLM client and the telemetry. Without LLM_MODEL every role runs on
-    its rule twin (no LLM calls at all). Strategist and profiler are Saed's LLM roles when the roles package provides
-    them, else their rule versions (identical behaviour without a model)."""
+    """`--agent buyer`: one BuyerAgent per case. Shared across cases: the data package (behind the tools' lock: one
+    SQLite connection, up to 10 cases in parallel), the LLM client, the telemetry and the profiler (precomputed
+    profiles + live reads of case facts, Saed). Per case: the strategist (S2+S3 in one call) and the writer.
+    Without LLM_MODEL every role runs on its rule twin (no LLM calls at all)."""
     safe = thread_safe(package)
     complete = llm_from_env() if os.environ.get("LLM_MODEL") else None
     tools = DataTools(safe)
     config, telemetry = OrchestratorConfig.from_env(), Telemetry()
-    llm_strategist = getattr(roles, "LLMStrategist", None)  # S2+S3 (Saed); absent on older roles code
-    llm_profiler = getattr(roles, "LLMProfiler", None)  # S4 (Saed): a cached lookup, the model only for new facts
+    profiler = LLMProfiler(complete)
 
     def new_agent() -> BuyerAgent:
-        strategist = llm_strategist(complete) if llm_strategist else RuleStrategist()
-        profiler = llm_profiler(complete) if llm_profiler else PassthroughProfiler()
-        return BuyerAgent(tools, profiler, RuleAnalyst(), strategist, LLMWriter(complete), safe, config, telemetry)
+        return BuyerAgent(
+            tools, profiler, RuleAnalyst(), LLMStrategist(complete), LLMWriter(complete), safe, config, telemetry
+        )
 
     return new_agent
 

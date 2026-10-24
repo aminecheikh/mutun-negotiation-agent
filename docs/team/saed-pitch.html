@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mutun Buyer Agent</title>
+<!-- S7 (owner: Saed). Open in a browser. Arrows / space: next slide. N: speaker notes. F: fullscreen.
+     Placeholders in [brackets] are filled after the 22:00 sweep and the final. -->
+<style>
+:root {
+  --bg: #fbfaf7; --fg: #16161a; --muted: #6b6b73; --line: #e2dfd8; --accent: #e8590c; --card: #ffffff;
+  --good: #2b8a3e; --bad: #c92a2a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111114; --fg: #f1f0ec; --muted: #a2a1a8; --line: #2c2c33; --accent: #ff7a2e; --card: #1a1a1f;
+    --good: #51cf66; --bad: #ff6b6b;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111114; --fg: #f1f0ec; --muted: #a2a1a8; --line: #2c2c33; --accent: #ff7a2e; --card: #1a1a1f;
+  --good: #51cf66; --bad: #ff6b6b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+  font: 400 18px/1.45 "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; }
+.deck { position: relative; height: 100vh; overflow: hidden; }
+.slide { position: absolute; inset: 0; padding: 6vh 7vw; display: none; flex-direction: column; gap: 2.2vh; }
+.slide.on { display: flex; }
+.tag { font: 500 12px/1 ui-monospace, "Cascadia Mono", monospace; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; align-self: flex-start; }
+h1 { font-size: clamp(34px, 5.6vw, 76px); line-height: 1.02; margin: 0; font-weight: 500; letter-spacing: -.02em; }
+h2 { font-size: clamp(26px, 3.6vw, 48px); line-height: 1.08; margin: 0; font-weight: 500; letter-spacing: -.015em; }
+h2 .soft, h1 .soft { color: var(--muted); }
+p.lead { font-size: clamp(17px, 1.7vw, 24px); color: var(--muted); margin: 0; max-width: 60ch; }
+.grid { display: grid; gap: 1.6vw; }
+.g2 { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: repeat(3, 1fr); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+.card h3 { margin: 0 0 6px; font-size: 18px; font-weight: 600; }
+.card p { margin: 0; color: var(--muted); font-size: 16px; }
+.big { font-size: clamp(36px, 5vw, 68px); font-weight: 500; letter-spacing: -.02em; line-height: 1; }
+.lbl { font: 500 12px/1.2 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.accent { color: var(--accent); } .good { color: var(--good); } .bad { color: var(--bad); }
+.quote { border-left: 3px solid var(--accent); padding: 4px 0 4px 16px; font-size: clamp(17px, 1.6vw, 22px); }
+.quote small { display: block; color: var(--muted); font-size: 13px; margin-top: 4px; }
+.flow { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; align-items: stretch; }
+.step { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; font-size: 15px; }
+.step b { display: block; margin-bottom: 4px; }
+.step .who { font: 500 11px/1 ui-monospace, monospace; color: var(--muted); text-transform: uppercase; }
+.step.llm { border-color: var(--accent); }
+table { border-collapse: collapse; width: 100%; font-size: 16px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 500 12px/1.2 ui-monospace, monospace; text-transform: uppercase; color: var(--muted); }
+.bar { height: 10px; border-radius: 5px; background: var(--line); position: relative; overflow: hidden; }
+.bar i { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 5px; }
+.foot { position: absolute; left: 7vw; right: 7vw; bottom: 3vh; display: flex; justify-content: space-between;
+  font: 500 12px/1 ui-monospace, monospace; color: var(--muted); }
+.notes { position: fixed; left: 0; right: 0; bottom: 0; max-height: 34vh; overflow: auto; display: none;
+  background: var(--card); border-top: 1px solid var(--line); padding: 14px 7vw; font-size: 15px; z-index: 5; }
+.notes.on { display: block; }
+.ph { background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 4px; padding: 0 4px; }
+@media (max-width: 820px) {
+  .g2, .g3, .flow { grid-template-columns: 1fr; }
+  .slide { padding: 5vh 16px; overflow-y: auto; }
+  .foot { left: 16px; right: 16px; }
+}
+</style>
+</head>
+<body>
+<div class="deck" id="deck">
+
+<!-- 1 -->
+<section class="slide" data-notes="Hi, we are Mutun. Our agent buys like a good procurement lead: it reads the supplier first, then trades what the supplier values against what we value - and it never says anything it cannot back. In the next five minutes: what we learned about the suppliers, how the agent is built, and one negotiation walked through.">
+  <span class="tag">Tacto Negotiation Arena · Team Mutun</span>
+  <h1>A buyer that reads<br><span class="soft">the supplier first.</span></h1>
+  <p class="lead">Code prices every move. The model reads people and writes. A safety net makes every e-mail
+    something we can stand behind.</p>
+  <div class="grid g3" style="margin-top:auto">
+    <div class="card"><div class="lbl">Live Final</div><div class="big ph">[points]</div><p>of 500, five waves</p></div>
+    <div class="card"><div class="lbl">Practice mean</div><div class="big ph">[score]</div><p>baseline kit agent: 54.4</p></div>
+    <div class="card"><div class="lbl">Unsafe e-mails</div><div class="big good">0</div><p>in every bench run - no invented figure, ID or leak</p></div>
+  </div>
+</section>
+
+<!-- 2 -->
+<section class="slide" data-notes="The first thing we learned from the replays: data alone barely moves these suppliers. Their most common answer to a verified figure is: it holds, but it does not change our calculation. What moves them is a trade. Across sixty exchanges, a message that only moved price got a quarter of a percent; a message that traded a term the supplier values got four to nine times more. Faster payment was the strongest single trade.">
+  <span class="tag">01 · What moves a supplier</span>
+  <h2>True data rarely moves price.<br><span class="soft">Trades do.</span></h2>
+  <div class="quote">“We checked the data you cited; it holds, but it does not change our calculation.”
+    <small>the suppliers' most common answer to a verified claim</small></div>
+  <div class="grid g2" style="margin-top:2vh">
+    <div class="card">
+      <div class="lbl">Supplier's next price step</div>
+      <table>
+        <tr><th>Our message</th><th>Mean step</th><th></th></tr>
+        <tr><td>Price only</td><td>0.27 %</td><td style="width:40%"><div class="bar"><i style="width:11%"></i></div></td></tr>
+        <tr><td>Traded contract length</td><td>0.93 %</td><td><div class="bar"><i style="width:37%"></i></div></td></tr>
+        <tr><td>Traded effective date</td><td>0.96 %</td><td><div class="bar"><i style="width:38%"></i></div></td></tr>
+        <tr><td>Traded payment days</td><td>1.36 %</td><td><div class="bar"><i style="width:54%"></i></div></td></tr>
+        <tr><td>Round 1, three packages</td><td>~2.4 %</td><td><div class="bar"><i style="width:96%"></i></div></td></tr>
+      </table>
+      <p style="margin-top:8px">60 exchanges from practice replays.</p>
+    </div>
+    <div class="card">
+      <div class="lbl">What the suppliers told us, in their words</div>
+      <p style="margin-top:8px">“Without movement from your side we cannot move either.”</p>
+      <p style="margin-top:8px">“Faster payment would help us more than anything.”</p>
+      <p style="margin-top:8px">“Our management has frozen all price reductions. We can talk about the terms instead.”</p>
+      <p style="margin-top:8px">“A binding higher volume would help us. Which volume can you commit to?”</p>
+    </div>
+  </div>
+</section>
+
+<!-- 3 -->
+<section class="slide" data-notes="So the agent has to know who it is talking to before it argues. The supplier notes in the data are not free text: they are a small vocabulary of recurring signals. Our profiler reads every supplier's notes, letters and news once, offline, and turns them into a persona and named traits, each pointing to its source. A hedged supplier does not care about index arguments until its hedge ends - so we move the start date. A frozen price list means we win on terms. A cash-short supplier gets faster payment, not a lecture on its costs.">
+  <span class="tag">02 · Reading the supplier</span>
+  <h2>Suppliers speak a small vocabulary.<br><span class="soft">The profiler reads it before round one.</span></h2>
+  <table>
+    <tr><th>Signal in the data</th><th>Trait</th><th>What the agent does</th></tr>
+    <tr><td>“bought copper forward until March 2027 - not our reality”</td><td>hedged until 2027-03</td><td>moves the effective date; no index arguments on that input</td></tr>
+    <tr><td>“head office has frozen all price reductions”</td><td>price freeze</td><td>leaves price, trades contract length and volume</td></tr>
+    <tr><td>“asked twice whether we could pay earlier - the bank is watching”</td><td>cash need</td><td>leads with a shorter payment term</td></tr>
+    <tr><td>“works from his own spreadsheet, last updated two years ago”</td><td>owner not following the market</td><td>cites the index moves that disarm him</td></tr>
+    <tr><td>“price changes above 2 % need the pricing committee”</td><td>pricing committee</td><td>asks in steps the rep can approve</td></tr>
+  </table>
+  <p class="lead">46 / 46 suppliers profiled offline in 28 s; every trait carries its data ID. New letters in a hidden case trigger one live read, capped at 6 s.</p>
+</section>
+
+<!-- 4 -->
+<section class="slide" data-notes="Here is one round. Before the first move, code builds the dossier, the price band and pre-verified claims, and the profiler adds traits. Each round: code fits the supplier's price path; one model call reads its last e-mail and chooses the move - which supplier, which terms to trade, which claims, which question; code builds and prices the term sheets on the published cost function; a second model call writes the e-mail; and a deterministic guard checks must-haves, cost and IDs before anything is sent. Two model calls, about eight seconds, well inside the sixty-second limit with ten cases in parallel. If a model is late or wrong, a rule takes over - no case is ever lost to an exception.">
+  <span class="tag">03 · How it is built</span>
+  <h2>Code prices. The model reads and writes.<br><span class="soft">A guard decides what leaves.</span></h2>
+  <div class="flow">
+    <div class="step"><span class="who">code · once</span><b>Prepare</b>dossier, price band, pre-verified claims</div>
+    <div class="step llm"><span class="who">model · cached</span><b>Profile</b>persona, levers, traits with IDs</div>
+    <div class="step llm"><span class="who">model · ~4 s</span><b>Read + decide</b>is it still open? which terms, claims, question</div>
+    <div class="step"><span class="who">code</span><b>Offer</b>1-3 term sheets priced on total cost C</div>
+    <div class="step llm"><span class="who">model · ~4 s</span><b>Write</b>the e-mail around fixed sentences</div>
+    <div class="step"><span class="who">code</span><b>Guard</b>must-haves, C, known IDs, no first-offer accept</div>
+  </div>
+  <div class="grid g3">
+    <div class="card"><h3>60 s per move, 10 cases at once</h3><p>Two model calls per round: median ~8 s, worst case under 23 s in our parallel bench.</p></div>
+    <div class="card"><h3>Every model call has a rule fallback</h3><p>Late, malformed or unsafe answer → the rule-based move, never a lost case.</p></div>
+    <div class="card"><h3>Nothing supplier-specific in code</h3><p>Final suppliers are new; rules come from behaviour, not names.</p></div>
+  </div>
+</section>
+
+<!-- 5 -->
+<section class="slide" data-notes="Trust is the currency in these negotiations. A single wrong figure earned us 'that costs trust' in practice. So every claim is verified against the same facts file the arena uses, cited once, copied word for word. And the writer is checked like a careful colleague would check it: it cannot invent a number, mention data it cannot show, claim a concession we did not make, or tell a supplier what our private notes say about its bank. Across every bench run, zero unsafe e-mails left the agent.">
+  <span class="tag">04 · Trust is the currency</span>
+  <h2>Every sentence is one we can back.</h2>
+  <div class="quote">“The delivery record figures you cite do not match the records. That costs trust.”
+    <small>a supplier, after one wrong figure in practice</small></div>
+  <div class="grid g2">
+    <div class="card"><h3>Claims are pre-verified</h3><p>Checked against facts.json with the arena's own rule, at most three per message, each data ID once per case, copied word for word.</p></div>
+    <div class="card"><h3>The writer is checked before sending</h3><p>Rejected if it invents a figure or ID, talks about data it cannot cite, claims a move we did not make, reveals our private notes (“your bank”, “idle shifts”), or leaks urgency or a budget.</p></div>
+  </div>
+  <div class="grid g3">
+    <div class="card"><div class="lbl">Bench decisions</div><div class="big">43</div><p>replayed with the real model, 10 in parallel</p></div>
+    <div class="card"><div class="lbl">Claims cited</div><div class="big">46</div><p>verbatim, pre-verified</p></div>
+    <div class="card"><div class="lbl">Unsafe e-mails sent</div><div class="big good">0</div><p>rejected drafts fell back to a safe template</p></div>
+  </div>
+</section>
+
+<!-- 6 -->
+<section class="slide" data-notes="One negotiation, walked through. REPLACE with our best Live Final replay after 14:30; until then this is a practice replay. The supplier asked for +9.5 % blaming energy and wages. Its own cost figures explained about 2.4 %. The profiler flagged an owner who does not follow his prices and who remembers past favours. Round one: three packages - a later start date, payment terms, a fair price - and its own weighted figures. Its answer: we did not know that, a fair point - the biggest step of the case. We closed at [score].">
+  <span class="tag">05 · One negotiation <span class="ph">[swap for our best final replay]</span></span>
+  <h2>+9.5 % asked. <span class="soft">The data explained about 2.4 %.</span></h2>
+  <div class="grid g2">
+    <div class="card">
+      <div class="lbl">Signal → lever</div>
+      <p style="margin-top:8px"><b>Profile:</b> family foundry, owner not following the market, remembers past favours.</p>
+      <p style="margin-top:8px"><b>Round 1:</b> three packages - later start date, payment term, fair price - and its own cost figures weighted.</p>
+      <p style="margin-top:8px"><b>Tone:</b> thanks for the long cooperation first, facts second, no threats.</p>
+    </div>
+    <div class="card">
+      <div class="lbl">The supplier's answer</div>
+      <div class="quote" style="margin-top:8px">“We did not know that - a fair point.”</div>
+      <p style="margin-top:12px">Biggest price step of the case in round 1; closed after <span class="ph">[n]</span> rounds.</p>
+      <div class="grid g3" style="margin-top:12px">
+        <div><div class="lbl">Opening C</div><div class="ph">[€]</div></div>
+        <div><div class="lbl">Our deal C</div><div class="ph">[€]</div></div>
+        <div><div class="lbl">Score</div><div class="ph">[0.xx]</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 -->
+<section class="slide" data-notes="Where we are and what is next. Practice moved from the kit baseline of 54.4 to [score]; the Live Final gave us [points]. With another week we would build a sparring supplier from the public data for unlimited free practice, learn concession curves per persona instead of per rule, and let the profiler watch a supplier change its mind within a case. Thank you - happy to take questions.">
+  <span class="tag">06 · Results and next</span>
+  <h2>From the kit baseline <span class="soft">to</span> <span class="ph">[score]</span>.</h2>
+  <div class="grid g2">
+    <div class="card">
+      <table>
+        <tr><th>Version</th><th>Practice mean</th></tr>
+        <tr><td>Kit LLM agent (baseline)</td><td>54.4</td></tr>
+        <tr><td>Sweep v1 · <span class="ph">[time]</span></td><td class="ph">[score]</td></tr>
+        <tr><td>Sweep v2 · <span class="ph">[time]</span></td><td class="ph">[score]</td></tr>
+        <tr><td><b>Live Final</b></td><td class="ph">[points] / 500</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h3>With another week</h3>
+      <p style="margin-top:6px">A sparring supplier built from the public data, for unlimited free practice.</p>
+      <p style="margin-top:6px">Concession curves learned per persona, not set by rule.</p>
+      <p style="margin-top:6px">A profiler that notices when a supplier changes its stance within a case.</p>
+    </div>
+  </div>
+  <p class="lead" style="margin-top:auto">Thank you. <span class="soft">Questions?</span></p>
+</section>
+
+<div class="foot"><span>Team Mutun · Tacto Negotiation Arena</span><span id="pg"></span></div>
+</div>
+<div class="notes" id="notes"></div>
+
+<script>
+(() => {
+  const slides = [...document.querySelectorAll('.slide')];
+  const notes = document.getElementById('notes'), pg = document.getElementById('pg');
+  let i = 0;
+  try { i = Math.min(+sessionStorage.getItem('pitch-slide') || 0, slides.length - 1); } catch (e) {}
+  const show = n => {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle('on', k === i));
+    notes.textContent = slides[i].dataset.notes || '';
+    pg.textContent = (i + 1) + ' / ' + slides.length;
+    try { sessionStorage.setItem('pitch-slide', i); } catch (e) {}
+  };
+  document.addEventListener('keydown', e => {
+    if (['ArrowRight', 'PageDown', ' '].includes(e.key)) { e.preventDefault(); show(i + 1); }
+    if (['ArrowLeft', 'PageUp'].includes(e.key)) { e.preventDefault(); show(i - 1); }
+    if (e.key === 'Home') show(0);
+    if (e.key === 'End') show(slides.length - 1);
+    if (e.key.toLowerCase() === 'n') notes.classList.toggle('on');
+    if (e.key.toLowerCase() === 'f') document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+  });
+  document.getElementById('deck').addEventListener('click', e => show(i + (e.clientX > innerWidth / 2 ? 1 : -1)));
+  show(i);
+})();
+</script>
+</body>
+</html>
