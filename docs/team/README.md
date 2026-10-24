@@ -6,8 +6,8 @@ person's file: that keeps the three branches free of merge conflicts.
 | File | Who | Branch | Owns |
 |---|---|---|---|
 | [amine.md](amine.md) | Amine | `feat/tools` | `starter-kit/arena_kit/agents/buyer/tools/` |
-| [saed.md](saed.md) | Saed | `feat/roles` | `starter-kit/arena_kit/agents/buyer/roles/` |
-| [jeddou.md](jeddou.md) | Jeddou | `feat/orchestrator` | `agents/buyer/agent.py`, `guard.py`, `cli.py`, `scripts/` |
+| [saed.md](saed.md) | Saed | `feat/roles-saeb` | `starter-kit/arena_kit/agents/buyer/roles/` |
+| [jeddou.md](jeddou.md) | Jeddou | `feat/orchestrator` | `agents/buyer/agent.py`, `guard.py` + orchestrator modules (`runner`, `arbiter`, `policy`, `pipeline`, `observe`, `state`, `config`, `telemetry`), `cli.py`, `scripts/` |
 | [DECISIONS.md](DECISIONS.md) | anyone, append only | any | decisions that bind more than one person |
 
 The branch tells Claude who you are (`.claude/hooks/team.py`); override with `MUTUN_MEMBER=amine|saed|jeddou`.

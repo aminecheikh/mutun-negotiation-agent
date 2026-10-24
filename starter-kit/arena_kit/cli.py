@@ -96,6 +96,11 @@ def main(argv=None):
 
         return serve(args.data)
     client = ArenaClient()
+    play_one, play_many, play_in_waves = play, play_all, play_waves
+    if getattr(args, "agent", None) == "buyer":  # our agent: one worker per supplier thread + a case arbiter
+        from .agents.buyer.runner import play_case, play_final, play_set
+
+        play_one, play_many, play_in_waves = play_case, play_set, play_final
     if args.cmd == "register":
         out = client.register(args.team_name, args.event_code)
         print(json.dumps(out, indent=2))
@@ -123,7 +128,7 @@ def main(argv=None):
     elif args.cmd == "play":
         table = RemoteTable(client)
         try:
-            result = play(table, args.case_id, agent_factory(args.agent, args.data)())
+            result = play_one(table, args.case_id, agent_factory(args.agent, args.data)())
         except ArenaError as e:  # e.g. not hosted, the quota, a paused key: the arena says why
             raise SystemExit(str(e)) from None
         print(json.dumps(summary(result), indent=2))
@@ -131,10 +136,10 @@ def main(argv=None):
         if replay:  # the supplier's reasons, move by move: read it, improve, play again
             print(f"replay: {os.environ['ARENA_URL'].rstrip('/')}{replay}")
     elif args.set == "final":  # waits for each wave and plays its cases within the cap
-        out = play_waves(client, agent_factory(args.agent, args.data), args.waves, min(args.parallel, 10))
+        out = play_in_waves(client, agent_factory(args.agent, args.data), args.waves, min(args.parallel, 10))
     else:
         ids = [case["case_id"] for case in hosted(client.cases(args.set))]
-        out = play_all(
+        out = play_many(
             lambda: RemoteTable(client),
             ids,
             agent_factory(args.agent, args.data),
