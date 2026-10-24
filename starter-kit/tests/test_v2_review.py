@@ -207,6 +207,55 @@ def test_a_word_the_addressee_shares_with_a_rival_is_not_removed():
     assert "brandlhuber" in marks and "gießerei" not in marks
 
 
+# ---- RFQ latency: an agreement is never left waiting -------------------------------------------------------------
+
+
+def test_the_coordinator_accepts_an_agreement_without_its_worker():
+    """P05 lost an agreed supplier because the accept went out 70 s after its reply: the coordinator now takes it."""
+    from v2_support import S02
+
+    a_sid, b_sid = S02["suppliers"]
+    mine = {"unit_price": 16.0, "payment_days": 30, "lead_time_days": 42}
+    threads = {
+        a_sid: [quote(a_sid, 0, 17.2, lead_time_days=42), ours(mine),
+                quote(a_sid, 1, 16.0, "agreed", lead_time_days=42)],
+        b_sid: [quote(b_sid, 0, 17.4, lead_time_days=42)],
+    }  # fmt: skip
+    table = Table(close=lambda m: {"ended": True, "deal": True})
+    run = CaseRun(agent(), table, S02, threads)
+    run.step()  # no worker runs at all
+    assert run.ended and table.closes and table.closes[0]["type"] == "accept"
+
+
+def test_a_closing_action_never_holds_the_case_lock():
+    """A slow arena close must not freeze the other threads of the case (the P05 cause)."""
+    import threading
+
+    events = [quote(SID, 0, 17.4), ours({"unit_price": 16.5, "payment_days": 30}), quote(SID, 1, 16.5, "agreed")]
+    started, release = threading.Event(), threading.Event()
+
+    def slow_close(message):
+        started.set()
+        release.wait(timeout=5)
+        return {"ended": True, "deal": True}
+
+    run = CaseRun(agent(), Table(close=slow_close), S01, {SID: events})
+    t = threading.Thread(target=run.accept_best, args=(SID, "test"), daemon=True)
+    t.start()
+    assert started.wait(timeout=5), "the close was never attempted"
+    got = threading.Event()
+
+    def take_lock():
+        with run.lock:
+            got.set()
+
+    other = threading.Thread(target=take_lock, daemon=True)
+    other.start()
+    assert got.wait(timeout=2), "the case lock was held across the closing POST"
+    release.set()
+    t.join(timeout=5)
+
+
 # ---- hardening: the coordinator survives an error ------------------------------------------------------------------
 
 

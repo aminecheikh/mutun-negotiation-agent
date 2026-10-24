@@ -82,6 +82,7 @@ class CaseRun:
         self.cond = threading.Condition(self.lock)
         self.result: dict | None = None
         self.end_reason: str | None = None
+        self._closing = False  # a closing action is in flight (never two at once)
         now = received_at if received_at is not None else time.monotonic()  # the quotes' 60 s started then
         self.runs = {sid: ThreadRun(sid, list(events), now) for sid, events in threads.items()}
         self.state = agent.brain.open_case(case, {s: r.events for s, r in self.runs.items()})
@@ -91,6 +92,18 @@ class CaseRun:
     @property
     def ended(self) -> bool:
         return self.result is not None
+
+    def claim_close(self) -> bool:
+        """Only one thread may have a closing action (accept / walk) in flight."""
+        with self.lock:
+            if self.ended or self._closing:
+                return False
+            self._closing = True
+            return True
+
+    def release_close(self) -> None:
+        with self.lock:
+            self._closing = False
 
     def finish(self, result: dict | None, reason: str) -> None:
         with self.lock:
@@ -132,10 +145,12 @@ class CaseRun:
                 self.wait(self.cfg.poll_s)
                 continue
             try:
+                started = time.monotonic()
                 with self.lock:
                     snapshot = {s: list(r.events) for s, r in self.runs.items()}
                     th.decided_for = len(th.events)
                 move = self.agent.brain.decide(self.state, sid, snapshot, th.received_at)
+                move.detail.setdefault("waited_s", round(started - th.received_at, 2))
                 self._log_move(th, move)
                 self.execute(th, move)
             except Exception:
@@ -326,7 +341,9 @@ class CaseRun:
         return best
 
     def accept_best(self, prefer: str | None, reason: str) -> bool:
-        """Accept the cheapest acceptable standing sheet among the idle threads (ties go to `prefer`)."""
+        """Accept the cheapest acceptable standing sheet among the idle threads (ties go to `prefer`). The choice
+        is made under the case lock; the closing POST happens outside it, so a slow arena call never freezes the
+        other threads of this case (an RFQ lost an agreed supplier to exactly that in practice)."""
         with self.lock:
             if self.ended:
                 return True
@@ -344,7 +361,12 @@ class CaseRun:
                     th, f = self.runs[prefer], mine
                 else:
                     reason = f"{reason}; {th.sid}'s acceptable sheet is cheaper ({f.standing.c:,.0f})"
+        if not self.claim_close():
+            return self.ended
+        try:
             return self._close_accept(th, f, reason)
+        finally:
+            self.release_close()
 
     def _close_accept(self, th: ThreadRun, f: F.ThreadFacts, reason: str, retry: bool = True) -> bool:
         message = {"action": {"type": "accept", "term_sheet_id": f.standing.id}}
@@ -378,6 +400,9 @@ class CaseRun:
             if self.ended:
                 return
             target = next((t for t in self.runs.values() if t.status not in ENDED), next(iter(self.runs.values())))
+        if not self.claim_close():
+            return
+        try:
             try:
                 result = self.table.close(target.sid, {"action": {"type": "walk_away"}})
             except Exception as e:  # refused or lost: the session state says what really happened
@@ -388,6 +413,8 @@ class CaseRun:
                 result = (state or {}).get("result") or {"deal": False, "end_reason": str(e)}
             self.agent.trail.round(case_id=self.case.get("case_id"), supplier_id=target.sid, kind="walk", reason=reason)
             self.finish(result if isinstance(result, dict) else {"deal": False}, f"walk: {reason}")
+        finally:
+            self.release_close()
 
     def seconds_left(self) -> float | None:
         cap = self.deadline() if callable(self.deadline) else self.deadline
@@ -396,6 +423,15 @@ class CaseRun:
     def step(self, workers_done: bool = False) -> None:
         """The coordinator: the wave's cap, and a case where no thread is negotiating any more."""
         if self.ended:
+            return
+        # an agreement must never wait for its worker: the coordinator polls every poll_s and closes it itself
+        with self.lock:
+            agreed = [
+                t
+                for t in self.runs.values()
+                if not t.closed and not t.in_flight and t.status not in ENDED and self._facts(t).accepted_ours
+            ]
+        if agreed and self.accept_best(prefer=agreed[0].sid, reason="the supplier accepted our offer"):
             return
         left = self.seconds_left()
         if left is not None:
