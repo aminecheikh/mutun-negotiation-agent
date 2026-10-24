@@ -23,3 +23,7 @@ decision - why`. Changing `contracts.py` always needs an entry here.
 - 2026-10-24 20:10 - Amine - `ConcessionFit` gains `p_room: float | None = None`: probability the supplier can still go
   >= 1 % below its last price (Bayesian fit of its own price path, `tools/concession.py`). For the analyst (p_more)
   and the accept/walk policy; None until it has moved once.
+- 2026-10-24 21:00 - Amine - `CaseContext.trades: dict[str, tuple[Trade, ...]]` (default empty) and the `Trade` type: per
+  supplier, each term change against its quote that saves us money, in EUR and as a price per unit (lead time,
+  ppm/chargeback, payment, Incoterm, volume, contract length, dates, clauses). For the strategist's explicit trades -
+  the tools no longer impose lead time or ppm, they price them.
