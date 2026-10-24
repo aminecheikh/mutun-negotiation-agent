@@ -11,7 +11,7 @@ import pytest
 from arena_kit.agents.buyer import guard, observe, policy
 from arena_kit.agents.buyer.agent import BuyerAgent
 from arena_kit.agents.buyer.config import OrchestratorConfig
-from arena_kit.agents.buyer.contracts import Email, Tactic
+from arena_kit.agents.buyer.contracts import ConcessionFit, Email, Tactic
 from arena_kit.agents.buyer.pipeline import keepalive_email
 from arena_kit.agents.buyer.telemetry import Telemetry
 from arena_kit.agents.buyer.tools import DataTools
@@ -463,3 +463,31 @@ def test_rebuild_when_supplier_sends_a_cheaper_alternative_stands_on_it():
     observe.rebuild(s, th)
     assert th.standing_id == cheaper["term_sheet_id"]
     assert th.c == pytest.approx(s.cost(SID, cheaper["terms"]))
+
+
+# ---- the target is a prior in the first half of the rounds -------------------------------------------------------
+
+
+def at_target_thread(fit=None):
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    band = s.band(SID)
+    reply = quote(SID, 1, band.target)
+    reply["term_sheets"][0]["terms"] = dict(band.target_terms)  # it offers exactly our target package
+    th.events += [ours(round(band.target * 0.9, 2)), reply]
+    observe.rebuild(s, th)
+    th.fit = fit
+    return s, th
+
+
+def test_verdict_when_at_target_in_the_first_half_keeps_negotiating():
+    # practice P01/P03/P11 (4c30c05) closed at our band target after one message: target scores were 0.81, 0.84,
+    # 0.60 while the baseline reached 0.91 on P01/P03 - our target is an estimate the supplier's moves can beat
+    s, th = at_target_thread()
+    v = policy.verdict(s, th)
+    assert v.kind == "counter" and not v.accept_permitted
+
+
+def test_verdict_when_at_target_and_its_prices_show_no_room_accepts():
+    s, th = at_target_thread(ConcessionFit(SID, (10.0, 9.0), 8.9, -10.0, True, 0.05))
+    assert policy.verdict(s, th).kind == "accept"

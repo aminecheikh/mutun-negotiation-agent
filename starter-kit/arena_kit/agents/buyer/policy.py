@@ -196,7 +196,8 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
         return Verdict("counter", "first answer: never take the opening quote")
     rival = rival_may_beat(session, th) if ok else None
     band = session.band(th.supplier_id)
-    at_target = ok and band is not None and th.c <= band.c_target * (1 + cfg.accept_eps)
+    early = target_is_prior(session, th)
+    at_target = ok and band is not None and th.c <= band.c_target * (1 + cfg.accept_eps) and not early
     final_closed = th.status == "final_offer" and not counter_allowed(session, th)
     forced = [
         why
@@ -229,7 +230,19 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
         return Verdict("dead", "final offer we cannot accept and should not push")
     if session.freeze and best_acceptable(session, idle_only=False) is not None:
         return Verdict("park", "freeze before the cap: an acceptable sheet is on the table")
-    return Verdict("counter", "negotiate", accept_permitted=ok and rival is None and cheaper is None)
+    return Verdict("counter", "negotiate", accept_permitted=ok and rival is None and cheaper is None and not early)
+
+
+def target_is_prior(session: CaseSession, th: ThreadState) -> bool:
+    """First half of the rounds and the supplier's prices still show room (or no fit yet): our target is an estimate
+    its moves can beat, not a reason to close (practice P01/P03/P11 closed at it after one message)."""
+    if th.status != "open":
+        return False
+    limit = session.case.get("round_limit", 10)
+    if th.moves_left(session.case) <= limit * session.config.prior_share_of_rounds:
+        return False
+    fit = th.fit
+    return fit is None or fit.p_room is None or fit.p_room >= session.config.low_room_probability
 
 
 def cheaper_elsewhere(session: CaseSession, th: ThreadState) -> ThreadState | None:
