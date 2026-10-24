@@ -108,8 +108,12 @@ def stuck(session: CaseSession, th: ThreadState) -> bool:
     cfg = session.config
     if not th.alive or th.status == "final_offer" or th.moves_left(session.case) <= 0:
         return True
+    # only offers count: a supplier we sent questions without a sheet has nothing to move on (P02 walked after three)
+    ours = [m for m in th.events if m.get("from") == "buyer"]
+    if not ours or not ours[-1].get("term_sheets"):
+        return False
     hist = [c for c in th.c_history if not math.isinf(c)]
-    if th.our_rounds >= cfg.stuck_rounds and len(hist) >= 3:
+    if sum(bool(m.get("term_sheets")) for m in ours) >= cfg.stuck_rounds and len(hist) >= 3:
         return hist[-1] >= hist[-3] * (1 - cfg.stuck_improvement)
     return False
 

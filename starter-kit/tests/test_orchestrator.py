@@ -541,3 +541,19 @@ def test_keepalive_message_after_a_final_offer_sends_no_sheet():
     th.events += [ours(8.5), quote(SID, 1, 9.8, "final_offer")]
     observe.rebuild(s, th)
     assert keepalive_message(s, th)["term_sheets"] == []
+
+
+def test_stuck_when_we_sent_no_sheets_is_not_the_supplier_standing_still():
+    # P02 (a3d4f84f7d5954f7): three e-mails without a sheet, the supplier asked for a concrete proposal and did not
+    # move; `stuck` read that as "no progress" and the case walked away (Saed's ask, 19:28)
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    question = {"from": "buyer", "subject": "Re", "body": "A question.", "term_sheets": [], "refs": []}
+    for n in range(1, 4):
+        th.events += [question, quote(SID, n, 10.0)]
+    observe.rebuild(s, th)
+    assert not policy.stuck(s, th)
+    for n in range(4, 7):
+        th.events += [ours(8.0 + n * 0.1), quote(SID, n, 10.0)]
+    observe.rebuild(s, th)
+    assert policy.stuck(s, th)  # three real offers it did not answer: now it is standing still
