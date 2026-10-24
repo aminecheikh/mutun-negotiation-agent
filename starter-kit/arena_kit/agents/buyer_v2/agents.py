@@ -286,6 +286,13 @@ def pace_guidance(state: F.CaseState, f: F.ThreadFacts) -> str:
                 f"- Lowest credible price {cred.lowest_price} ({(cred.lowest_price / price - 1) * 100:+.1f} %):"
                 f" {cred.reason}."
             )
+        if not F.floor_is_credible(state, sid, price):
+            lines.append(
+                f"- CAUTION: our cost floor ({band.floor if band else None}) is ABOVE its own quote ({price}), so it"
+                " is our cost estimate for this part that is wrong, not the supplier's price. Do not let that floor"
+                " hold your anchor up: judge by what it concedes and by our alternative, and expect real room below"
+                " its quote. A supplier that answers 'agreed' to a first offer was given more than it needed."
+            )
         lines.append(
             "- ANCHOR AT THE LOWEST CREDIBLE PRICE above. It is computed per supplier from our cost evidence:"
             " deep when a firm should-cost or its own breakdown backs it, shallow when the evidence is thin -"

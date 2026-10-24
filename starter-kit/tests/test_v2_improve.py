@@ -149,6 +149,66 @@ def test_the_models_json_record_carries_the_precomputed_block(tmp_path, monkeypa
     assert recs and "TOOL RESULTS ALREADY FETCHED" in recs[0]["user"]
 
 
+# ---- a self-contradicting cost floor, and downloads off the move's path -----------------------------------------
+
+
+def test_a_floor_above_the_quote_is_not_treated_as_evidence_where_we_are_told_to_push():
+    import copy
+
+    case = copy.deepcopy(S01)
+    case["buyer"]["category_goal"] = "leverage"
+    st = state_for(case, {SID: [quote(SID, 0, 17.4)]})
+    band = st.ctx.bands[SID]
+    st.ctx = st.ctx.__class__(**{**st.ctx.__dict__, "bands": {SID: band.__class__(**{**band.__dict__, "floor": 99.0})}})
+    assert not F.floor_is_credible(st, SID, 17.4), "a floor above its own quote contradicts itself"
+    assert F.floor_is_credible(st, SID, 120.0), "below the quote it is ordinary evidence"
+    f = F.thread_facts(st, SID, [quote(SID, 0, 17.4)])
+    assert "CAUTION" in A.decision_frame(st, f)
+
+
+def test_a_squeezed_supplier_in_a_relationship_case_keeps_its_floor():
+    import copy
+
+    case = copy.deepcopy(S01)
+    case["buyer"]["category_goal"] = "stabilise"
+    st = state_for(case, {SID: [quote(SID, 0, 17.4)]})
+    band = st.ctx.bands[SID]
+    st.ctx = st.ctx.__class__(**{**st.ctx.__dict__, "bands": {SID: band.__class__(**{**band.__dict__, "floor": 99.0})}})
+    assert F.floor_is_credible(st, SID, 17.4), "C charges us for squeezing here, so the floor stands"
+
+
+def test_a_slow_document_download_never_delays_the_decision():
+    """Run 4: one attachment GET blocked a worker 76 s between the reply and the decision."""
+    import threading
+    import time as _t
+
+    from arena_kit.agents.buyer_v2.runner import CaseRun, V2Agent
+    from arena_kit.agents.buyer_v2.trail import Trail
+
+    started, release = threading.Event(), threading.Event()
+
+    class SlowDocs:
+        session_id = "x"
+
+        def attachment(self, attachment_id):
+            started.set()
+            release.wait(timeout=5)
+            return b"late"
+
+        def result(self):
+            return {"ended": False}
+
+    cfg = V2Config(log_dir="off")
+    run = CaseRun(V2Agent(Brain(DataTools(), None, cfg), cfg, Trail("off")), SlowDocs(), S01,
+                  {SID: [quote(SID, 0, 17.4)]})  # fmt: skip
+    reply = {"attachments": [{"attachment_id": "a1", "name": "quote.pdf"}]}
+    t0 = _t.monotonic()
+    run.fetch_later(reply)
+    assert _t.monotonic() - t0 < 0.5, "the download must not run on the caller's thread"
+    assert started.wait(timeout=5)
+    release.set()
+
+
 # ---- hallucination: a figure an agent states is never taken as fact -------------------------------------------
 
 

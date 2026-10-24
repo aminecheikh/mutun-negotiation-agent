@@ -89,6 +89,23 @@ def cost(state: CaseState, supplier_id: str, terms: dict, std: dict | None = Non
         return math.inf
 
 
+# Goals where C charges us for leaving the supplier below a sustainable margin: there a quote under our cost
+# floor means a genuinely squeezed supplier, and the floor stands. Elsewhere it means our estimate is wrong.
+RELATIONSHIP_GOALS = {"stabilise", "secure_supply"}
+
+
+def floor_is_credible(state: CaseState, supplier_id: str, quote: float | None) -> bool:
+    """A cost floor above the supplier's own asking price contradicts itself: nobody quotes below cost for long.
+    Outside the relationship goals we stop treating such a floor as a constraint, rather than anchoring just
+    under a quote our own model cannot explain."""
+    band = getattr(state.ctx, "bands", {}).get(supplier_id)
+    if band is None or band.floor is None or quote is None:
+        return True
+    if state.case.get("buyer", {}).get("category_goal") in RELATIONSHIP_GOALS:
+        return True
+    return band.floor <= quote
+
+
 def alternative_cost(case: dict) -> float | None:
     alt = case.get("buyer", {}).get("alternative") or {}
     if alt.get("kind") in (None, "none") or not (alt.get("terms") or {}).get("unit_price"):

@@ -30,6 +30,8 @@ from .config import V2Config
 from .trail import Trail
 
 log = logging.getLogger("arena")
+# document downloads: never on a move's path, so one slow arena call cannot cost the 60 s limit
+_DOCS = ThreadPoolExecutor(max_workers=8, thread_name_prefix="v2-docs")
 MAX_ERRORS = 3  # a thread that keeps failing is given up (the coordinator still closes the case)
 
 
@@ -247,22 +249,24 @@ class CaseRun:
             th.slowest_s = max(th.slowest_s, received - asked_at)
             th.errors = 0
         self.notify()
-        self.fetch_bounded(reply, received + self.cfg.attachment_budget_s)
+        self.fetch_later(reply)
 
-    def fetch_bounded(self, message: dict, deadline: float) -> None:
-        """The text of the reply's attachments, as far as the deadline allows. Every arena call is paced at 9/s
-        across all cases, so a reply with several documents can take longer than the whole move; what does not
-        arrive in time is left for a later round (the agents see it as not readable)."""
-        for att in message.get("attachments") or []:
-            if att.get("attachment_id") is None or "text" in att:
-                continue
-            if time.monotonic() >= deadline:
-                log.info("%s: attachment %s left for a later round (download budget spent)",
-                         self.case.get("case_id"), att.get("name"))  # fmt: skip
+    def fetch_later(self, message: dict) -> None:
+        """Download the reply's attachments on their own thread. One arena call can take over a minute (run 4:
+        a single attachment GET blocked a worker for 76 s, past the move limit), and a deadline cannot interrupt
+        a call already in flight - so the move never waits for a document. The text lands in the same message and
+        is read from the next round on; until then the agents see the attachment as not readable."""
+        pending = [a for a in message.get("attachments") or [] if a.get("attachment_id") and "text" not in a]
+        if pending:
+            _DOCS.submit(self._fetch, pending)
+
+    def _fetch(self, attachments: list[dict]) -> None:
+        for att in attachments:
+            if self.ended:
                 return
             try:
                 att["text"] = read_document(att["name"], self.table.attachment(att["attachment_id"]))
-            except Exception as e:  # a document we cannot read must never cost the round
+            except Exception as e:  # a document we cannot read must never cost a round
                 log.warning("%s: could not read %s: %s", self.case.get("case_id"), att.get("name"), e)
 
     def _repair(self, th: ThreadRun, message: dict) -> dict:
@@ -318,8 +322,8 @@ class CaseRun:
         if not t or not t.get("messages"):
             return "failed"
         events = list(t["messages"])
-        for m in events[-2:]:  # only the newest messages' documents, and only while the budget lasts
-            self.fetch_bounded(m, time.monotonic() + self.cfg.attachment_budget_s)
+        for m in events[-2:]:  # the newest messages' documents, off the move's path
+            self.fetch_later(m)
         ours = [m for m in events if m.get("from") == "buyer" and m.get("term_sheets")]
         timeouts = list(t.get("timeouts") or [])
         for _ in timeouts:  # each timeout used a round: the arena repeated our last offer
