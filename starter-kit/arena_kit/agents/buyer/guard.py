@@ -7,8 +7,8 @@ than any clever one gains:
   term sheets  exactly the negotiable fields, values the arena accepts (an option or the supplier's standard
                value), at most 3, and each one a deal we would be content with if the supplier says 'agreed'
   body         every data ID known to the arena and cited at most once per case, never an offer ID (no
-               inter-supplier comparison), at most 3 checkable arguments, no leak of urgency, budget or a missing alternative
-               (English and German), bounded lengths
+               inter-supplier comparison), at most 3 checkable arguments, no leak of urgency, budget or a
+               missing alternative (English and German), bounded lengths
 """
 
 import math

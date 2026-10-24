@@ -8,7 +8,7 @@ from pathlib import Path
 from arena_kit.agents.buyer.contracts import BehaviourRead, Claim, ConcessionFit, Trade
 from arena_kit.agents.buyer.roles import LLMStrategist, RuleAnalyst, RuleStrategist
 from arena_kit.agents.buyer.roles.analyst import wants_from
-from arena_kit.agents.buyer.roles.strategist import negotiable_levers, refined_read, safe
+from arena_kit.agents.buyer.roles.strategist import accept_ready, negotiable_levers, refined_read, safe
 from arena_kit.agents.buyer.tools import DataTools
 
 CASE = json.loads((Path(__file__).parents[1] / "arena_kit/sim_cases/S01.json").read_text())
@@ -250,3 +250,37 @@ def test_choose_when_trades_priced_shows_them_with_their_euro_value():
     trade = Trade("payment_days", 30, 60, 1234.0, 0.21)
     view = seen_thread(replace(ctx, trades={SID: (trade,)}), threads)
     assert view["trades"] == [{"field": "payment_days", "theirs": 30, "ours": 60, "eur": 1234.0, "per_unit": 0.21}]
+
+
+# ---- a refused accept still sends a full offer; each supplier alone -------------------------------------------
+
+
+def test_safe_when_model_accepts_keeps_its_levers_claims_and_question_for_a_refused_accept():
+    # audit: a policy-refused accept became a price-only send with no claims or question ("without movement...")
+    ctx, threads = setup([supplier(), buyer(), supplier(16.9, n=1)])
+    raw = {"supplier_id": SID, "action": "accept", "levers": ["unit_price", "payment_days"], "claims": [0],
+           "question": "Which payment term would help you most?"}  # fmt: skip
+    tactic = safe(ctx, threads, raw, rule_tactic(ctx, threads))
+    assert tactic.action == "accept"
+    assert "payment_days" in tactic.levers and tactic.claims == (0,) and tactic.question
+
+
+def test_accept_ready_when_at_target_in_the_first_half_keeps_trading():
+    # as policy.target_is_prior (f28e992): the rule fallback must not accept at our estimated target early
+    ctx, threads = setup([supplier(), buyer(), supplier(12.0, n=1)])  # far below any target
+    assert not accept_ready(ctx, SID, threads[SID])
+
+
+def test_accept_ready_when_its_prices_show_no_room_accepts_at_target():
+    ctx, threads = setup([supplier(), buyer(), supplier(12.0, n=1)])
+    ctx = replace(ctx, fits={SID: ConcessionFit(SID, (17.4, 12.0), 11.9, -31.0, True, 0.05)})
+    assert accept_ready(ctx, SID, threads[SID])
+
+
+def test_strategist_prompt_never_brings_in_another_supplier():
+    # organisers: no inter-supplier comparison - one supplier per call, nothing about rivals
+    from arena_kit.agents.buyer.roles.llm import prompt
+
+    text = prompt("strategist").lower()
+    assert "rival" not in text and "rfq" not in text and "every open supplier" not in text
+    assert "never mention" in text and "another supplier" in text

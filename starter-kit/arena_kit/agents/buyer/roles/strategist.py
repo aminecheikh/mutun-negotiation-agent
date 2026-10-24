@@ -18,6 +18,7 @@ from ....cost import total_cost
 from ....docs import standard_terms
 from ....play import latest, moves_left, standing
 from ...llm import ID_RE
+from ..config import OrchestratorConfig
 from ..contracts import BehaviourRead, CaseContext, Claim, Tactic
 from .analyst import wants_from
 from .llm import call_json, prompt
@@ -100,7 +101,19 @@ def accept_ready(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
         return False  # never take the opening quote
     if status == "final_offer":
         return c < alt
-    return band is not None and c <= band.c_target
+    return band is not None and c <= band.c_target and not target_is_prior(ctx, sid, events)
+
+
+def target_is_prior(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
+    """As policy.target_is_prior: in the first half of the rounds our target is an estimate the supplier's moves
+    can beat, unless its own prices show no room left (ConcessionFit.p_room)."""
+    cfg = OrchestratorConfig()
+    if latest(events).get("status") != "open":
+        return False
+    if moves_left(ctx.case, events) <= ctx.case.get("round_limit", 10) * cfg.prior_share_of_rounds:
+        return False
+    fit = ctx.fits.get(sid)
+    return fit is None or fit.p_room is None or fit.p_room >= cfg.low_room_probability
 
 
 def walk_allowed(ctx: CaseContext, threads: dict[str, list[dict]]) -> bool:
@@ -116,18 +129,13 @@ def walk_allowed(ctx: CaseContext, threads: dict[str, list[dict]]) -> bool:
 
 
 class RuleStrategist:
-    """Talk to the supplier whose standing sheet costs least; trade price against what it values; accept by
-    `accept_ready`. The orchestrator's guard still refuses accepts that break a must-have or lose to the
-    alternative."""
+    """Trade price against what this supplier values; accept by `accept_ready`. The orchestrator gives it one
+    thread at a time (each supplier is negotiated on its own) and still refuses accepts that break a must-have
+    or lose to the alternative."""
 
     def choose(self, ctx: CaseContext, threads: dict[str, list[dict]], reads: dict[str, BehaviourRead]) -> Tactic:
         sid = min(threads, key=lambda s: standing_c(ctx, threads[s]))
         events = threads[sid]
-        if accept_ready(ctx, sid, events):
-            status, left = latest(events).get("status"), moves_left(ctx.case, events)
-            return Tactic(sid, "accept", rationale=f"rule: accept ({status}, {left} messages left)")
-        if walk_allowed(ctx, threads):
-            return Tactic(sid, "walk_away", rationale="rule: the alternative beats every standing offer")
         first = our_messages(events) == 0
         read = reads.get(sid)
         dossier = ctx.dossiers.get(sid)
@@ -138,6 +146,12 @@ class RuleStrategist:
         levers = levers[:3]
         claims = tuple(i for i, _ in usable_claims(ctx, sid, cited_refs(threads))[: 3 if first else 2])
         question = COST_BREAKDOWN if first else None
+        # accept and walk carry the send's levers, claims and question: if the policy refuses them, the send is full
+        if accept_ready(ctx, sid, events):
+            status, left = latest(events).get("status"), moves_left(ctx.case, events)
+            return Tactic(sid, "accept", levers, claims, question, f"rule: accept ({status}, {left} messages left)")
+        if walk_allowed(ctx, threads):
+            return Tactic(sid, "walk_away", levers, claims, question, "rule: the alternative beats its standing offer")
         return Tactic(sid, "send", levers, claims, question, "rule: trade price against what it values")
 
 
@@ -264,9 +278,13 @@ def safe(ctx: CaseContext, threads: dict[str, list[dict]], raw: dict, rule: Tact
         return Tactic(sid, "accept", rationale="safe: supplier agreed to our terms")
     if action == "send" and our_messages(events) == 0 and not question:
         question = COST_BREAKDOWN
-    if action != "send":
-        return Tactic(sid, action, rationale=rationale)
-    return Tactic(sid, "send", levers or ("unit_price",), claims, question, rationale)
+    # an accept or walk the policy refuses becomes a send: it keeps the model's (else the rule's) levers, claims
+    # and question, never a bare price-only message
+    if not claims and rule.supplier_id == sid:
+        claims = rule.claims
+    if not question and rule.supplier_id == sid:
+        question = rule.question
+    return Tactic(sid, action, levers or ("unit_price",), claims, question, rationale)
 
 
 class LLMStrategist:

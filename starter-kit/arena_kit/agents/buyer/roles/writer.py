@@ -38,7 +38,8 @@ VAGUE_DATA = re.compile(
     r"our (?:data|analysis|analyses|records|research|figures|estimates?|calculations?|assessment|cost model)|"
     r"should[- ]cost|cost picture|price indices|index data|"
     r"vergleichbare[nr]? (?:teile\w*|wellen|gussteile\w*|lieferanten|angebote\w*|preise\w*)|marktpreis\w*|"
-    r"marktniveau\w*|andere[nr]? (?:lieferanten|anbieter\w*)|wettbewerber\w*|konkurrenz\w*|"
+    r"marktniveau\w*|andere[nrm]? (?:lieferant\w*|anbieter\w*)|wettbewerber\w*|konkurrenz\w*|"
+    r"another (?:supplier|bidder|vendor|source|offer|quote)|alternative (?:suppliers?|sources?)|second source|"
     r"unsere[rnm]? (?:daten|analysen?|unterlagen|berechnung\w*|kalkulation\w*|einschätzung\w*|kostenmodell\w*)|"
     r"preisindizes|indexdaten)\b",
     re.I,

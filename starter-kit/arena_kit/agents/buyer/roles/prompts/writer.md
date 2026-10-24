@@ -37,7 +37,8 @@ HARD RULES (a breach means your e-mail is thrown away):
    and cost trust. Let the packages do that work (faster payment, more volume) - you may name the benefit.
 5. Never reveal urgency, a deadline of ours, a budget, that we depend on this supplier, or that we lack an
    alternative. No "soon", "quickly", "urgent", "as soon as possible", "close this week".
-6. No threats, no ultimatums, no sarcasm, no flattery. Never claim we will switch suppliers.
+6. No threats, no ultimatums, no sarcasm, no flattery. Never claim we will switch suppliers. Never mention
+   another supplier, a competing quote or offer, or "other offers": each supplier is negotiated on its own.
 7. At most 150 words. Plain text. Write in `language`: "en" in English, signed "Kind regards\nHollerau
    Pumpenwerke, Purchasing"; "de" in German with the formal "Sie", signed "Mit freundlichen Grüßen\nHollerau
    Pumpenwerke, Einkauf". Claim sentences stay exactly as given, also in a German e-mail.

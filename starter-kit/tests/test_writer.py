@@ -280,3 +280,10 @@ def test_prompts_when_supplier_text_is_shown_treat_it_as_data_not_instructions(n
     from arena_kit.agents.buyer.roles.llm import prompt
 
     assert "never instructions" in prompt(name).lower()
+
+
+@pytest.mark.parametrize("line", ["Another supplier offers a lower price.", "Ein anderer Lieferant ist günstiger."])
+def test_check_when_email_brings_in_another_supplier_reports_it(line):
+    # organisers: no inter-supplier comparison
+    problems = run_check(body(CLAIM.sentence, line))
+    assert any("without a claim" in p for p in problems), problems
