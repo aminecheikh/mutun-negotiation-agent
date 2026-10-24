@@ -43,6 +43,7 @@ class ThreadRun:
     slowest_s: float = 0.0
     decided_for: int = -1  # len(events) when we last decided: never decide twice on the same reply
     accept_retries: dict = None  # len(events) -> failed accepts on that reply (re-decide at most twice)
+    closed: bool = False  # the arena closed this thread (timeouts, round limit): no message, no accept
 
     @property
     def awaiting_us(self) -> bool:
@@ -55,7 +56,7 @@ class ThreadRun:
 
     @property
     def live(self) -> bool:
-        return not self.done and self.status not in ENDED
+        return not self.done and not self.closed and self.status not in ENDED
 
 
 class V2Agent:
@@ -66,14 +67,22 @@ class V2Agent:
 
 
 class CaseRun:
-    def __init__(self, agent: V2Agent, table, case: dict, threads: dict[str, list[dict]], deadline=None):
+    def __init__(
+        self,
+        agent: V2Agent,
+        table,
+        case: dict,
+        threads: dict[str, list[dict]],
+        deadline=None,
+        received_at: float | None = None,
+    ):
         self.agent, self.table, self.case, self.deadline = agent, table, case, deadline
         self.cfg = agent.config
         self.lock = threading.RLock()
         self.cond = threading.Condition(self.lock)
         self.result: dict | None = None
         self.end_reason: str | None = None
-        now = time.monotonic()
+        now = received_at if received_at is not None else time.monotonic()  # the quotes' 60 s started then
         self.runs = {sid: ThreadRun(sid, list(events), now) for sid, events in threads.items()}
         self.state = agent.brain.open_case(case, {s: r.events for s, r in self.runs.items()})
 
@@ -105,7 +114,11 @@ class CaseRun:
         try:
             while not self.ended:
                 self.wait(self.cfg.poll_s)
-                self.step(workers_done=all(f.done() for f in futures))
+                try:
+                    self.step(workers_done=all(f.done() for f in futures))
+                except Exception:  # the coordinator must outlive any error: it owns the cap and the close
+                    log.exception("%s: coordinator step failed", self.case.get("case_id"))
+                    time.sleep(self.cfg.poll_s)
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
         return self.result or {"deal": False}
@@ -125,15 +138,11 @@ class CaseRun:
                 move = self.agent.brain.decide(self.state, sid, snapshot, th.received_at)
                 self._log_move(th, move)
                 self.execute(th, move)
-            except ArenaError as e:
-                th.errors += 1
-                th.decided_for = -1
-                log.warning("%s/%s: arena error %s: %s", self.case.get("case_id"), sid, e.status, e.detail)
-                time.sleep(0.5)
             except Exception:
                 th.errors += 1
                 th.decided_for = -1
                 log.exception("%s/%s: round failed (%d errors)", self.case.get("case_id"), sid, th.errors)
+                time.sleep(0.5)
         if th.errors >= MAX_ERRORS:
             with self.lock:
                 th.done = True
@@ -168,80 +177,138 @@ class CaseRun:
             message = guard.reserve(self.state, message, list(message.get("refs") or ()))
             th.in_flight = True
         asked_at = time.monotonic()
-        reply, delivered = None, True
+        reply, conflict, lost = None, None, None
         try:
-            try:
-                reply = self.table.send(th.sid, message)
-            except ArenaError as e:
-                if e.status == 422:  # invalid, nothing happened, no round used: repair once
-                    log.warning("%s/%s: 422 %s - repairing", self.case.get("case_id"), th.sid, e.detail)
-                    message = self._repair(th, message)
-                    try:
-                        reply = self.table.send(th.sid, message)
-                    except ArenaError as e2:
-                        if e2.status != 409:
-                            raise
-                        delivered, reply = False, None
-                elif e.status == 409:  # late, thread ended, round limit or case ended
-                    delivered, reply = False, None
-                else:
-                    raise
-        finally:
-            with self.lock:
-                th.in_flight = False
+            reply = self.table.send(th.sid, message)
+        except ArenaError as e:
+            if e.status == 422:  # invalid, nothing happened, no round used: repair once
+                log.warning("%s/%s: 422 %s - repairing", self.case.get("case_id"), th.sid, e.detail)
+                message = self._repair(th, message)
+                try:
+                    reply = self.table.send(th.sid, message)
+                except ArenaError as e2:
+                    if e2.status != 409:
+                        with self.lock:
+                            th.in_flight = False
+                        raise
+                    conflict = e2
+            elif e.status == 409:  # late, thread ended, round limit or case ended
+                conflict = e
+            else:
+                with self.lock:
+                    th.in_flight = False
+                raise
+        except Exception as e:  # transport error after the client's own retries: did the message land?
+            lost = e
+        received = time.monotonic()  # the supplier's 60 s for our answer start now, before any download
+        with self.lock:
+            th.in_flight = False
+        if lost is not None:
+            outcome = self._resync(th, f"send failed ({type(lost).__name__})")
+            th.errors += 1
+            if outcome != "changed":
+                th.decided_for = -1  # it did not land (or we cannot tell): decide again on the same reply
+            return
+        if conflict is not None:
+            outcome = self._resync(th, f"409 {conflict.detail}")
+            if outcome == "same":  # the arena takes no further message here (round limit, closed): stop writing
+                with self.lock:
+                    th.done = True
+                log.warning("%s/%s: 409 and nothing changed - no further messages in this thread",
+                            self.case.get("case_id"), th.sid)  # fmt: skip
+            elif outcome == "failed":
+                th.errors += 1
+                th.decided_for = -1
+            self.notify()
+            return
         if reply is not None and "result" in reply:
             self.finish(reply["result"], "the arena ended the case")
             return
-        if reply is None:
-            self._resync(th, f"our message to {th.sid} was not taken")
-            return
         reply = fetch_documents(self.table, reply)
-        now = time.monotonic()
         with self.lock:
-            if delivered:
-                th.events.append({**message, "from": "buyer"})
+            th.events.append({**message, "from": "buyer"})
             th.events.append(reply)
-            th.received_at = now
-            th.slowest_s = max(th.slowest_s, now - asked_at)
+            th.received_at = received
+            th.slowest_s = max(th.slowest_s, received - asked_at)
+            th.errors = 0
         self.notify()
 
     def _repair(self, th: ThreadRun, message: dict) -> dict:
-        """After a 422: re-check every sheet with snapping forced; with no sheet left it goes out as a question."""
+        """After a 422: re-check every sheet with snapping forced; with none left, the bridge counter."""
         with self.lock:
             events = list(th.events)
         f = F.thread_facts(self.state, th.sid, events)
         sheets = [ts.get("terms", ts) for ts in message.get("term_sheets") or []]
         snapped = [guard.normalise(self.state, s, f) for s in sheets]
         kept = guard.check_counter(self.state, f, [s for s in snapped if s]).sheets
+        if not kept and (bridge := guard.bridge_sheet(self.state, f)) is not None:
+            kept = [bridge]
         return {**message, "term_sheets": [{"terms": s} for s in kept], "refs": list(message.get("refs") or [])[:20]}
 
-    def _resync(self, th: ThreadRun, why: str) -> None:
-        """Read the thread (and the case) from the arena after a 409 or a refusal: the arena is the record."""
+    def _session_state(self) -> dict | None:
+        client, session = getattr(self.table, "client", None), getattr(self.table, "session_id", None)
+        try:
+            if client is not None and session:
+                return client.session(session)
+            result = self.table.result()
+            return {"status": "ended" if (result or {}).get("ended") else "open", "result": result}
+        except Exception as e:
+            log.warning("could not read the session: %s", e)
+            return None
+
+    def _read_thread(self, sid: str):
+        """(the session if it has ended, the thread as the arena has it)."""
+        client, session = getattr(self.table, "client", None), getattr(self.table, "session_id", None)
+        if client is not None and session:
+            state = client.session(session)
+            if state.get("status") == "ended":
+                return state, None
+            return None, client.thread(session, sid)
+        if hasattr(self.table, "thread"):
+            t = self.table.thread(sid)
+            return None, t if isinstance(t, dict) else {"messages": t}
+        return None, None
+
+    def _resync(self, th: ThreadRun, why: str) -> str:
+        """Rebuild the thread from the arena after a 409, a refusal or a lost answer - the arena is the record.
+        Its timeouts count as rounds (our last offer repeated); a timeout answer that changed its standing offer
+        becomes its latest message; a closed thread is not written to again. Returns ended / changed / same /
+        failed."""
         log.info("%s/%s: %s - re-reading the thread", self.case.get("case_id"), th.sid, why)
         try:
-            client, session = getattr(self.table, "client", None), getattr(self.table, "session_id", None)
-            if client is not None and session:
-                state = client.session(session)
-                if state.get("status") == "ended":
-                    self.finish(state.get("result") or {"deal": False, "end_reason": state.get("end_reason")}, why)
-                    return
-                messages = client.thread(session, th.sid).get("messages") or []
-            elif hasattr(self.table, "thread"):
-                messages = self.table.thread(th.sid)
-            else:
-                messages = None
-        except ArenaError as e:
+            ended, t = self._read_thread(th.sid)
+        except Exception as e:
             log.warning("%s/%s: could not re-read the thread: %s", self.case.get("case_id"), th.sid, e)
-            return
-        if not messages:
-            return
-        for m in messages:
-            fetch_documents(self.table, m)
+            return "failed"
+        if ended is not None:
+            self.finish(ended.get("result") or {"deal": False, "end_reason": ended.get("end_reason")}, why)
+            return "ended"
+        if not t or not t.get("messages"):
+            return "failed"
+        events = [fetch_documents(self.table, m) for m in t["messages"]]
+        ours = [m for m in events if m.get("from") == "buyer" and m.get("term_sheets")]
+        timeouts = list(t.get("timeouts") or [])
+        for _ in timeouts:  # each timeout used a round: the arena repeated our last offer
+            events.append({"from": "buyer", "subject": "(timeout)", "body": "", "refs": [], "synthetic": True,
+                           "term_sheets": ours[-1]["term_sheets"] if ours else []})  # fmt: skip
+        priced = next((m for m in reversed(events) if m.get("from") != "buyer" and m.get("term_sheets")), None)
+        standing_id = priced["term_sheets"][0].get("term_sheet_id") if priced else None
+        if timeouts or (t.get("offer_id") and t.get("offer_id") != standing_id):
+            last = timeouts[-1] if timeouts else {}
+            terms = last.get("terms") or (priced["term_sheets"][0].get("terms") if priced else {}) or {}
+            offer_id = t.get("offer_id") or last.get("offer_id") or standing_id
+            events.append({"from": "arena", "status": t.get("status") or last.get("status") or "open",
+                           "term_sheets": [{"term_sheet_id": offer_id, "terms": terms}] if offer_id else [],
+                           "body": "(the supplier's answer to a timeout)", "attachments": []})  # fmt: skip
         with self.lock:
-            th.events = list(messages)
+            before = _fingerprint(th.events)
+            th.events = events
             th.received_at = time.monotonic()
             th.decided_for = -1
+            th.closed = bool(t.get("closed"))
+            changed = _fingerprint(events) != before
         self.notify()
+        return "changed" if changed or th.closed else "same"
 
     # ---- closing ----------------------------------------------------------------------------------------------
 
@@ -251,7 +318,7 @@ class CaseRun:
     def best_acceptable(self, idle_only: bool = True) -> tuple[ThreadRun, F.ThreadFacts] | None:
         best = None
         for th in self.runs.values():
-            if th.status in ENDED or (idle_only and th.in_flight):
+            if th.closed or th.status in ENDED or (idle_only and th.in_flight):
                 continue
             f = self._facts(th)
             if guard.closable(self.state, f) and (best is None or f.standing.c < best[1].standing.c):
@@ -269,7 +336,11 @@ class CaseRun:
             th, f = pick
             if prefer and th.sid != prefer:
                 mine = self._facts(self.runs[prefer])
-                if guard.closable(self.state, mine) and mine.standing.c <= f.standing.c:
+                if (
+                    not self.runs[prefer].closed
+                    and guard.closable(self.state, mine)
+                    and mine.standing.c <= f.standing.c
+                ):
                     th, f = self.runs[prefer], mine
                 else:
                     reason = f"{reason}; {th.sid}'s acceptable sheet is cheaper ({f.standing.c:,.0f})"
@@ -280,12 +351,14 @@ class CaseRun:
         try:
             result = self.table.close(th.sid, message)
         except ArenaError as e:
-            if e.status == 409:
-                self._resync(th, f"accept answered 409 ({e.detail})")
-                if not self.ended:
-                    self.finish(self._result_or_none() or {"deal": False, "end_reason": str(e.detail)}, "already ended")
-                return True
+            if e.status == 409:  # the thread (or the case) has ended: never end the case on our own word
+                outcome = self._resync(th, f"accept answered 409 ({e.detail})")
+                if outcome != "ended":
+                    th.closed = True
+                return self.ended
             log.warning("%s/%s: accept refused (%s): %s", self.case.get("case_id"), th.sid, e.status, e.detail)
+            if e.status != 422:  # a transient error: the sheet is not refused, the worker decides again
+                return False
             self.state.refused.add(f.standing.id)
             if retry:  # a stale ID (the supplier answered a timeout repeat meanwhile): read the thread, try once more
                 self._resync(th, "accept refused")
@@ -293,6 +366,8 @@ class CaseRun:
                 if guard.closable(self.state, fresh) and fresh.standing.id != f.standing.id:
                     return self._close_accept(th, fresh, f"{reason} (after re-reading the thread)", retry=False)
             return False
+        except Exception as e:  # transport error: did the accept land? the arena knows
+            return self._resync(th, f"accept failed ({type(e).__name__})") == "ended"
         self.agent.trail.round(case_id=self.case.get("case_id"), supplier_id=th.sid, kind="accept", reason=reason,
                                c=f.standing.c, c_open=self.state.c_open, c_alt=self.state.c_alt)  # fmt: skip
         self.finish(result if isinstance(result, dict) else {"deal": True}, f"accept: {reason}")
@@ -305,18 +380,14 @@ class CaseRun:
             target = next((t for t in self.runs.values() if t.status not in ENDED), next(iter(self.runs.values())))
             try:
                 result = self.table.close(target.sid, {"action": {"type": "walk_away"}})
-            except ArenaError as e:
-                log.warning("%s: walk away refused (%s): %s", self.case.get("case_id"), e.status, e.detail)
-                result = self._result_or_none() or {"deal": False, "end_reason": str(e.detail)}
+            except Exception as e:  # refused or lost: the session state says what really happened
+                log.warning("%s: walk away failed: %s", self.case.get("case_id"), e)
+                state = self._session_state()
+                if state is not None and state.get("status") != "ended":
+                    return  # the session is still open: the coordinator tries again on its next step
+                result = (state or {}).get("result") or {"deal": False, "end_reason": str(e)}
             self.agent.trail.round(case_id=self.case.get("case_id"), supplier_id=target.sid, kind="walk", reason=reason)
             self.finish(result if isinstance(result, dict) else {"deal": False}, f"walk: {reason}")
-
-    def _result_or_none(self) -> dict | None:
-        try:
-            return self.table.result()
-        except Exception as e:
-            log.warning("could not read the session result: %s", e)
-            return None
 
     def seconds_left(self) -> float | None:
         cap = self.deadline() if callable(self.deadline) else self.deadline
@@ -352,17 +423,26 @@ class CaseRun:
         )  # fmt: skip
 
 
+def _fingerprint(events: list[dict]) -> tuple:
+    return tuple(
+        (m.get("from"), m.get("status"),
+         tuple((ts.get("term_sheet_id"), str(ts.get("terms"))) for ts in m.get("term_sheets") or []))
+        for m in events
+    )  # fmt: skip
+
+
 # ---- entry points -----------------------------------------------------------------------------------------------
 
 
 def play_case(table, case_id: str, agent: V2Agent, deadline=None) -> dict:
     case, threads = table.open(case_id)
+    opened = time.monotonic()  # the suppliers' quotes are in: their 60 s run from here, downloads included
     if getattr(table, "done", None):  # resumed a case that had already ended
         return table.done
     for events in threads.values():
         for m in events:
             fetch_documents(table, m)
-    run = CaseRun(agent, table, case, threads, deadline)
+    run = CaseRun(agent, table, case, threads, deadline, received_at=opened)
     result = run.play()
     agent.trail.case(
         case_id=case_id, session_id=getattr(table, "session_id", None), end=run.end_reason,

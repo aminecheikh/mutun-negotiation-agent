@@ -25,7 +25,11 @@ from .config import V2Config
 log = logging.getLogger("arena")
 MIN_CALL_S = 2.0  # never start a model call with less time than this before the deadline
 GRACE_S = 0.3  # an answer this late past its deadline still counts (HTTP timeouts end slightly after)
-_POOL = ThreadPoolExecutor(max_workers=96, thread_name_prefix="v2-agent")
+# separate executors: a burst of specialist calls (a wave's first round) can never queue a negotiator behind it
+_POOLS = {
+    "analyst": ThreadPoolExecutor(max_workers=96, thread_name_prefix="v2-analyst"),
+    "negotiator": ThreadPoolExecutor(max_workers=32, thread_name_prefix="v2-negotiator"),
+}
 
 # transport(model=, system=, messages=, tools=, tool_choice=, schema=, effort=, max_tokens=, timeout_s=)
 #   -> (content_blocks, stop_reason, usage_dict)
@@ -190,7 +194,10 @@ class LLM:
     def run_many(self, calls: list[AgentCall]) -> dict[str, CallResult]:
         """Every call in parallel; a call that is not back by its deadline is reported late and abandoned (its
         HTTP request carries the same deadline as its timeout, so it ends on its own shortly after)."""
-        futures = {call.role: (_POOL.submit(self.run, call), call) for call in calls}
+        futures = {
+            call.role: (_POOLS["negotiator" if call.role == "negotiator" else "analyst"].submit(self.run, call), call)
+            for call in calls
+        }
         out = {}
         for role, (future, call) in futures.items():
             try:

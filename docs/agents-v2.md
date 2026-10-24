@@ -118,10 +118,48 @@ Every move, case and model call is logged as JSON lines:
 
 The directory comes from `V2_LOG_DIR` or `BUYER_LOG_DIR` (`off` disables it).
 
+## Independent review (before the PR)
+
+A separate reviewer, who had not seen the design reasoning, checked the code against the requirements and the
+arena contract and reproduced 8 bugs. All of them are fixed and pinned by `tests/test_v2_review.py`:
+1. **A repeated 409 looped decide → send.** A 409 now re-reads the thread from the arena: closed flag, status,
+   standing offer ID, and timeouts (each one counts as a round). If nothing changed, the thread is not written to
+   again.
+2. **The confirm path ignored the round limit.** With no messages left, v2 now accepts a signable sheet or stops.
+3. **The confirm path skipped the counter rules.** A confirmation now passes `check_counter` unchanged, or it is
+   not sent (no price above the supplier's standing offer).
+4. **A 409 on an accept ended the case locally while the session was still open.** The thread is now marked
+   closed and the other threads go on.
+5. **Argument tokens were positions that shifted when another thread cited an ID.** Tokens are now fixed per case.
+6. **The rules fallback could send a counter without a sheet.** A "bridge" sheet is now offered (its own terms,
+   priced between our offer and its offer).
+7. **The caps vanished when its latest e-mail carried no sheet.** The standing offer is now its latest message
+   that has a sheet.
+8. **Other suppliers' short names and dependence wording passed the e-mail check.** Both are now removed, except
+   words the addressee's own name shares.
+
+Hardening that came with the fixes:
+- a transient accept error no longer marks a sheet refused;
+- a transport error re-reads the thread before deciding again (no double send);
+- the coordinator survives an error;
+- the 60 s clock starts when the reply arrives (before downloads);
+- the rules fallback has a last resort of its own;
+- specialists and negotiators use separate executors;
+- C_open is recomputed with the current supplier estimates;
+- tools serve only the thread's own supplier;
+- argument tokens are normalised ("[[a1]]" is A1);
+- no "none" index clause is offered where the arena would refuse it.
+
+Remaining, by design:
+- When no sheet can satisfy all hard rules at once, the rules fallback still sends a question without a sheet.
+  This happens when our earlier offer has become unsignable, or when the credible floor sits above our
+  alternative.
+- At the wave cap, the coordinator signs the best idle sheet rather than wait for an in-flight thread.
+
 ## What is verified, and what is not
 
 - **Verified offline:**
-  - The full test suite, plus about 110 v2 tests: rules and guard properties on all 19 practice case files;
+  - The full test suite (670 passed), including 126 v2 tests: rules and guard properties on all 19 practice case files;
     every tool on every practice case with the real data package; the tool loop and its deadlines with a scripted
     model; fast paths; the negotiator kept inside the limits; fallbacks; prompts and schemas.
   - arena-sim on a real clock: every case to a deal; no timeouts, no offer above the supplier's price, nothing

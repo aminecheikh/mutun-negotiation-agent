@@ -41,8 +41,8 @@ class Tool:
 class ToolContext:
     """What every tool may read for one decision: the case state and a snapshot of the threads."""
 
-    def __init__(self, state: F.CaseState, threads: dict[str, list[dict]], package=None):
-        self.state, self.threads, self.package = state, threads, package
+    def __init__(self, state: F.CaseState, threads: dict[str, list[dict]], package=None, focus: str | None = None):
+        self.state, self.threads, self.package, self.focus = state, threads, package, focus
 
     def events(self, supplier_id: str) -> list[dict]:
         if supplier_id not in self.threads:
@@ -79,6 +79,9 @@ class Toolset:
         missing = [r for r in tool.required if r not in args]
         if missing:
             raise ValueError(f"missing argument(s) {missing}")
+        focus = self.ctx.focus
+        if focus and "supplier_id" in tool.params and args.get("supplier_id") not in (None, "", focus):
+            raise ValueError(f"each supplier is negotiated on its own: these tools serve {focus} only")
         clean = {k: v for k, v in args.items() if k in tool.params}
         return _compact(tool.handler(self.ctx, **clean))
 
@@ -166,7 +169,7 @@ def supplier_documents(ctx: ToolContext, supplier_id: str, limit: int = 25):
     own = [
         {"id": ref, **{k: v for k, v in fact.items() if k != "body"}}
         for ref, fact in case_facts.items()
-        if isinstance(fact, dict) and (fact.get("supplier") in (supplier_id, None) or ref.startswith(("doc:", "news:")))
+        if isinstance(fact, dict) and fact.get("supplier") in (supplier_id, None)
     ]
     return {
         "as_of": AS_OF,

@@ -14,11 +14,9 @@ Every step has a deterministic fallback, so the move always leaves in time. `Mov
 """
 
 import logging
-import math
 import time
 from dataclasses import dataclass, field
 
-from ...cost import must_haves_ok
 from ..buyer.contracts import BehaviourRead, Tactic
 from . import agents as A
 from . import emails, guard
@@ -70,7 +68,11 @@ class Brain:
             move = self._decide(state, sid, threads, received_at)
         except Exception as e:  # never lose a move to a bug: the rules always have an answer
             log.exception("%s/%s: v2 decision failed - rule fallback", state.case.get("case_id"), sid)
-            move = self._fallback(state, sid, threads, F.thread_facts(state, sid, threads[sid]), f"error: {e!r}")
+            try:
+                move = self._fallback(state, sid, threads, F.thread_facts(state, sid, threads[sid]), f"error: {e!r}")
+            except Exception:
+                log.exception("%s/%s: rule fallback failed too - last resort", state.case.get("case_id"), sid)
+                move = self._last_resort(state, sid, threads)
         move.detail.setdefault("seconds", round(time.monotonic() - t0, 2))
         return move
 
@@ -96,26 +98,28 @@ class Brain:
         if f.accepted_ours and guard.accept_ours_ok(state, f)[0]:
             return Move("accept", sid, "the supplier accepted our offer", term_sheet_id=f.standing.id,
                         detail={"path": "fast", "c": f.standing.c})  # fmt: skip
-        if f.accepted_alternative is not None:
-            confirm = self._confirm(state, f, events)
-            if confirm is not None:
-                return confirm
-        if f.moves_left <= 0:
+        if f.moves_left <= 0:  # the arena still takes an accept at the round limit, never another message
             if ok:
                 return Move("accept", sid, "no messages left: its standing sheet is signable",
                             term_sheet_id=f.standing.id, detail={"path": "fast", "c": f.standing.c})  # fmt: skip
             return Move("stop", sid, f"no messages left and its sheet is not signable ({why})", detail={"path": "fast"})
+        if f.accepted_alternative is not None:
+            confirm = self._confirm(state, f, events)
+            if confirm is not None:
+                return confirm
         return None
 
     def _confirm(self, state: F.CaseState, f: F.ThreadFacts, events: list[dict]) -> Move | None:
         """Its alternative sheet is our package: send exactly that package back, so it becomes its standing sheet."""
         alt = f.accepted_alternative
         sheet = guard.normalise(state, alt.terms, f)
-        if sheet is None or not must_haves_ok(state.case, sheet, f.std):
+        if sheet is None:
+            return None
+        # the same hard limits as any counter, and the package must pass them unchanged - else it is not a confirmation
+        checked = guard.check_counter(state, f, [sheet])
+        if not checked.sheets or not F.same_terms(state.case, checked.sheets[0], sheet, f.std, 1e-9):
             return None
         c = F.cost(state, f.supplier_id, sheet, f.std)
-        if math.isinf(c) or c > state.c_open or (state.c_alt is not None and c > state.c_alt):
-            return None
         lang = emails.language(str((F.latest_supplier(events) or {}).get("body") or ""))
         body = emails.template_body(lang, "confirm", 1, [], False)
         message = {"subject": emails.subject_for(events, state.case.get("title", "")), "body": body,
@@ -127,7 +131,7 @@ class Brain:
 
     def _agents(self, state: F.CaseState, sid: str, threads: dict, f: F.ThreadFacts, received_at: float) -> Move:
         cfg, events = self.config, threads[sid]
-        ctx = ToolContext(state, threads, self.package)
+        ctx = ToolContext(state, threads, self.package, focus=sid)
         notes = state.notes.setdefault(sid, {})
         latest = F.latest_supplier(events) or {}
         new_docs = bool(latest.get("attachments")) and f.our_rounds > 0
@@ -204,6 +208,7 @@ class Brain:
             [str(t) for t in d.get("arguments") or []],
             checked.sheets,
             others,
+            A.supplier_name(state, sid),
         )
         detail["guard"] += email_notes
         if body is None:
@@ -276,9 +281,30 @@ class Brain:
             checked = guard.check_counter(state, f, list(plan.term_sheets))
             if checked.sheets:
                 return checked.sheets
+        bridge = guard.bridge_sheet(state, f)  # its own terms, priced between our offer and its offer
+        if bridge is not None:
+            return [bridge]
         if f.our_offer:  # our last offer still stands: repeat what the rules allow of it
             return guard.check_counter(state, f, [s.terms for s in f.our_offer]).sheets
         return []
+
+    def _last_resort(self, state: F.CaseState, sid: str, threads: dict) -> Move:
+        """When even the rules failed: accept a signable sheet, else repeat our offer if the rules allow, else stop."""
+        try:
+            f = F.thread_facts(state, sid, threads[sid])
+            if guard.closable(state, f):
+                return Move("accept", sid, "last resort: a signable sheet", term_sheet_id=f.standing.id,
+                            detail={"path": "last_resort"})  # fmt: skip
+            sheets = guard.check_counter(state, f, [s.terms for s in f.our_offer]).sheets if f.our_offer else []
+            if sheets:
+                events = threads[sid]
+                body, refs = self._template(state, f, events, len(sheets))
+                message = {"subject": emails.subject_for(events, state.case.get("title", "")), "body": body,
+                           "term_sheets": [{"terms": s} for s in sheets], "refs": refs}  # fmt: skip
+                return Move("send", sid, "last resort: our offer stands", message, detail={"path": "last_resort"})
+        except Exception:
+            log.exception("%s/%s: last resort failed", state.case.get("case_id"), sid)
+        return Move("stop", sid, "last resort: nothing safe to send", detail={"path": "last_resort"})
 
     def _template(self, state: F.CaseState, f: F.ThreadFacts, events: list[dict], n_sheets: int):
         latest = F.latest_supplier(events) or {}

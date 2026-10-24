@@ -26,7 +26,8 @@ from .facts import CaseState, ThreadFacts
 
 LEAKS = re.compile(
     r"\b(urgent\w*|asap|as soon as possible|immediately|right away|deadline|our budget|budget|"
-    r"no (?:other )?alternative|no other (?:supplier|source)|only (?:possible )?supplier|depend(?:ent|s)? on you|"
+    r"no (?:other )?alternative|no other (?:supplier|source)|only (?:possible )?supplier|depend\w* (?:up)?on you\w*|"
+    r"rely on you\w*|reliant on you\w*|(?:only|sole|single) source\w*|"
     r"last chance|or else|competitor\w*|other suppliers?|another supplier|rival\w*|other bidders?|"
     r"dringend\w*|eilig\w*|so schnell wie m[öo]glich|sofort\w*|umgehend\w*|frist\w*|keine (?:andere )?alternative|"
     r"einzige[nr]? (?:lieferant\w*|anbieter\w*)|angewiesen|letzte chance|wettbewerber\w*|"
@@ -146,6 +147,30 @@ def check_counter(state: CaseState, f: ThreadFacts, proposed: list[dict]) -> Che
     return Checked(kept, notes)
 
 
+def bridge_sheet(state: CaseState, f: ThreadFacts) -> dict | None:
+    """The last-resort counter when no proposal survives the rules: the supplier's own standing terms at a price
+    between our current offer and its offer - C halfway between them, never above its price, never below our
+    offer, signable. None when no such sheet exists (then its sheet costs us no more than our offer, or nothing
+    signable can be offered)."""
+    if f.standing is None or f.standing.price is None or math.isinf(f.standing.c):
+        return None
+    sid, cap, high = f.supplier_id, f.standing.price, f.standing.c
+    low = f.our_last_c if not math.isinf(f.our_last_c) else high * 0.97
+    ceiling = min(x for x in (high * (1 - 1e-6), state.c_open, state.c_alt or math.inf) if x is not None)
+    target = min((low + high) / 2, ceiling)
+    if target < low * (1 - state.config.same_cost_rel):
+        return None
+    base = normalise(state, {**f.standing.terms, "unit_price": cap}, f)
+    if base is None:
+        return None
+    price = price_for_cost(state, sid, base, f.std, target, 0.01, cap)
+    if price is None:
+        return None
+    sheet = {**base, "unit_price": price}
+    checked = check_counter(state, f, [sheet])
+    return checked.sheets[0] if checked.sheets else None
+
+
 def accept_ok(state: CaseState, f: ThreadFacts) -> tuple[bool, str]:
     """An accept is sent only for a signable standing sheet, never for the opening quote before our first message
     (it is the score's zero line) unless the supplier agreed to our terms."""
@@ -208,11 +233,13 @@ def clean_email(
     tokens: list[str],
     sheets: list[dict],
     other_names: list[str],
+    own_name: str = "",
 ) -> tuple[str | None, list[str], list[str]]:
     """(body or None, refs, notes). None: too little left after cleaning - the caller uses the template."""
     notes: list[str] = []
     usable = {a.token: a for a in F.arguments(state, f.supplier_id)}
-    chosen = [t for t in dict.fromkeys(tokens or ()) if t in usable][: state.config.max_claims]
+    tokens = [re.sub(r"[^A-Za-z0-9]", "", str(t)).upper() for t in tokens or ()]  # "[[a1]]" -> "A1"
+    chosen = [t for t in dict.fromkeys(tokens) if t in usable][: state.config.max_claims]
     if len(chosen) < len(set(tokens or ())):
         notes.append("unknown or already cited arguments dropped")
     sentences = {t: usable[t].sentence for t in chosen}
@@ -230,7 +257,7 @@ def clean_email(
     supplier_text = "\n".join(str(m.get("body") or "") for m in events if m.get("from") != "buyer")
     claim_texts = list(sentences.values())
     allowed = _allowed_numbers(sheets, claim_texts, supplier_text)
-    lowered_names = [n.lower() for n in other_names if n and len(n) > 3]
+    lowered_names = name_marks(other_names, own_name)
     lines = []
     for line in text.split("\n"):
         kept = []
@@ -247,7 +274,7 @@ def clean_email(
             if leak := LEAKS.search(s):
                 notes.append(f"removed (leak {leak.group(0)!r}): {s[:60]}")
                 continue
-            if any(name in s.lower() for name in lowered_names):
+            if any(re.search(rf"\b{re.escape(mark)}\b", s.lower()) for mark in lowered_names):
                 notes.append(f"removed (names another supplier): {s[:60]}")
                 continue
             extra = _numbers(s) - allowed
@@ -269,6 +296,28 @@ def clean_email(
         return None, [], notes + ["too little left after the checks"]
     refs = [r for t in chosen for r in usable[t].refs]
     return cleaned[:7900], list(dict.fromkeys(refs)), notes
+
+
+LEGAL_AND_GENERIC = {
+    "gmbh", "co", "kg", "ag", "se", "ohg", "ek", "e.k", "mbh", "ltd", "inc", "sa", "spa", "srl", "bv", "nv", "plc",
+    "und", "and", "the", "der", "die", "das", "group", "gruppe", "werk", "werke", "industries", "industrie",
+}  # fmt: skip
+
+
+def name_marks(names: list[str], own: str = "") -> list[str]:
+    """Each other supplier's full name and its distinctive words ("Gießerei Brandlhuber GmbH & Co. KG" ->
+    "brandlhuber", "gießerei"), so a sentence naming it by a short form is caught too - except words the
+    addressee's own name shares (two foundries both say "Gießerei")."""
+    mine = set(re.findall(r"[\wÄÖÜäöüß]+", (own or "").lower()))
+    marks = set()
+    for name in names or ():
+        if not name or len(name) < 4:
+            continue
+        marks.add(name.lower())
+        for word in re.findall(r"[\wÄÖÜäöüß]+", name.lower()):
+            if len(word) >= 5 and word not in LEGAL_AND_GENERIC and word not in mine:
+                marks.add(word)
+    return sorted(marks)
 
 
 def _shorten(text: str, max_words: int) -> str:

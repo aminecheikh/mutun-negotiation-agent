@@ -67,6 +67,7 @@ class CaseState:
     burned: set = field(default_factory=set)  # data IDs already cited in this case: each counts once
     notes: dict = field(default_factory=dict)  # supplier_id -> {"counterpart": {...}, "market": {...}}
     refused: set = field(default_factory=set)  # term_sheet_ids the arena refused to let us accept: never again
+    tokens: dict = field(default_factory=dict)  # argument refs -> its token ("A1"): stable for the whole case
     lock: threading.RLock = field(default_factory=threading.RLock)
 
     @property
@@ -144,7 +145,9 @@ def thread_facts(state: CaseState, supplier_id: str, events: list[dict]) -> Thre
     last = latest_supplier(events) or {}
     status = str(last.get("status") or "open")
     std = standard_terms(events)
-    raw = [s for s in (last.get("term_sheets") or []) if isinstance(s, dict)]
+    # its standing offer is its latest term sheet: an e-mail without one (a question, a note) leaves it standing
+    priced = next((m for m in reversed(events) if m.get("from") != "buyer" and m.get("term_sheets")), {})
+    raw = [s for s in (priced.get("term_sheets") or []) if isinstance(s, dict)]
     sheets = [
         Sheet(s.get("term_sheet_id"), _sheet_terms(s), cost(state, supplier_id, _sheet_terms(s), std)) for s in raw
     ]
@@ -232,7 +235,7 @@ def cited_ids(threads: dict[str, list[dict]]) -> set[str]:
 
 @dataclass(frozen=True)
 class Argument:
-    token: str  # "A1", "A2", ... - how agents and the e-mail refer to it
+    token: str  # "A1", "A2", ... - how agents and the e-mail refer to it (fixed per case, see token_for)
     sentence: str  # the verified sentence, copied verbatim into the e-mail
     refs: tuple[str, ...]
     kind: str
@@ -252,7 +255,17 @@ def arguments(state: CaseState, supplier_id: str) -> list[Argument]:
         and c.kind not in {"rival_quote", "rival_offer"}
     ]
     usable.sort(key=lambda c: -c.strength)
-    return [Argument(f"A{i}", c.sentence, tuple(c.refs), c.kind, round(c.strength, 2)) for i, c in enumerate(usable, 1)]
+    return [Argument(token_for(state, c.refs), c.sentence, tuple(c.refs), c.kind, round(c.strength, 2)) for c in usable]
+
+
+def token_for(state: CaseState, refs) -> str:
+    """The argument's token, fixed for the whole case: tokens never shift when other arguments get cited, so the
+    token an agent chose always names the same sentence."""
+    key = tuple(sorted(refs))
+    with state.lock:
+        if key not in state.tokens:
+            state.tokens[key] = f"A{len(state.tokens) + 1}"
+        return state.tokens[key]
 
 
 def with_estimates(state: CaseState, threads: dict[str, list[dict]]) -> None:
@@ -286,4 +299,5 @@ def refreshed(state: CaseState, threads: dict[str, list[dict]]) -> CaseState:
         except Exception:
             continue
     state.ctx = replace(ctx, fits={**getattr(ctx, "fits", {}), **fits})
+    state.c_open = opening_cost(state, threads)  # the same supplier estimates as every other C this round
     return state

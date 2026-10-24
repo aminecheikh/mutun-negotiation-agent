@@ -32,14 +32,17 @@ def _num(x) -> str:
 
 
 def allowed(case: dict, field: str, standing: dict, std: dict) -> dict[str, object]:
-    """label -> value for one negotiable field: the case's options, the supplier's standard and current value."""
+    """label -> value for one negotiable field: the case's options and the supplier's standard value - exactly
+    what the arena accepts. (Its current value is one of these; "as supplier" names it.) Without options listed,
+    the arena takes any value, so the supplier's current value is offered as a label too."""
     out: dict[str, object] = {}
-    for value in case.get("term_options", {}).get(field) or ():
+    options = case.get("term_options", {}).get(field) or ()
+    for value in options:
         out[label(value)] = value
-    for value in (std.get(field), standing.get(field)):
-        if field in std or field in standing:
-            if value is not None or field == "index_clause":
-                out.setdefault(label(value), value)
+    if field in std:
+        out.setdefault(label(std[field]), std[field])
+    if not options and field in standing:
+        out.setdefault(label(standing[field]), standing[field])
     return out
 
 
