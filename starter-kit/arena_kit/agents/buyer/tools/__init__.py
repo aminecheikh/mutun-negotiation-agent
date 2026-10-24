@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from ....docs import standard_terms
 from ..contracts import BehaviourRead, CaseContext, ConcessionFit, OfferPlan, Tactic
-from . import bands, claims, concession, credibility, dossier, levers, offers, signals
+from . import bands, claims, concession, credibility, dossier, estimates, levers, offers, signals
 from .safe_package import thread_safe
 
 
@@ -50,7 +50,9 @@ class DataTools:
             if not prices or band is None:
                 continue
             estimate = bands.cost_estimate(ctx.case, self.package, sid, signals.read(events, self.package))
-            out[sid] = credibility.assess(sid, band.floor, prices[-1], estimate)
+            stated = ctx.case.get("buyer", {}).get("sustainable_margin_pct")  # the case's healthy margin, if any
+            margin = stated / 100 if stated else estimates.TYPICAL_MARGIN
+            out[sid] = credibility.assess(sid, band.floor, prices[-1], estimate, margin)
         return out
 
     def _claims(self, case: dict, threads: dict[str, list[dict]]) -> dict:
