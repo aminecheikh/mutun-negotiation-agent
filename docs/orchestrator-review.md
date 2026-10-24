@@ -47,6 +47,14 @@ No shared contract signature changed.
 The opening/resume attachment budget is shared across the entire history, so resuming a long
 thread cannot accumulate one full timeout for each older document.
 
+Amine's follow-up retry question is resolved: the live buyer uses a 12-second provider timeout
+and zero Anthropic SDK retries, leaving room before the roles' 15-second fallback. The compatible
+HTTP provider receives the same timeout and already has no retries. Offline profile precomputation
+and the kit example retain their original defaults. This matters because the SDK otherwise retries
+timeouts twice ([official Python SDK documentation](https://platform.claude.com/docs/en/cli-sdks-libraries/sdks/python)).
+Outer role deadlines still bound waiting: a network timeout is not a guaranteed wall-clock cancellation
+of an already-running request, and the live profiler has its own shorter six-second fallback.
+
 ## Operations completed
 
 - `scripts/rehearse.py`: self-contained two-wave simulator run with real data, ordinary API pacing,
@@ -64,13 +72,16 @@ thread cannot accumulate one full timeout for each older document.
 The original suite passed before edits. Regression tests first reproduced the concurrency, deadline,
 guard and conflict-handling failures. Targeted tests cover uncertain POSTs against the real-clock HTTP
 simulator, timeouts, restart, transient polling errors, stale profiles, release ingestion, and the sweep CLI.
-The final integrated suite passed with **431 tests and 2 skipped**. The skips are the optional hosted
+The final integrated suite passed with **434 tests and 2 skipped**. The skips are the optional hosted
 arena check (no test credentials) and the harvested-session writer check (no local harvested sessions).
 Ruff lint and formatting checks pass. The recovery regressions also pass independently.
 
 The real-data local rehearsal completed **6/6 cases across two waves, zero timeouts, zero wave-cap
-closures, and 53 verified claims with zero duplicates or contradictions**. Evidence is in
-`starter-kit/runs/codex-review-rehearsal/report.json` and `sessions.json` (local, gitignored).
+closures, and 51 verified claims with zero duplicates or contradictions** on clean commit `13d712f`.
+Evidence is in `starter-kit/runs/codex-final-rehearsal/report.json` and `sessions.json` (local, gitignored).
+An earlier rehearsal also passed with 53 verified claims; concurrent claim reservations can change the count.
+The subsequent provider-configuration change is covered by stubbed client tests; this deterministic
+rehearsal does not call an LLM.
 These are scripted-supplier reliability results, not evidence of an improved hosted negotiation score.
 
 ## Remaining live validation

@@ -6,7 +6,7 @@ How it works: the module docstrings (start with `runner.py`, then `policy.py`). 
 
 ## Now
 
-- Claude's PR #1 merged by the team; main merge `d05f691` integrated locally without conflicts.
+- Claude's PR #1 and the team's follow-up through `1dde1b2` integrated locally without conflicts.
   Independent review fixes, release evidence ingestion, sweep and local rehearsal tooling completed;
   see `docs/orchestrator-review.md`. Next: configure the final machine's credentials, run live-model
   sandbox checks and a controlled hosted sweep. No hosted quota used by this review.
@@ -24,6 +24,10 @@ How it works: the module docstrings (start with `runner.py`, then `policy.py`). 
 | J6 | Preflight, self-contained rehearsal, README run section, freeze, runner | local rehearsal and documentation done; final-machine preflight/freeze pending | Sun 10:30-13:15 |
 
 ## Asks to others
+
+- @amine - SDK retry question resolved: the live buyer sets `max_retries=0` and a 12-second
+  provider timeout; role deadlines and rule fallbacks remain in place. Offline precomputation keeps
+  the kit's original defaults. Both provider paths have client-configuration regression tests.
 
 - @amine @saed - review follow-up changes under Jeddou's user-authorised integration: Sunday facts
   now reach dossiers; new case/release evidence bypasses old profile fallbacks; timed-out queued model

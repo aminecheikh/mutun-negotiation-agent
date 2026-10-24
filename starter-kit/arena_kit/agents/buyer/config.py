@@ -14,6 +14,7 @@ class OrchestratorConfig:
     move_budget_s: float = 48.0  # our receipt of a reply -> our message leaves; 12 s cushion for network/server
     strategist_timeout_s: float = 17.0  # outer bound around the strategist (roles use 15 s internally)
     writer_timeout_s: float = 16.0  # outer bound around the writer (roles use 15 s internally)
+    llm_request_timeout_s: float = 12.0  # no SDK retries; leave 3 s before the roles' 15 s fallback
     min_llm_window_s: float = 6.0  # less time than this left: skip the LLM stage, use its rule twin
     document_timeout_s: float = 8.0  # attachment enrichment must leave time to answer inside the 60 s clock
     keepalive_after_s: float = 40.0  # a parked thread gets a question this long after the supplier's reply

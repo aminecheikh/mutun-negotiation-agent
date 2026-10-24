@@ -35,3 +35,7 @@ decision - why`. Changing `contracts.py` always needs an entry here.
   Feed Sunday release evidence into dossiers and prevent old cached profiles overriding it; cancel
   expired queued role calls. Small changes in kit data/resume and tools/roles are covered by regression
   tests; implementation and limits are recorded in `docs/orchestrator-review.md`.
+- 2026-10-24 - Jeddou / Codex integration - Answer Amine's SDK retry request by configuring the live
+  buyer with zero SDK retries and a 12-second provider timeout (below the 15-second role fallback).
+  Preserve generic/offline defaults; retain outer role deadlines and cancellation of queued work.
+  Research proposals that alter negotiation policy remain experiments pending controlled hosted evidence.
