@@ -6,6 +6,7 @@ Price of the main sheet, each round:
            plausible cost floor (an impossible ask wastes rounds and trust)
   time     anchor -> ceiling on a Boulware curve: (t / T) ** (1 / beta), beta < 1 holds early and concedes late
            (time-dependent tactics, Faratin, Sierra & Jennings 1998)
+  pace     until our target, at least a linear step per round (reaching it halfway): visible movement
   reply    at least what the supplier conceded in its last move (absolute tit-for-tat, same paper): "it gives
            nothing without a move from you" - and matched moves meet at the midpoint, i.e. the target
   limits   never above the ceiling or its standing price, never below our previous offer
@@ -14,10 +15,11 @@ term each and are re-priced to cost us the same C: worth more to the supplier (i
 so its answer shows what it values.
 """
 
-from ....cost import complete_offer, must_haves_ok, supplier_value, total_cost
+from ....cost import complete_offer, cost_breakdown, must_haves_ok, supplier_value, total_cost
 from ....docs import standard_terms
 from ....play import standing
 from ..contracts import BehaviourRead, CaseContext, OfferPlan, Tactic
+from .bands import HOLD_AT_STANDARD
 from .concession import supplier_prices
 
 BOULWARE_BETA = 0.5  # Faratin et al. 1998: beta < 1 is Boulware
@@ -25,6 +27,9 @@ TIT_FOR_TAT = 1.0  # absolute tit-for-tat: match the supplier's last concession
 MAX_ANCHOR_BELOW_FLOOR_PCT = 5  # as bands.MAX_AIM_BELOW_FLOOR_PCT: the stated error of a plant-specific should-cost
 MAX_SHEETS = 3  # the arena's limit per message
 EQUAL_C_TOLERANCE = 0.002  # variants cost us within 0.2 % of the main sheet
+# until our target we move at least at a linear pace that reaches it halfway through the rounds: the supplier
+# 'gives nothing without a move from you', and a matched linear concession from its side meets us there
+TARGET_BY_SHARE_OF_ROUNDS = 0.5
 
 
 def plan(
@@ -39,8 +44,12 @@ def plan(
     price = next_price(case, band, events)
     main = _main_sheet(case, band, theirs, price, std)
     c_main = total_cost(case, main, std, supplier)
-    fields = [f for f in tactic.levers if f != "unit_price"] or list(case["negotiable"])
-    variants = equal_cost_variants(case, main, c_main, std, supplier, fields, theirs["unit_price"])
+    levers = tuple(f for f in tactic.levers if f != "unit_price" and f in case["negotiable"])
+    fields = list(dict.fromkeys([*levers, *case["negotiable"]]))
+    credible = band.floor * (1 - MAX_ANCHOR_BELOW_FLOOR_PCT / 100) if band.floor else 0.0
+    credible = max(credible, anchor_price(band, events) * (1 - MAX_ANCHOR_BELOW_FLOOR_PCT / 100))
+    price_range = (credible, theirs["unit_price"])
+    variants = equal_cost_variants(case, main, c_main, std, supplier, fields, price_range, levers)
     sheets = (main, *variants)[:MAX_SHEETS]
     costs = tuple(total_cost(case, s, std, supplier) for s in sheets)
     why = f"price {main['unit_price']} (theirs {theirs['unit_price']}, target {band.target}, ceiling {band.ceiling})"
@@ -52,16 +61,25 @@ def our_prices(events: list[dict]) -> list[float]:
     return [m["term_sheets"][0]["terms"]["unit_price"] for m in mine]
 
 
+def anchor_price(band, events: list[dict]) -> float:
+    """Our most aggressive justified price: 2 x target - its opening, not under the plausible cost floor."""
+    theirs = supplier_prices(events)
+    lowest = band.floor * (1 - MAX_ANCHOR_BELOW_FLOOR_PCT / 100) if band.floor else 0.01
+    return min(max(2 * band.target - theirs[0], lowest), band.target, band.ceiling, theirs[-1])
+
+
 def next_price(case: dict, band, events: list[dict]) -> float:
     theirs, ours = supplier_prices(events), our_prices(events)
     limit = min(band.ceiling, theirs[-1])
-    lowest = band.floor * (1 - MAX_ANCHOR_BELOW_FLOOR_PCT / 100) if band.floor else 0.01
-    anchor = min(max(2 * band.target - theirs[0], lowest), band.target, limit)
+    anchor = anchor_price(band, events)
     horizon = max(case.get("round_limit", 10) - 1, 1)
     share = min(len(ours) / horizon, 1.0) ** (1 / BOULWARE_BETA)
     price = anchor + (band.ceiling - anchor) * share
     if ours:
         price = max(price, ours[-1])
+        if ours[-1] < band.target:  # a visible step every round until our target, even if it waits for us
+            pace = (band.target - anchor) / max(horizon * TARGET_BY_SHARE_OF_ROUNDS, 1)
+            price = max(price, min(ours[-1] + pace, band.target))
         if len(theirs) >= 2 and theirs[-2] > theirs[-1]:
             price = max(price, ours[-1] + TIT_FOR_TAT * (theirs[-2] - theirs[-1]))
     return round(min(price, limit), 2)
@@ -90,20 +108,27 @@ def reprice(case: dict, sheet: dict, cost: float, std: dict, supplier) -> dict |
     return out if abs(total_cost(case, out, std, supplier) - cost) <= cost * EQUAL_C_TOLERANCE else None
 
 
-def equal_cost_variants(case, main, c_main, std, supplier, fields, their_price) -> list[dict]:
-    """One-term changes of the main sheet, re-priced to cost us the same, that leave the supplier better off
-    (by its estimated cash value; without an estimate: more price for it). Best two, different fields."""
+def equal_cost_variants(case, main, c_main, std, supplier, fields, price_range, levers=()) -> list[dict]:
+    """One-term changes of the main sheet, re-priced to cost us the same. The strategist's levers always get
+    their best such sheet - it chose to trade them; other fields only when the change leaves the supplier
+    better off (its estimated cash value; without an estimate: more price for it). Levers first, then the
+    best others, two at most. Never less coverage of our need than the main sheet (a shorter contract "paid
+    for" by our uncovered-need cost would show our fallback), and prices within `price_range` (credible low ..
+    its price)."""
     worth = (lambda s: supplier_value(case, s, supplier)) if supplier else (lambda s: s["unit_price"])
     base_worth, best = worth(main), {}
+    uncovered = cost_breakdown(case, main, std)["uncovered_need"]
     for field in fields:
         for option in case.get("term_options", {}).get(field, []):
-            if option == main.get(field):
+            if option == main.get(field) or (field not in levers and field in HOLD_AT_STANDARD):
                 continue
             sheet = reprice(case, complete_offer(case, {**main, field: option}), c_main, std, supplier)
-            if sheet is None or sheet["unit_price"] > their_price or not must_haves_ok(case, sheet, std):
+            if sheet is None or not price_range[0] <= sheet["unit_price"] <= price_range[1]:
+                continue
+            if cost_breakdown(case, sheet, std)["uncovered_need"] > uncovered or not must_haves_ok(case, sheet, std):
                 continue
             value = worth(sheet)
-            if value > base_worth and value > best.get(field, (None, -float("inf")))[1]:
+            if (field in levers or value > base_worth) and value > best.get(field, (None, -float("inf")))[1]:
                 best[field] = (sheet, value)
-    ranked = sorted(best.values(), key=lambda sv: sv[1], reverse=True)
-    return [sheet for sheet, _ in ranked[: MAX_SHEETS - 1]]
+    ranked = sorted(best.items(), key=lambda kv: (kv[0] not in levers, -kv[1][1]))
+    return [sheet for _, (sheet, _) in ranked[: MAX_SHEETS - 1]]
