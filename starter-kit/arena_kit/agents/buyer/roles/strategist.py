@@ -128,13 +128,14 @@ def alternatives(ctx: CaseContext, sid: str, events: list[dict]) -> list[tuple[d
 
 
 def lever_floor(ctx: CaseContext, sid: str, events: list[dict], levers) -> tuple[str, ...]:
-    """The levers code always keeps, whatever the model chose: price; the terms a cheaper alternative of the
-    supplier changes (our sheets then rebuild its own proposal, which it can agree to); the largest trade (the
-    term worth most to us - in practice often more than the whole price gap). Then the model's choice."""
+    """The levers code always keeps, whatever the model chose: price; at closing time only, the terms a cheaper
+    alternative of the supplier changes (our sheets then rebuild its own proposal, which it can agree to - before
+    that, rebuilding it closed P08/P11 in round 2-3 at its own proposal instead of negotiating it down); the
+    largest trade (the term worth most to us - often more than the whole price gap). Then the model's choice."""
     _, theirs = standing(events)
     c = standing_c(ctx, events, sid)
     alt_fields = []
-    for terms, c_alt in alternatives(ctx, sid, events)[:1]:
+    for terms, c_alt in alternatives(ctx, sid, events)[:1] if closing(ctx, events) else ():
         if c_alt < c * (1 - CHEAPER_ALTERNATIVE):
             alt_fields = [f for f, v in terms.items() if f != "unit_price" and v != theirs.get(f)]
     # It held its price after our last sheets: the same packages again get "you sent the exact same packages",
@@ -146,6 +147,15 @@ def lever_floor(ctx: CaseContext, sid: str, events: list[dict], levers) -> tuple
     rest = [*levers] if not used else [*fresh, *levers]
     ordered = negotiable_levers(ctx, ("unit_price", *alt_fields, *top, *rest))
     return ordered[:MAX_LEVERS]
+
+
+def closing(ctx: CaseContext, events: list[dict]) -> bool:
+    """The point where we would close anyway: its final offer, it repeated its offer, or our last messages."""
+    return (
+        latest(events).get("status") == "final_offer"
+        or stalled(events)
+        or moves_left(ctx.case, events) <= LAST_MESSAGES + 1
+    )
 
 
 def stalled(events: list[dict]) -> bool:

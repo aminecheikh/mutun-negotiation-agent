@@ -89,3 +89,28 @@ def test_build_when_any_case_keeps_its_invariants(case, package):
         assert d.supplier_id == sid and d.persona in PERSONAS
         assert len(d.evidence) <= dossier.MAX_EVIDENCE
         assert all(isinstance(lever, str) for lever in d.levers)
+
+
+def test_build_when_sunday_release_has_news_about_the_supplier_puts_it_first(tmp_path):
+    # brief: final cases cite the Sunday release - its facts live outside world.sqlite (DataPackage.release)
+    import json as _json
+    from types import SimpleNamespace
+
+    from arena_kit.agents.buyer.tools import dossier
+
+    fact = {"date": "2026-10-24", "headline": "Supplier files for insolvency", "supplier": "sup:99998",
+            "topic": "insolvency"}  # fmt: skip
+    (tmp_path / "facts.json").write_text(_json.dumps({"news:20261024-99": fact}), encoding="utf-8")
+    package = SimpleNamespace(
+        release=tmp_path, query=lambda *a, **k: [], document=lambda fid: "# News\nheader\nThe bank is watching."
+    )
+    d = dossier.build({"case_id": "case:T", "facts": {}, "parts": [], "suppliers": ["sup:99998"]}, package, "sup:99998")
+    assert d.evidence and d.evidence[0].startswith("release fact news:20261024-99")
+    assert "insolvency" in d.evidence[0] and "bank is watching" in d.evidence[0]
+
+
+def test_build_when_no_release_has_no_release_lines(package):
+    from arena_kit.agents.buyer.tools import dossier
+
+    d = dossier.build(case_for("sup:70210", "part:320070"), package, "sup:70210")
+    assert not any(line.startswith("release fact") for line in d.evidence)

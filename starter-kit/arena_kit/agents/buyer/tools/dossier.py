@@ -12,6 +12,8 @@ thresholds come from company.md / SCORECARD.md or are stated first principles.
 
 import json
 from collections import defaultdict
+from functools import lru_cache
+from pathlib import Path
 
 from ..contracts import Dossier
 from . import estimates
@@ -58,12 +60,16 @@ FACT_KEYS = ("supplier", "supplier_id")
 
 
 def build(case: dict, package, supplier_id: str) -> Dossier:
-    facts = _fact_lines(case, supplier_id)
-    row = _one(package, "SELECT * FROM suppliers WHERE id = ?", supplier_id) if package else None
-    if row is None:  # unknown to the data: only what the case itself says
-        second = _second_source(case, package, supplier_id) if package else False
-        return Dossier(supplier_id, supplier_id, None, "unknown", (), None, second, tuple(facts[:MAX_EVIDENCE]))
     scores: dict[str, int] = defaultdict(int)
+    # newest first: what the case says, then the Sunday release, then the package's own history
+    facts = [*_fact_lines(case, supplier_id), *_release_lines(package, supplier_id, scores)]
+    row = _one(package, "SELECT * FROM suppliers WHERE id = ?", supplier_id) if package else None
+    if row is None:  # unknown to the data: only what the case and the release say
+        second = _second_source(case, package, supplier_id) if package else False
+        persona = _persona(scores)
+        return Dossier(
+            supplier_id, supplier_id, None, persona, _levers(scores, persona), None, second, tuple(facts[:MAX_EVIDENCE])
+        )
     signal_lines, other_notes = _signals(package, supplier_id, row, scores)
     second = _second_source(case, package, supplier_id)
     _structure_signals(case, package, supplier_id, second, scores)
@@ -97,6 +103,39 @@ def _fact_lines(case: dict, supplier_id: str) -> list[str]:
         body = {k: v for k, v in fact.items() if k not in FACT_KEYS}
         lines.append(f"case fact {fid}: {json.dumps(body, ensure_ascii=False, default=str)[:160]}")
     return lines
+
+
+def _release_facts(package) -> dict:
+    """The Sunday release's facts (`DataPackage.release`, outside world.sqlite), or {} before it is downloaded."""
+    root = getattr(package, "release", None) if package is not None else None
+    return _read_release(str(root)) if root else {}
+
+
+@lru_cache(maxsize=4)
+def _read_release(root: str) -> dict:
+    try:
+        return json.loads((Path(root) / "facts.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _release_lines(package, supplier_id: str, scores: dict[str, int]) -> list[str]:
+    """Sunday news and letters about this supplier, newest first, with their text: the final cites them and they
+    are the newest evidence (brief: 'some cite the Sunday release'). They score the personas like the package's
+    own news and letters, and the profiler re-profiles when it sees them (roles/profiler.py)."""
+    rows = [(fid, f) for fid, f in _release_facts(package).items() if any(f.get(k) == supplier_id for k in FACT_KEYS)]
+    rows.sort(key=lambda item: str(item[1].get("date", "")), reverse=True)
+    lines = []
+    for fid, fact in rows[:MAX_DOCS]:
+        text = _body(package, fid) if fid.startswith(("doc:", "news:")) else ""
+        if hit := TOPIC_SIGNALS.get(fact.get("topic")):
+            scores[hit[0]] += hit[1]
+        for persona, phrases in PHRASE_SIGNALS.items():
+            if any(ph in text.lower() for ph in phrases):
+                scores[persona] += 1
+        body = {k: v for k, v in fact.items() if k not in FACT_KEYS and v is not None}
+        lines.append(f"release fact {fid}: {json.dumps(body, ensure_ascii=False, default=str)[:200]} {_excerpt(text)}")
+    return [line.strip() for line in lines]
 
 
 def _persona(scores: dict[str, int]) -> str:

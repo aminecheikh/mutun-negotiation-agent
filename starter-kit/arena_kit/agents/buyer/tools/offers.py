@@ -25,10 +25,11 @@ supplier (its estimated cost of money), so its answer shows what it values.
 
 from ....cost import complete_offer, cost_breakdown, must_haves_ok, supplier_value, total_cost
 from ....docs import standard_terms
-from ....play import standing
+from ....play import moves_left, standing
 from ..contracts import BehaviourRead, CaseContext, OfferPlan, Tactic
 from .bands import HOLD_AT_STANDARD, PRICE_STEPS
 from .concession import supplier_prices
+from .credibility import NO_EVIDENCE_GAP_PCT
 
 BOULWARE_BETA = 0.5  # Faratin et al. 1998: beta < 1 is Boulware
 TIT_FOR_TAT = 1.0  # absolute tit-for-tat: match the supplier's last concession
@@ -50,13 +51,18 @@ def plan(
         sheet = complete_offer(case, theirs)
         return OfferPlan(supplier_id, (sheet,), (total_cost(case, sheet, std, supplier),), "no band: echo its terms")
     credible = ctx.credibility.get(supplier_id)
-    alternative = _cheaper_alternative(case, events, std, supplier)
+    # No credibility for this supplier (live, round 1 went out at a raw -20 % anchor without it: P08 4.84 vs its
+    # 6.05): assess it here from its current price, the same rule as tools.credibility without cost evidence.
+    lowest = credible.lowest_price if credible else theirs["unit_price"] * (1 - NO_EVIDENCE_GAP_PCT / 100)
+    # Its own cheaper alternative goes back unchanged only where we would close anyway (final offer, a repeated
+    # offer, our last messages): mid-negotiation it closed P08/P18 in round 2 at its own proposal (0.43/0.34).
+    alternative = _cheaper_alternative(case, events, std, supplier) if _closing(case, events) else None
     if alternative is not None:  # its own cheaper proposal goes back unchanged: it will agree to it (Saed, P18)
         c_alt = total_cost(case, alternative, std, supplier)
         return OfferPlan(
             supplier_id, (alternative,), (c_alt,), "its own alternative sheet is cheaper for us: sent back"
         )
-    price = next_price(case, band, events, credible.lowest_price if credible else 0.0)
+    price = next_price(case, band, events, lowest, _cap(case, band, std, supplier))
     main = _main_sheet(case, band, theirs, price, std, supplier, _our_last_terms(events))
     main = _not_below_c_minimum(case, main, std, supplier, band, min(band.ceiling, theirs["unit_price"]))
     c_main = total_cost(case, main, std, supplier)
@@ -84,9 +90,10 @@ def anchor_price(band, events: list[dict]) -> float:
     return min(max(2 * band.target - theirs[0], lowest), band.target, band.ceiling, theirs[-1])
 
 
-def next_price(case: dict, band, events: list[dict], lowest: float = 0.0) -> float:
+def next_price(case: dict, band, events: list[dict], lowest: float = 0.0, cap: float | None = None) -> float:
+    """`cap`: the most our sheet's own terms allow (C at the band's C ceiling), else the band's price ceiling."""
     theirs, ours = supplier_prices(events), our_prices(events)
-    limit = min(band.ceiling, theirs[-1])
+    limit = min(cap if cap is not None else band.ceiling, theirs[-1])
     anchor = anchor_price(band, events)
     horizon = max(case.get("round_limit", 10) - 1, 1)
     share = min(len(ours) / horizon, 1.0) ** (1 / BOULWARE_BETA)
@@ -132,6 +139,25 @@ def _not_below_c_minimum(case: dict, sheet: dict, std: dict, supplier, band, lim
     if floor <= sheet["unit_price"]:
         return sheet
     return complete_offer(case, {**sheet, "unit_price": round(min(floor, limit), 2)})
+
+
+def _cap(case: dict, band, std: dict, supplier) -> float:
+    """The highest price our target package may carry: where its C reaches the band's C ceiling (our alternative
+    or its opening). band.ceiling is a bare price (e.g. the alternative's quote on other terms): P07 froze at it,
+    5.37 three rounds while the supplier came down, though 5.52 on our terms still cost us 51k less than the
+    alternative - the same sheet twice drew its final offer."""
+    if not band.target_terms or band.target_terms.get("unit_price") is None:
+        return band.ceiling
+    sheet = reprice(case, complete_offer(case, dict(band.target_terms)), band.c_ceiling, std, supplier)
+    return max(band.ceiling, sheet["unit_price"]) if sheet else band.ceiling
+
+
+def _closing(case: dict, events: list[dict]) -> bool:
+    """Where we would close anyway: its final offer, it repeated its price, or our last two messages."""
+    prices = supplier_prices(events)
+    last = events[-1] if events and events[-1].get("from") != "buyer" else {}
+    repeated = bool(our_prices(events)) and len(prices) >= 2 and prices[-1] >= prices[-2]
+    return last.get("status") == "final_offer" or repeated or moves_left(case, events) <= 2
 
 
 def _cheaper_alternative(case: dict, events: list[dict], std: dict, supplier) -> dict | None:
