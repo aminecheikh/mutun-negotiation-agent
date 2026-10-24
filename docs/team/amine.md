@@ -92,6 +92,14 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
   (082049f). Open (A8): a breakdown that lumps "overhead and profit" makes our floor its variable cost, so the
   target (12.66) sits below where it can sell - the final-offer rule now contains the damage.
 
+- 19:40 - hosted practice sweep on main 4c30c05 (10 sessions): mean 50.2 vs baseline 54.4. Up: P08 0.57 (0.38),
+  P10 0.65 (0.59), P11 0.63 (0.58). Down: P01 0.65 (0.91), P03 0.84 (0.91), P18 0.01 (0.19), P07 0.57 (0.66).
+  Replays: (1) the policy only saw the supplier's first sheet - P18's alternative cost C 273,512 vs the 294,209
+  we accepted (~0.30 instead of 0.01), P05 similar: standing = cheapest offered sheet (7fab87a); (2) we closed at
+  our band target after one message (P01/P03/P11), but targets score 0.6-0.84: the target is a prior in the
+  first half of the rounds unless p_room says no room (f28e992). Still open: suppliers go final after 1-2
+  rounds (P10, P18, P04) and walk-prone personas get no counter; our first offers sit 25-28 % under them.
+
 ## Runs
 
 | When | Commit | Cases | Sessions | Mean | Notes |
@@ -99,3 +107,5 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 | Sat 20:15 | ef030f0 | sandbox D02 | 0 (free) | 0.21 | 3 sheets/round worked; lost rival to timeouts; accepted 16.10 final offer |
 | Sat 18:22 | d05f691 | sandbox D02 | 0 (free) | 0.52 | merged main; claims 2/2 verified, no timeouts; same keep-alive 3x to J1 |
 | Sat 18:56 | 0b8b6fd | sandbox D02 | 0 (free) | 0.36 | keep-alive fixed; J1 parked on a stale band, walked after our unmoved counter to its final |
+| Sat 19:12 | 082049f | sandbox D01, D02 | 0 (free) | 0.69 | D01 0.86 (best), D02 0.52, no walk-away |
+| Sat 19:13 | 4c30c05 | practice (10) | 10 | 50.2 | baseline 54.4; alternatives ignored (P18 0.01), closed at target after 1 msg (P01, P03) |
