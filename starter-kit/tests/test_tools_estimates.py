@@ -47,11 +47,11 @@ def test_full_cost_when_only_a_german_base_exists_scales_by_supplier_country(pac
     assert cost.value == pytest.approx(194.18 * 0.75, abs=0.01) and cost.uncertainty_pct == 15
 
 
-def test_full_cost_when_no_should_cost_row_falls_back_to_lowest_recent_price_minus_margin(package):
+def test_full_cost_when_no_should_cost_row_uses_its_own_lowest_recent_price_minus_margin(package):
     cost = estimates.full_cost(package, "part:360020", "sup:70620")
-    assert cost is not None and cost.uncertainty_pct >= 15 and "price" in cost.source
-    lowest = min(r["price"] for r in package.query("SELECT price FROM price_conditions WHERE part_id = 'part:360020'"))
-    assert cost.value < lowest
+    assert cost is not None and cost.uncertainty_pct >= 15 and "its own" in cost.source
+    sql = "SELECT price FROM price_conditions WHERE part_id = 'part:360020' AND supplier_id = 'sup:70620'"
+    assert cost.value < min(r["price"] for r in package.query(sql))
 
 
 def test_cost_of_money_when_supplier_offers_skonto_uses_its_implied_rate(package):
@@ -73,3 +73,13 @@ def test_cost_of_money_when_no_skonto_adds_premia_to_our_rate(package):
 def test_accepts_below_cost_when_history_note_says_so_is_true(package):
     assert estimates.accepts_below_cost(package, "sup:70110") is True
     assert estimates.accepts_below_cost(package, "sup:70210") is False
+
+
+def test_full_cost_when_supplier_is_unknown_says_the_country_was_assumed(package):
+    cost = estimates.full_cost(package, "part:310010", "sup:99999")
+    assert cost is not None and "country unknown" in cost.source
+
+
+def test_cost_of_money_when_supplier_is_unknown_says_it_is_a_default_not_a_finding(package):
+    rate = estimates.cost_of_money(package, "sup:99999")
+    assert rate.value == estimates.OUR_RATE and "unknown supplier" in rate.source

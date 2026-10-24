@@ -75,26 +75,31 @@ def full_cost(package, part_id: str, supplier_id: str) -> Estimate | None:
     if own:
         r = own[0]
         return Estimate(r["unit_cost"], f"should-cost of {supplier_id}'s plant ({r['id']})", OWN_PLANT_UNCERTAINTY)
-    country = _country(package, supplier_id) or "DE"
+    known = _country(package, supplier_id)
+    country = known or "DE"
     if rows:
         r = next((r for r in rows if not r["supplier_id"]), rows[0])
         factor = COUNTRY_FACTOR.get(country, 1.0) / COUNTRY_FACTOR.get(r["cost_base"], 1.0)
-        source = f"{r['id']} ({r['cost_base']} base) x {factor:.2f} for {country}"
+        where = f"for {country}" if known else "(country unknown, assumed DE)"
+        source = f"{r['id']} ({r['cost_base']} base) x {factor:.2f} {where}"
         return Estimate(round(r["unit_cost"] * factor, 2), source, SCALED_UNCERTAINTY)
-    return _cost_from_prices(package, part_id)
+    return _cost_from_prices(package, part_id, supplier_id)
 
 
-def _cost_from_prices(package, part_id: str) -> Estimate | None:
+def _cost_from_prices(package, part_id: str, supplier_id: str) -> Estimate | None:
+    """The lowest recent price minus a typical margin: this supplier's own prices first - another supplier's
+    price says little about this one's cost - else any supplier's."""
     prices = package.query(
-        "SELECT price FROM price_conditions WHERE part_id = ? AND valid_from >= ? "
-        "UNION ALL SELECT unit_price FROM quotes WHERE part_id = ? AND quote_date >= ?",
+        "SELECT supplier_id, price FROM price_conditions WHERE part_id = ? AND valid_from >= ? "
+        "UNION ALL SELECT supplier_id, unit_price FROM quotes WHERE part_id = ? AND quote_date >= ?",
         (part_id, PRICES_SINCE, part_id, PRICES_SINCE),
     )
-    values = [p["price"] for p in prices if p["price"]]
+    own = [p["price"] for p in prices if p["price"] and p["supplier_id"] == supplier_id]
+    values = own or [p["price"] for p in prices if p["price"]]
     if not values:
         return None
-    lowest = min(values)
-    source = f"lowest price since {PRICES_SINCE} ({lowest}) minus {TYPICAL_MARGIN:.0%} margin"
+    lowest, whose = min(values), "its own" if own else "any supplier's"
+    source = f"lowest of {whose} prices since {PRICES_SINCE} ({lowest}) minus {TYPICAL_MARGIN:.0%} margin"
     return Estimate(round(lowest * (1 - TYPICAL_MARGIN), 2), source, PRICE_UNCERTAINTY)
 
 
@@ -109,6 +114,8 @@ def cost_of_money(package, supplier_id: str) -> Estimate:
         source = f"its skonto {pct:g}% within {days} days, net {net}: implied {implied:.0%} a year"
         return Estimate(round(min(implied, MAX_RATE), 4), source)
     intel = package.query("SELECT * FROM supplier_intel WHERE supplier_id = ?", (supplier_id,))
+    if not rows and not intel:
+        return Estimate(OUR_RATE, f"unknown supplier: our {OUR_RATE:.0%} as a default, not a finding")
     premia = _rate_premia(intel[0]) if intel else []
     rate = OUR_RATE + sum(p for p, _ in premia)
     reasons = "; ".join(r for _, r in premia) or "no sign of cash pressure"

@@ -5,7 +5,7 @@ fair    today's price moved by the part's cost drivers (estimates.fair_price)
 target  the cheapest package in C - relationship charge included - that the supplier can still accept
         (what it is worth to it in cash >= its floor), searched over every allowed option of the case
 ceiling the most we accept: the opening, or less if our alternative is cheaper
-Without a data package or a cost estimate (bundles): target falls back to fair or a share of the opening.
+Without a cost estimate (no data, bundles): the lowest anchor the case justifies (_anchor_without_cost).
 """
 
 import itertools
@@ -18,7 +18,9 @@ from ....play import standing
 from ..contracts import PriceBand
 from . import estimates
 
-PLACEHOLDER_TARGET_SHARE = 0.92
+# only when the case gives no anchor at all: a first ask a little under the opening, as negotiators open
+# below the other side's number; the live concession fit replaces it as soon as the supplier moves
+UNINFORMED_TARGET_SHARE = 0.92
 BELOW_COST_TOLERANCE = 0.05  # how far under full cost a supplier with a below-cost history may go
 # the target may sit this far under the floor estimate, never more: the stated error of a plant-specific
 # should-cost model (company.md, ~5 %); wider errors mean a weak estimate, not a supplier that goes lower
@@ -55,15 +57,17 @@ def _same_scale(cost: float, price: float) -> bool:
 
 
 def price_bands(case: dict, threads: dict[str, list[dict]], package) -> dict[str, PriceBand]:
+    quotes = {sid: standing(ev)[1] for sid, ev in threads.items()}
     out = {}
     for sid, events in threads.items():
-        _, terms = standing(events)
+        terms = quotes[sid]
         if terms.get("unit_price") is not None:  # no bid: no band
-            out[sid] = supplier_band(case, package, sid, terms, standard_terms(events))
+            rivals = [t["unit_price"] for s, t in quotes.items() if s != sid and t.get("unit_price") is not None]
+            out[sid] = supplier_band(case, package, sid, terms, standard_terms(events), rivals)
     return out
 
 
-def supplier_band(case: dict, package, sid: str, terms: dict, std: dict) -> PriceBand:
+def supplier_band(case: dict, package, sid: str, terms: dict, std: dict, rivals=()) -> PriceBand:
     supplier = supplier_estimate(case, package, sid, terms, std)
     opening = complete_offer(case, terms)
     current = case["buyer"].get("current_unit_price") or terms["unit_price"]
@@ -72,10 +76,9 @@ def supplier_band(case: dict, package, sid: str, terms: dict, std: dict) -> Pric
     floor, lowest_plausible, why = _floor(case, package, sid, supplier)
     best = _best_package(case, opening, std, supplier, lowest_plausible, ceiling) if floor else None
     if best is None:
-        share = round(terms["unit_price"] * PLACEHOLDER_TARGET_SHARE, 2)
-        price = fair.value if fair and fair.value < ceiling else share
-        best = complete_offer(case, {**opening, "unit_price": min(price, ceiling)})
-        why.append(f"target without a cost estimate: {'fair price' if fair else 'share of opening'}")
+        price, reason = _anchor_without_cost(case, terms["unit_price"], fair, rivals, ceiling)
+        best = complete_offer(case, {**opening, "unit_price": price})
+        why.append(f"target without a cost estimate: {reason}")
     fair_why = f"fair: {fair.source}" if fair else "fair: no cost drivers"
     return PriceBand(
         supplier_id=sid,
@@ -88,6 +91,24 @@ def supplier_band(case: dict, package, sid: str, terms: dict, std: dict) -> Pric
         derivation=(*why, fair_why, f"ceiling: {ceiling}"),
         target_terms=best,
     )
+
+
+def _anchor_without_cost(case: dict, opening: float, fair, rivals, ceiling: float) -> tuple[float, str]:
+    """Without a cost estimate: the lowest price the case itself justifies - the cost drivers' fair price,
+    today's price (no increase without a reason), the cheapest other bidder, our fallback - else a share of
+    the opening, said plainly, for the concession fit to correct."""
+    b = case["buyer"]
+    anchors = [
+        (fair.value if fair else None, "fair price from the part's cost drivers"),
+        (b.get("current_unit_price"), "today's price: no increase without a reason"),
+        (min(rivals) if rivals else None, "the cheapest other bidder's quote"),
+        (b.get("fallback_unit_price"), "our fallback price"),
+    ]
+    usable = [(price, why) for price, why in anchors if price and price < ceiling]
+    if usable:
+        return min(usable)
+    share = round(min(opening, ceiling) * UNINFORMED_TARGET_SHARE, 2)
+    return share, f"no anchor in the data: {1 - UNINFORMED_TARGET_SHARE:.0%} under the opening until it moves"
 
 
 def _floor(case: dict, package, sid: str, supplier: dict | None) -> tuple[float | None, float | None, list[str]]:

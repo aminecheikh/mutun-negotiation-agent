@@ -65,9 +65,9 @@ def test_price_bands_when_leverage_case_without_should_cost_targets_below_openin
     assert band.floor is not None and band.target < 6.05 and band.c_target < band.c_ceiling
 
 
-def test_price_bands_when_no_data_package_falls_back_to_share_of_opening():
+def test_price_bands_when_no_data_package_aims_at_todays_price():
     band = bands.price_bands(CASES["case:P01"], thread("sup:70110", P01_OPENING), None)["sup:70110"]
-    assert band.floor is None and band.target == round(138.55 * bands.PLACEHOLDER_TARGET_SHARE, 2)
+    assert band.floor is None and band.target == CASES["case:P01"]["buyer"]["current_unit_price"]
 
 
 def test_price_bands_when_cost_estimate_is_above_opening_stays_within_its_uncertainty(package):
@@ -75,3 +75,30 @@ def test_price_bands_when_cost_estimate_is_above_opening_stays_within_its_uncert
     opening = {"unit_price": 370.96, "payment_days": 30, "index_clause": None}
     band = bands.price_bands(CASES["case:P02"], thread("sup:70510", opening), package)["sup:70510"]
     assert 374.95 * (1 - 0.05) <= band.target <= 370.96
+
+
+def unknown(case: dict, current, suppliers=("sup:99999",)) -> dict:
+    out = json.loads(json.dumps(case))
+    out["parts"], out["suppliers"] = ["part:999999"], list(suppliers)
+    out["buyer"]["current_unit_price"] = current
+    return out
+
+
+def test_price_bands_when_nothing_is_known_but_todays_price_aims_at_no_increase(package):
+    case = unknown(CASES["case:P01"], 126.53)
+    band = bands.price_bands(case, thread("sup:99999", P01_OPENING), package)["sup:99999"]
+    assert band.target == 126.53 and any("today's price" in d for d in band.derivation)
+
+
+def test_price_bands_when_rfq_without_data_aims_at_the_cheapest_rival_quote(package):
+    case = unknown(CASES["case:P01"], None, ("sup:99998", "sup:99999"))
+    threads = {**thread("sup:99998", {**P01_OPENING, "unit_price": 131.0}), **thread("sup:99999", P01_OPENING)}
+    band = bands.price_bands(case, threads, package)["sup:99999"]
+    assert band.target == 131.0 and any("other bidder" in d for d in band.derivation)
+
+
+def test_price_bands_when_there_is_no_anchor_at_all_says_so(package):
+    case = unknown(CASES["case:P01"], None)
+    case["buyer"]["fallback_unit_price"] = 150.0  # above the opening: no anchor
+    band = bands.price_bands(case, thread("sup:99999", P01_OPENING), package)["sup:99999"]
+    assert band.target < 138.55 and any("no anchor" in d for d in band.derivation)
