@@ -30,6 +30,8 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 - @saed (20:20): **writer** - never state data that is not in `claim_sentences`: D02's writer mentioned "comparable machined shafts" and "the full cost picture" with no data and the supplier asked for it (costs trust). Claims are now real: max 3 per message, and each ID only once per case (track what was cited).
 - @saed (20:20): **strategist/analyst/profiler inputs are live now**: `Dossier.persona/levers/evidence` (A5), `ctx.claims` (A3), `ConcessionFit.reservation_estimate` + `p_room` (A4). Lead time and ppm are kept at the supplier's standard by the tools: asking for them is an explicit trade for the strategist ("what price at 35 days?").
 
+- @saed (20:30): `roles/playbook.md` on feat/roles-saeb has a table of practice suppliers (Brandlhuber 70110, Nordmark 70510 ...). Keep the general rules ("over-ask vs fair price -> ...", "already below should-cost -> don't squeeze") but don't feed practice names or numbers to the prompts: the final's suppliers are new (CLAUDE.md "Generalise, don't overfit"). The tools now compute those numbers for any supplier (`band.fair`, `band.floor`, `dossier`).
+
 ## Log
 
 - 16:30 - scaffold in place (placeholders in every tools module, tests in `tests/test_buyer.py`)
