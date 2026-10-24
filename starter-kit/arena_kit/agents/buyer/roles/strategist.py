@@ -15,6 +15,7 @@ which follows the same policy without an LLM.
 import json
 import logging
 import math
+import re
 from dataclasses import asdict
 
 from ....cost import total_cost
@@ -31,7 +32,8 @@ TERMS = {
     "unit_price", "payment_days", "volume_per_year", "contract_months", "effective_date", "lead_time_days",
     "incoterm", "index_clause", "tooling_eur", "ppm_commitment", "chargeback_eur_per_complaint",
 }  # fmt: skip
-COST_BREAKDOWN = "Could you send us a cost breakdown for this part?"
+# Never ask for its cost breakdown or calculation (Saeb): every e-mail is a logical counter-offer instead.
+NO_ASK = re.compile(r"break ?down|calculation|cost structure|kalkulation|kostenaufschl|aufschl.sselung", re.I)
 ATTACHMENT_CHARS = 1500
 MOVING_P_ROOM = 0.35  # p_room at or above this: another round likely gets >= 1 % more
 MOVING_STEP_PCT = 0.3  # without p_room: a last step this big (and not shrinking) means it still moves
@@ -230,8 +232,7 @@ class RuleStrategist:
             levers = negotiable_levers(ctx, (*levers, "payment_days", "contract_months", "effective_date"))
         levers = lever_floor(ctx, sid, events, levers)
         claims = tuple(i for i, _ in usable_claims(ctx, sid, cited_refs(events))[: 3 if first else 2])
-        question = COST_BREAKDOWN if first else None
-        return Tactic(sid, "send", levers, claims, question, "rule: trade price against what it values")
+        return Tactic(sid, "send", levers, claims, None, "rule: trade price against what it values")
 
 
 # ---- the LLM strategist (S2 + S3) --------------------------------------------------------------
@@ -348,7 +349,12 @@ def safe(ctx: CaseContext, threads: dict[str, list[dict]], raw: dict, rule: Tact
     levers = [lever for lever in _items(raw.get("levers")) if isinstance(lever, str)]
     levers = lever_floor(ctx, sid, events, negotiable_levers(ctx, levers) or rule.levers)
     question = raw.get("question")
-    if not isinstance(question, str) or not question.strip() or any(ch.isdigit() for ch in question):
+    if (
+        not isinstance(question, str)
+        or not question.strip()
+        or any(ch.isdigit() for ch in question)
+        or NO_ASK.search(question)
+    ):
         question = None
     question = question.strip()[:300] if question else None
     rationale = str(raw.get("rationale") or "")[:300]
@@ -367,8 +373,6 @@ def safe(ctx: CaseContext, threads: dict[str, list[dict]], raw: dict, rule: Tact
         return Tactic(sid, "accept", rationale="safe: no messages left - accept or the guard walks")
     if action == "send" and accept_ready(ctx, sid, events) and latest(events).get("status") == "agreed":
         return Tactic(sid, "accept", rationale="safe: supplier agreed to our terms")
-    if action == "send" and our_messages(events) == 0 and not question:
-        question = COST_BREAKDOWN
     if action != "send":
         return Tactic(sid, action, rationale=rationale)
     return Tactic(sid, "send", levers or ("unit_price",), claims, question, rationale)

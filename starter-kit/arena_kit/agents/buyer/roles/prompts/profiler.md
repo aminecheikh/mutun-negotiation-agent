@@ -28,7 +28,7 @@ TRAITS (add every one the evidence supports; one evidence ID each):
   "not our reality" - index arguments on that input do not move it before that date.
 - uninformed_owner: works from an old spreadsheet, has not followed its material and energy prices - data
   arguments can disarm it.
-- open_book: offered to walk us through its calculation - ask for its cost breakdown.
+- open_book: offered to walk us through its calculation - it is open to a reasoned, data-backed offer.
 - pricing_committee: price changes above about 2 % need a committee or head office - move in small steps.
 - price_freeze: head office froze price changes - win on terms other than price.
 - volume_discounts_only: only multi-year volume agreements change its prices.

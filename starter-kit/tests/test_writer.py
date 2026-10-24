@@ -30,7 +30,7 @@ def ctx(persona: str = "partner") -> CaseContext:
     return CaseContext(case, {SID: dossier}, {}, {SID: (CLAIM,)}, None)
 
 
-TACTIC = Tactic(SID, "send", ("payment_days", "effective_date"), (0,), "Could you send us a cost breakdown?")
+TACTIC = Tactic(SID, "send", ("payment_days", "effective_date"), (0,), "Which lead time can you confirm?")
 PLAN = OfferPlan(SID, ({"unit_price": 129.9, "payment_days": 60},), (100.0,), "")
 
 
@@ -86,7 +86,7 @@ def test_writer_when_model_invents_a_price_falls_back_to_template_with_refs():
 
 def test_writer_when_model_follows_rules_keeps_its_email():
     text = body(
-        "thank you for your offer and the long cooperation.", CLAIM.sentence, "Could you send us a cost breakdown?"
+        "thank you for your offer and the long cooperation.", CLAIM.sentence, "Which lead time can you confirm?"
     )
 
     def complete(system, user):
@@ -306,3 +306,9 @@ def test_call_json_when_reply_not_json_uses_salvage_else_none():
         "subject": "Hi",
         "body": "Body text",
     }
+
+
+def test_check_when_email_asks_for_cost_breakdown_rejects_it():
+    problems = run_check(body("thank you for your offer.", CLAIM.sentence, "Could you send us a cost breakdown?"))
+    assert any("asks for its costs" in p for p in problems)
+    assert not any("asks for its costs" in p for p in run_check(body("thank you.", CLAIM.sentence, "Kind regards")))

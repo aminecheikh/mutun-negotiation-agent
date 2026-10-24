@@ -197,6 +197,15 @@ def _numbers(text: str) -> set[str]:
     return {n.replace(",", "") for n in NUMBER_RE.findall(text)}
 
 
+# Asking for its cost breakdown or calculation (Saeb: never - every e-mail is a logical counter-offer instead).
+ASKS_COSTS = re.compile(
+    r"(?:send|share|provide|show|walk us through|explain)[^.?!\n]{0,40}"
+    r"(?:cost ?breakdown|break ?down|calculation|cost structure)|"
+    r"(?:kostenaufschl.sselung|kalkulation)[^.?!\n]{0,40}\?",
+    re.I,
+)
+
+
 def check(body: str, sentences: list[str], allowed_refs: set[str], supplier_text: str, title: str) -> list[str]:
     """Problems that must stop an e-mail; empty means it may be sent. Claim sentences are the only source
     of our figures and IDs; a figure the supplier wrote itself may be repeated."""
@@ -224,6 +233,8 @@ def check(body: str, sentences: list[str], allowed_refs: set[str], supplier_text
         problems.append(f"reveals our notes about the supplier: {sorted(private)[:3]}")
     if len(body.split()) > MAX_WORDS:
         problems.append(f"too long: {len(body.split())} words")
+    if ask := ASKS_COSTS.search(body):
+        problems.append(f"asks for its costs: {ask.group(0)!r}")
     return problems
 
 

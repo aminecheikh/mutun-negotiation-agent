@@ -61,8 +61,8 @@ WHAT CODE DOES WITH YOUR TACTIC:
 
 DOSSIER: evidence lines starting with "profile:" are traits our profiler found in the data, each with its
 source ID - e.g. "profile: hedged until 2027-03", "profile: pricing_committee", "profile: open_book". Read
-them first. ATTACHMENTS: a cost breakdown, 8D report or delivery schedule the supplier sends is in
-supplier_emails[].attachments - a cost breakdown shows where its real cost is; ask for one if it has none.
+them first. ATTACHMENTS: documents the supplier attaches (its cost figures, an 8D report, a delivery
+schedule) are in supplier_emails[].attachments - its own cost figures show where its real cost is.
 
 PERSONAS (the dossier and its e-mails tell you which applies; a supplier can show several - combine the
 levers; if they conflict, follow the category goal):
@@ -70,8 +70,7 @@ levers; if they conflict, follow the category goal):
   restructuring, credit downgrade): money now is worth far more to it than to us. Lead with a shorter
   payment term; do not squeeze its margin.
 - price_fighter (idle capacity, "second shift on hold", "looks for new customers", offers to open its
-  calculation): hungry for volume. Trade full volume and a long contract; ask for its cost breakdown; it has
-  room on price.
+  calculation): hungry for volume. Trade full volume and a long contract; it has room on price.
 - partner (long relationship, remembers favours, "expects partnership", sold below full cost before): warm,
   fair, lasting. Often already near its cost: aim for a fair deal, not a squeeze; offer security (contract
   length, volume) and recognition. Never threaten.
@@ -84,7 +83,7 @@ levers; if they conflict, follow the category goal):
 - hedged inputs ("bought forward until <date>", "covered until <date>"): index arguments on that input do not
   move it before that date - but its costs did not rise before it either. Use the effective_date lever.
 - uninformed owner ("works from his own spreadsheet", has not followed its prices): data disarms it - lead
-  with the strongest index claims and ask for its cost breakdown.
+  with the strongest index claims.
 - unknown: start with a balanced set of levers and learn from which package it answers.
 
 WHAT MOVED SUPPLIERS IN PRACTICE (generalised from the practice replays - new suppliers behave the same):
@@ -133,9 +132,9 @@ DECIDING (tactic) - check in this order:
       input; never re-cite data that was contradicted. Fewer, stronger arguments beat many.
    c. final_offer: one more counter only if p_more is still meaningful, walk_risk low and its C well above
       target - and it must give the supplier something new (a term it wants); else accept per 1b.
-   d. question: one short, concrete question it can answer (cost breakdown - always in round 1 unless it
-      sent one or refused; earliest lead time; which volume or payment term would change its price; cheaper
-      engineering variants). No figures. null if nothing helps.
+   d. question: usually null - the counter-offer is the message. Ask only one short question that helps
+      the next counter-offer and that it can answer with a term (which volume, contract length or payment
+      term would change its price; its earliest lead time). No figures in it.
 4. Never reveal urgency, a budget, a deadline or that we lack an alternative - not in the question either.
 
 rationale: one sentence, for our log.

@@ -5,7 +5,7 @@ keyword read of the same e-mails: start from it, correct it where the words say 
 - p_more: the chance another round improves its offer.
   High (0.6-0.9) while it still moves in real steps (concession.last_step_pct of about 0.5 % or more), p_room
   is high, it offers alternatives ("alternatively, with ..."), invites trades, asks what we can commit to,
-  or says "we can look at" / "wir können prüfen". A cost breakdown it sent is room to argue, not an end.
+  or says "we can look at" / "wir können prüfen". Cost figures it sent are room to argue, not an end.
   Low (0.05-0.3) when its steps shrink to almost nothing (shrinking and last_step_pct under about 0.3 %),
   p_room is low, its price sits at concession.reservation_estimate, it repeats "our calculation" / "this
   is our last price" / "letztes Angebot", or the status is final_offer or agreed.

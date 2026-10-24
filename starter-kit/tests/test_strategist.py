@@ -63,10 +63,10 @@ def test_safe_when_model_names_another_supplier_still_answers_the_one_thread():
     assert tactic.supplier_id == SID  # one-on-one: the model never picks a supplier
 
 
-def test_safe_when_accept_before_our_first_message_sends_with_cost_breakdown_question():
+def test_safe_when_accept_before_our_first_message_sends_a_counter_offer_without_asking_costs():
     ctx, threads = setup([supplier()])
     tactic = safe(ctx, threads, {"action": "accept"}, rule_tactic(ctx, threads))
-    assert tactic.action == "send" and "cost breakdown" in tactic.question
+    assert tactic.action == "send" and tactic.question is None
 
 
 def test_safe_when_walk_without_alternative_sends_instead():
@@ -170,11 +170,12 @@ def test_llm_strategist_when_model_is_late_returns_rule_in_time():
 # ---- RuleStrategist / RuleAnalyst: the policy without a model ------------------------------------
 
 
-def test_rule_strategist_when_first_round_probes_two_terms_with_claims_and_question():
+def test_rule_strategist_when_first_round_probes_two_terms_with_claims_no_question():
     ctx, threads = setup([supplier()])
     tactic = rule_tactic(ctx, threads)
     assert tactic.action == "send" and len(tactic.levers) >= 2 and "unit_price" in tactic.levers
-    assert tactic.claims == (2, 0) and tactic.question  # strongest first, the claim that hurts us never
+    assert tactic.claims == (2, 0)  # strongest first, the claim that hurts us never
+    assert tactic.question is None  # no cost-breakdown request: the counter-offer is the message
 
 
 def test_rule_strategist_when_final_offer_and_no_alternative_accepts():

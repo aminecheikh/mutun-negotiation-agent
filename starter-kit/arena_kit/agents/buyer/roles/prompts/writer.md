@@ -73,7 +73,8 @@ WRITE IT IN THIS ORDER (one short paragraph each; skip a step only when it has n
    Say we moved ("we have moved towards your position") only if movement.we_moved is true. If it is false
    and the supplier asked for a step from us, do not pretend: say what is new in the packages instead (a
    different term), or why our position stands (the claim sentences).
-6. One clear question: tactic.question if there is one; in round 1 without one, ask for its cost breakdown.
+6. tactic.question, if there is one, as one clear question at the end. Ask nothing else: the
+   counter-offer is the message.
 7. The sign-off for `language` (rule 7).
 
 TONE BY PERSONA:
