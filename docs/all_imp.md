@@ -133,9 +133,75 @@ floor of 4.76, so the credible anchor was 4.84; the prose talked the negotiator 
 
 **Tests:** 829 pass, including a new check that the negotiator's input carries the engine's counter.
 
-## Practice runs used for the improvement work (limit: 5)
+## 5. Runs 2-6: what each change did (Sun 25 Oct, 00:40-01:40)
 
-| # | When | Build | Mean | Notes |
-|---|---|---|---|---|
-| 1 | Sun 00:15 | 3ec8249 / 4973483 | **58.8** | concession discipline, ranked arguments, precomputed inputs. P01 .65->.79, P10 new best .686; P08 .54->.31 from a too-shallow anchor |
-| 2 | Sun 00:50 | 7c01027 | running | anchor = credible price + the engine's counter; tool-turn skip |
+Each entry is a change, its argument, its tests and what the next sweep said. Scores move several points between
+identical runs (the suppliers are LLMs), so a single case's change is read as evidence only when the trail
+explains it.
+
+### Anchor: the credible price, not a blanket percentage (`7c01027`)
+Run 1 showed P08 at 0.31 against a best of 0.62: our first counter was 7 % under its quote where the best
+session anchored 20 % under. The cause was my own "first counters 4-8 % under closed best", a replay average
+that mixed suppliers with firm cost evidence and without. `tools/credibility` already sets that depth per
+supplier. The frame and prompts now anchor at the credible price, and the negotiator's input carries the offer
+engine's own paced counter (credibility-aware and C-aware, so squeeze cases hold above the C minimum).
+**Run 2: P08 0.31 -> 0.56, P04 0.86 and P02 0.39 both new bests, mean 60.4.**
+
+### RFQ latency: nothing blocks a move (`b650dff`, `ba5ec81`, `aa6bd8d`)
+Run 2's P05 scored 0.087: a supplier agreed and our accept left 70 s after its reply, past the 60 s limit, so
+the thread had timed out and the stale ID was refused. Three steps, each proved by the next run:
+1. `accept_best`/`walk` held the case lock across the closing HTTP call, freezing every worker in the case.
+   Fixed; one closing action at a time; the coordinator now accepts an agreement itself every poll.
+2. A new `waited_s` in the trail then showed the move waited 77 s *before* deciding - so the lock was not the
+   main cause. Attachments were downloaded serially between the reply and the decision, through the client's
+   9-calls/s pacing shared by all ten cases.
+3. Run 4 proved a budget between downloads cannot interrupt one in flight: a single attachment GET blocked a
+   worker 76 s. Downloads now run on their own threads.
+**Run 5: max wait 1.4 s (was 76.9 s), no move over 60 s, P18 a new best at 0.509.**
+
+### Hallucination: a figure an agent states is never a fact (`ba5ec81`)
+The guard keeps invented figures out of the e-mail, but inside the team a specialist could report a price from
+memory, the negotiator would read it as fact, and it would persist through the memory log into later rounds.
+Every reported figure code can compute (fair, floor, credible price, target, standing C, the accepted and
+acceptable flags) is replaced by the computed value before the negotiator sees it; one it cannot compute is
+dropped rather than trusted; each substitution is recorded. **Runs 4-5: 3 then 6 corrections, e.g. a reported
+target of 30.28 where the band says 26.29.**
+
+### A cost floor above the supplier's own quote is not evidence (`a70cb96`, `9d7b7a5`)
+P05's supplier quotes 36.00 while our should-cost floor says 36.87. Nobody sells below cost for long, so the
+estimate is wrong, not the price - yet the derived credible price (35.03) held our anchor 2.7 % under the quote,
+it answered "agreed" in round one, and we locked in the worst score of the set. Outside `stabilise` and
+`secure_supply` (where that picture means a genuinely squeezed supplier, and C already charges us for pushing)
+the floor now falls back to the tool's own no-evidence rule. Two steps were needed: relaxing the guard stopped a
+low price being raised, but the offer engine prices from the same band, so its anchor had to be corrected where
+v2 owns it. On the real openings this moves exactly one supplier (35.03 -> 33.12) and leaves the rest untouched.
+**Not yet verified on the hosted arena.**
+
+### Scores across the sweeps
+
+| Case | run 1 | run 2 | run 3 | run 4 | run 5 | verif | best |
+|---|---|---|---|---|---|---|---|
+| P01 | 0.790 | 0.804 | 0.780 | 0.829 | 0.841 | 0.823 | 0.906 |
+| P02 | 0.311 | **0.387** | 0.301 | 0.299 | 0.367 | 0.283 | 0.387 |
+| P03 | 0.855 | 0.856 | 0.857 | **0.919** | 0.868 | 0.855 | 0.919 |
+| P04 | 0.766 | **0.860** | 0.637 | 0.860 | 0.860 | 0.766 | 0.860 |
+| P05 | 0.352 | 0.087 | 0.414 | 0.087 | 0.087 | 0.087 | 0.455 |
+| P07 | 0.689 | 0.704 | 0.678 | 0.710 | 0.697 | 0.704 | 0.710 |
+| P08 | 0.313 | 0.561 | 0.542 | 0.419 | 0.582 | 0.538 | 0.621 |
+| P10 | **0.686** | 0.655 | 0.663 | 0.663 | - | 0.655 | 0.686 |
+| P11 | 0.710 | 0.710 | **0.785** | 0.626 | 0.765 | 0.710 | 0.785 |
+| P18 | 0.406 | 0.419 | - | 0.443 | **0.509** | 0.406 | 0.509 |
+| mean | 58.8 | 60.4 | 62.8* | 58.6 | 55.8* | 58.3 | |
+
+\* run 3 and run 5 are means over 9 cases (one case was refused: another sweep on the team key held a session
+slot). Six of the ten team bests now come from v2: P02, P03, P04, P10, P11, P18.
+
+### What is left, in order of expected value
+
+1. **P05 (0.09 against a 0.46 best)** - the anchor correction above should address it; unverified live.
+2. **The root cause belongs in shared code**: `tools/credibility` should not derive a near-quote floor from a
+   should-cost that exceeds the quote. Fixing it there helps v1 too (an ask for Amine).
+3. **Run-to-run spread is 0.1-0.2 per case.** Judging a change on one sweep is unsafe; the trail, not the mean,
+   is what justified every change here.
+
+## Practice runs used for the improvement work (limit: 5)
