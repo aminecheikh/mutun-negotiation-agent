@@ -24,7 +24,6 @@ class OrchestratorConfig:
     last_call_s: float = 30.0  # accept the best acceptable sheet whatever is in flight, else walk
     # ---- accept / counter / walk -----------------------------------------------------------------------
     accept_eps: float = 0.005  # a standing sheet within 0.5 % of the band's target C is the target
-    rival_beat_margin: float = 0.01  # another thread "could beat" a sheet if it can plausibly go 1 % lower in C
     rival_in_flight_margin: float = 0.03  # an unanswered rival within 3 % may still come back cheaper
     final_counter_gap: float = 0.02  # one counter after a final offer only if it is > 2 % above our target C
     final_counter_min_moves: int = 2

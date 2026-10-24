@@ -87,7 +87,8 @@ def test_verdict_when_supplier_agreed_to_our_sheet_accepts():
     assert v.kind == "accept" and "agreed" in v.reason
 
 
-def test_verdict_when_rival_can_still_go_lower_parks_the_final_offer():
+def test_verdict_when_another_supplier_may_still_go_lower_accepts_this_final_offer():
+    # no inter-supplier comparison (organisers): a thread is never held back by what another supplier might do
     s = session_for(
         S02,
         {
@@ -97,7 +98,7 @@ def test_verdict_when_rival_can_still_go_lower_parks_the_final_offer():
     )
     v = policy.verdict(s, s.threads[A])
     assert policy.acceptable(s, s.threads[A])
-    assert v.kind == "park" and "plausibly" in v.reason
+    assert v.kind == "accept"
 
 
 def test_verdict_when_rival_is_at_its_final_offer_too_accepts_the_cheaper():
@@ -215,14 +216,13 @@ def test_clean_body_removes_unknown_and_duplicate_ids_extra_arguments_and_leaks(
     assert any("more than 3 arguments" in p for p in problems) and any("leak" in p for p in problems)
 
 
-def test_clean_body_allows_a_rival_offer_once_per_supplier_but_never_its_own():
+def test_clean_body_never_cites_another_suppliers_offer_nor_its_own():
+    # no inter-supplier comparison (organisers): another bidder's offer never reaches a supplier
     s = session_for(S02, {A: [rfq_quote(A, 0, 17.2)], B: [rfq_quote(B, 0, 17.5)]})
     rival, own = f"offer:{A[4:]}-0", f"offer:{B[4:]}-0"
     body = f"We hold an offer at EUR 17.20 ({rival}). Your offer stands at EUR 17.50 ({own}). Please review it."
     text, cited, _ = guard.clean_body(s, s.threads[B], body)
-    assert rival in text and own not in text and cited == {rival}
-    s.threads[B].cited_offers.add(rival)
-    assert rival not in guard.clean_body(s, s.threads[B], body)[0]
+    assert rival not in text and own not in text and cited == set()
 
 
 def test_build_message_when_the_body_is_cut_too_short_returns_none():
@@ -303,7 +303,7 @@ def test_verdict_when_a_cheaper_acceptable_sheet_exists_never_accepts_the_dearer
     b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 16.4, "agreed")]
     s = session_for(S02, {A: a_events, B: b_events})
     v = policy.verdict(s, s.threads[B])
-    assert v.kind == "park" and A in v.reason  # B agreed, but A's acceptable sheet is cheaper
+    assert v.kind == "park"  # B agreed, but A's acceptable sheet is cheaper: we sign A, not B
     assert policy.verdict(s, s.threads[A]).kind == "accept"
 
 
@@ -359,13 +359,10 @@ def test_reserve_when_two_threads_cite_the_same_id_only_the_first_keeps_it():
     assert known <= s.burned
 
 
-def test_rival_with_no_room_left_in_its_price_path_does_not_hold_up_an_accept():
-    from arena_kit.agents.buyer.contracts import ConcessionFit
-
+def test_verdict_when_another_supplier_has_room_does_not_hold_up_an_accept():
     b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0)]
     s = session_for(S02, {A: A_COUNTERED, B: b_events})
-    assert policy.verdict(s, s.threads[A]).kind == "park"  # without evidence, B's band target says it may go lower
-    s.threads[B].fit = ConcessionFit(B, (17.5, 17.0), 16.9, 2.9, True, p_room=0.05)
+    s.threads[B].fit = ConcessionFit(B, (17.5, 17.0), 14.0, 2.9, False, p_room=0.9)  # B could go far lower
     assert policy.verdict(s, s.threads[A]).kind == "accept"
 
 

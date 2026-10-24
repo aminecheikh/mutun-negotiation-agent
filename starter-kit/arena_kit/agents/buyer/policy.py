@@ -103,38 +103,6 @@ def best_acceptable(session: CaseSession, idle_only: bool = True) -> ThreadState
     return min(pool, key=lambda t: (t.c, t.our_rounds), default=None)
 
 
-def reachable_c(session: CaseSession, th: ThreadState) -> float:
-    """Where this thread can plausibly still go, in C: where it is now if its price path leaves little room
-    (`p_room`), else its standing sheet at the price tools estimate it stops at, else our band target."""
-    if th.status in ("final_offer", "agreed") or not th.standing_terms:
-        return th.c
-    fit, band = th.fit, session.band(th.supplier_id)
-    if fit is not None and fit.p_room is not None and fit.p_room < session.config.low_room_probability:
-        return th.c  # its own price path says it is (almost) done: tools.concession p_room
-    price = fit.reservation_estimate if fit and fit.reservation_estimate else None
-    if price is None and band is not None:
-        return min(th.c, band.c_target)
-    if price is None:
-        return th.c
-    return min(th.c, session.cost(th.supplier_id, {**th.standing_terms, "unit_price": price}))
-
-
-def rival_may_beat(session: CaseSession, th: ThreadState) -> str | None:
-    """Why closing on `th` now could leave money on the table: another live thread that can plausibly come in
-    cheaper and still has room to negotiate, or an unanswered rival that was close. None if nothing can."""
-    cfg = session.config
-    for other in session.alive():
-        if other is th:
-            continue
-        if other.in_flight and other.c < th.c * (1 + cfg.rival_in_flight_margin):
-            return f"{other.supplier_id} is answering and stood within {cfg.rival_in_flight_margin:.0%}"
-        if other.status in ("final_offer", "agreed") or other.moves_left(session.case) < 2:
-            continue
-        if reachable_c(session, other) < th.c * (1 - cfg.rival_beat_margin):
-            return f"{other.supplier_id} can plausibly go below {th.c:,.0f}"
-    return None
-
-
 def stuck(session: CaseSession, th: ThreadState) -> bool:
     """No more progress is likely on this thread."""
     cfg = session.config
@@ -194,7 +162,6 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
     left = th.moves_left(case)
     if th.our_rounds == 0 and th.status != "agreed":
         return Verdict("counter", "first answer: never take the opening quote")
-    rival = rival_may_beat(session, th) if ok else None
     band = session.band(th.supplier_id)
     early = target_is_prior(session, th)
     at_target = ok and band is not None and th.c <= band.c_target * (1 + cfg.accept_eps) and not early
@@ -212,25 +179,25 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
     ]
     cheaper = cheaper_elsewhere(session, th) if ok else None
     if ok and forced:
-        if cheaper is not None:  # never close above another acceptable sheet: beat it, or hold and let it close
-            if can_still_beat(session, th, cheaper):
-                return Verdict("counter", f"{forced[0]}, but {cheaper.supplier_id} is cheaper: push on")
-            return Verdict("park", f"{forced[0]}, but {cheaper.supplier_id} is cheaper", note="hold the sheet")
-        if rival and not session.in_close_window():
-            return Verdict("park", f"{forced[0]}, but {rival}", note="hold the sheet, keep the thread alive")
+        # each supplier is negotiated on its own (organisers: no inter-supplier comparison); only the close never
+        # signs a dearer sheet while a cheaper acceptable one is on the table - this thread negotiates on, or waits
+        if cheaper is not None:
+            if th.status in ("final_offer", "agreed") or left < 1 or session.in_close_window():
+                return Verdict("park", f"{forced[0]}, but a cheaper acceptable sheet is on the table")
+            return Verdict("counter", f"{forced[0]}, but a cheaper acceptable sheet is on the table: negotiate on")
         return Verdict("accept", forced[0])
     if left <= 0:
         return Verdict("dead", "no messages left and the sheet is not acceptable")
     if th.status == "final_offer":
         if counter_allowed(session, th):
             return Verdict(
-                "counter", "final offer clearly above target: one counter", accept_permitted=ok and not rival,
+                "counter", "final offer clearly above target: one counter", accept_permitted=ok,
                 note="this is our one answer to its final offer: add a term it values, do not only ask a lower price",
             )  # fmt: skip
         return Verdict("dead", "final offer we cannot accept and should not push")
     if session.freeze and best_acceptable(session, idle_only=False) is not None:
         return Verdict("park", "freeze before the cap: an acceptable sheet is on the table")
-    return Verdict("counter", "negotiate", accept_permitted=ok and rival is None and cheaper is None and not early)
+    return Verdict("counter", "negotiate", accept_permitted=ok and cheaper is None and not early)
 
 
 def target_is_prior(session: CaseSession, th: ThreadState) -> bool:
@@ -249,16 +216,6 @@ def cheaper_elsewhere(session: CaseSession, th: ThreadState) -> ThreadState | No
     """Another live thread whose standing sheet is acceptable and cheaper than this one."""
     pool = [t for t in session.alive() if t is not th and acceptable(session, t) and t.c < th.c]
     return min(pool, key=lambda t: t.c, default=None)
-
-
-def can_still_beat(session: CaseSession, th: ThreadState, other: ThreadState) -> bool:
-    """This thread can plausibly come in below `other` and still has room to negotiate."""
-    return (
-        th.status not in ("final_offer", "agreed")
-        and th.moves_left(session.case) >= 2
-        and not session.in_close_window()
-        and reachable_c(session, th) < other.c * (1 - session.config.rival_beat_margin)
-    )
 
 
 # ---- the case-level walk ------------------------------------------------------------------------------------
