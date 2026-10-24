@@ -71,7 +71,7 @@ uv run arena me                                 # quota left
    the notification arrives. Then add a row to **Runs** and use skill `replay-analysis` on weak cases.
 5. **Prefer free runs.** Order: unit tests -> local `arena-sim` -> sandbox (D01/D02) -> hosted practice.
    Check the member's quota budget in `docs/team/README.md` and `uv run arena me` before a hosted run.
-6. **Before merging into `feat/negotiation-agent`**: `uv run pytest` and `uv run ruff check .` green,
+6. **Before merging into `main`**: `uv run pytest` and `uv run ruff check .` green,
    one sandbox game with `--agent buyer` finishes, the member's file is up to date.
 
 ## Lessons from replays (keep this list current)
@@ -93,7 +93,7 @@ uv run arena me                                 # quota left
 - Python 3.12, type hints on signatures, frozen dataclasses for shared types, ruff (line length 120).
 - Tests with pytest in `starter-kit/tests/`, named `test_<what>_<when>_<expected>`; tools are pure
   functions over the SQLite package, so test them against real rows.
-- Branches: `feat/tools`, `feat/roles`, `feat/orchestrator` off `feat/negotiation-agent`; merge back at
+- Branches: `feat/tools`, `feat/roles`, `feat/orchestrator` off `main`; merge back at
   each checkpoint (19:00, 22:00, ~02:00, Sun 10:00). Conventional commits with the task ID, e.g.
-  `feat(tools): A1 floor from should-cost`. The final runs from `feat/negotiation-agent`.
+  `feat(tools): A1 floor from should-cost`. The final runs from `main`.
 - No TODO without a task ID from `docs/team/<member>.md`.
