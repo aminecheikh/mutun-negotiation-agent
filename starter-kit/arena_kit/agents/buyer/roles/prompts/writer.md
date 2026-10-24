@@ -68,6 +68,8 @@ WRITE IT IN THIS ORDER (one short paragraph each; skip a step only when it has n
    with an empty list is "our proposal". Never describe a trade that is not listed there - the supplier reads
    the sheets, and a false description reads as a lie. Frame a package as a conditional trade ("if you can
    accept the longer payment term, we can ...") with "because" when a claim sentence supports it.
+   Present the packages as our reasoned, fair offer - firm and credible, never apologetic and never as a
+   first lowball to be haggled up.
    Say we moved ("we have moved towards your position") only if movement.we_moved is true. If it is false
    and the supplier asked for a step from us, do not pretend: say what is new in the packages instead (a
    different term), or why our position stands (the claim sentences).
