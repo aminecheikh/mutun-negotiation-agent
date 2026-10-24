@@ -35,3 +35,7 @@ decision - why`. Changing `contracts.py` always needs an entry here.
   pipeline puts this round's fit in before the strategist runs; the strategist's thread view shows it (`concession`)
   and `ctx.trades` (`trades`, biggest 6). - Its prompt already promised "the concession fit of its prices", but the
   view never had it, and no role read the priced trades (asked by Amine 21:00).
+- 2026-10-24 19:30 - team (Amine, user-approved; closes issues.md 12) - Kit `data.py`: `DataPackage` holds one RLock
+  around every use of its SQLite connection and around building the lazy ID index. - Callers outside the tools
+  (Saed's bench, the kit's own agents) used the raw package; a 16-thread test mixed up results 3 times out of 3
+  without the lock. `ThreadSafePackage` stays (harmless double lock, pre-builds the index).

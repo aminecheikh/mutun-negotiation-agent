@@ -38,3 +38,29 @@ def test_data_tools_when_every_case_prepares_in_parallel_on_one_package_never_fa
     for w in workers:
         w.join()
     assert errors == []
+
+
+def test_data_package_when_raw_package_is_shared_by_threads_answers_like_one_thread():
+    # issues.md 12: callers outside the tools (role bench, kit agents) use the raw package; one SQLite connection
+    # shared by threads mixed up results. A cold package also builds its ID index lazily on first lookup.
+    serial = DataPackage(DATA)
+    refs = serial.ids("sup:")[:20]
+    sql = "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+    expected = ([serial.lookup(r) for r in refs], serial.query(sql))
+    shared, errors, wrong = DataPackage(DATA), [], []
+
+    def work() -> None:
+        try:
+            for _ in range(30):
+                got = ([shared.lookup(r) for r in refs], shared.query(sql))
+                if got != expected:
+                    wrong.append(1)
+        except Exception as e:  # sqlite3 misuse errors are the bug this test catches
+            errors.append(repr(e))
+
+    threads = [threading.Thread(target=work) for _ in range(16)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == [] and wrong == []
