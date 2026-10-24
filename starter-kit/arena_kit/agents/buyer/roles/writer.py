@@ -262,9 +262,12 @@ def template(ctx: CaseContext, tactic: Tactic, plan: OfferPlan, claims: list[str
 
 
 # Claims of our own movement; only allowed when the packages really are above our previous offer.
+_AUX = r"(?: have| has| are| is)?(?: now| also| further| again| already)?"
 MOVED_RE = re.compile(
-    r"\b(?:we|our (?:offer|proposal|position|price))(?: have| has| are| is)?(?: now| also| further| again| already)?"
-    r" (?:moved|improved|raised|increased|stepped|coming|come (?:closer|towards))\b|"
+    rf"\b(?:we|our (?:offer|proposal|position|price)){_AUX}"
+    r" (?:moved|improved|stepped|coming|come (?:closer|towards))\b|"
+    rf"\bour (?:offer|proposal|position|price){_AUX} (?:raised|increased)\b|"
+    rf"\bwe{_AUX} (?:raised|increased) (?:our|the) (?:offer|price|proposal|bid)\b|"  # not "the points we raised"
     r"\bwir sind (?:ihnen )?(?:entgegengekommen|nachgekommen)|"
     r"\bwir haben (?:unser angebot|unseren vorschlag|unseren preis) (?:verbessert|erhöht|angehoben)",
     re.I,

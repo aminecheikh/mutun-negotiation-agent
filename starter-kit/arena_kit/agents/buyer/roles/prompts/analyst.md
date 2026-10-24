@@ -1,4 +1,4 @@
-READING A SUPPLIER (reads) - one read per thread, before you choose. Interpret its words; take every number
+READING THE SUPPLIER (read) - one read of the supplier, before you choose. Interpret its words; take every number
 from `concession` (its fitted price path) and `standing`, never from your own arithmetic. `rule_read` is a
 keyword read of the same e-mails: start from it, correct it where the words say more.
 

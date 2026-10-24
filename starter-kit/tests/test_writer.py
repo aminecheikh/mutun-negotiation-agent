@@ -215,6 +215,8 @@ def test_moved_re_when_supplier_moved_does_not_flag_but_our_move_does():
 
     assert not MOVED_RE.search("We appreciate that you have moved on the price.")
     assert not MOVED_RE.search("We note the step you made.")
+    assert not MOVED_RE.search("Thank you for answering the points we raised.")
+    assert not MOVED_RE.search("The concerns we have raised still stand.")
     for ours in ("We have moved towards your position.", "We raised our offer.", "Our offer has improved."):
         assert MOVED_RE.search(ours), ours
 

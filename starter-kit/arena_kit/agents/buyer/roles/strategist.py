@@ -1,13 +1,14 @@
 """Strategist: this round's decision (owner: Saed). S2 + S3 in one LLM call.
 
 One-on-one: one supplier, take its deal or leave it for our alternative - never a comparison with other
-bidders. `LLMStrategist.choose` sends the supplier's thread (dossier, band, standing C, fit, its own words,
-claim results, unused claims) to the model once and gets back both the behaviour read per thread (S3) and the
-tactic (S2) - one call instead of two saves ~10 s of the 60 s per move. The refined reads are written back
-into the `reads` dict the orchestrator passes in, so `tools.plan_offers` uses them. Every answer goes through
-`safe()`: a closed thread, an unknown claim, an accept of the opening quote (the score's zero line), a walk
-without a cheaper alternative or a question with figures never reaches the supplier. No model, a late model or
-a broken answer gives `RuleStrategist`, which follows the same policy without an LLM.
+bidders. The orchestrator calls `choose(ctx, {supplier_id: events}, reads)` with the one thread being answered.
+`LLMStrategist.choose` sends that thread (dossier, band, standing C, fit, its own words, claim results, unused
+claims) to the model once and gets back both its read of the supplier (S3) and the tactic (S2) - one call
+instead of two saves ~10 s of the 60 s per move. The refined read is written back into the `reads` dict the
+orchestrator passes in, so `tools.plan_offers` uses it. Every answer goes through `safe()`: an unknown claim,
+an accept of the opening quote (the score's zero line), a walk without a cheaper alternative or a question
+with figures never reaches the supplier. No model, a late model or a broken answer gives `RuleStrategist`,
+which follows the same policy without an LLM.
 """
 
 import json
@@ -57,14 +58,19 @@ def our_messages(events: list[dict]) -> int:
     return sum(m.get("from") == "buyer" for m in events)
 
 
-def cited_refs(threads: dict[str, list[dict]]) -> set[str]:
-    """Every data ID we already cited in this case: each counts once, a second citation is `duplicate`."""
+def the_thread(threads: dict[str, list[dict]]) -> tuple[str, list[dict]]:
+    """The one supplier thread the orchestrator hands us (one-on-one: there is no other)."""
+    sid = next(iter(threads))
+    return sid, threads[sid]
+
+
+def cited_refs(events: list[dict]) -> set[str]:
+    """Every data ID we already cited to this supplier: each counts once, a second citation is `duplicate`."""
     refs = set()
-    for events in threads.values():
-        for m in events:
-            if m.get("from") == "buyer":
-                refs.update(m.get("refs") or ())
-                refs.update(ID_RE.findall(str(m.get("body") or "")))
+    for m in events:
+        if m.get("from") == "buyer":
+            refs.update(m.get("refs") or ())
+            refs.update(ID_RE.findall(str(m.get("body") or "")))
     return refs
 
 
@@ -126,13 +132,12 @@ def still_moving(ctx: CaseContext, sid: str) -> bool:
     return fit.last_step_pct >= MOVING_STEP_PCT and not fit.shrinking
 
 
-def walk_allowed(ctx: CaseContext, threads: dict[str, list[dict]]) -> bool:
+def walk_allowed(ctx: CaseContext, events: list[dict]) -> bool:
     """Only when our alternative is cheaper than the supplier's standing offer and it is not moving any more."""
     if ctx.c_alternative is None:
         return False
-    cheaper = all(standing_c(ctx, ev) > ctx.c_alternative for ev in threads.values())
-    stuck = all(latest(ev).get("status") == "final_offer" or moves_left(ctx.case, ev) <= 1 for ev in threads.values())
-    return cheaper and stuck
+    stuck = latest(events).get("status") == "final_offer" or moves_left(ctx.case, events) <= 1
+    return standing_c(ctx, events) > ctx.c_alternative and stuck
 
 
 # ---- the rule-based strategist (fallback) ------------------------------------------------------
@@ -144,13 +149,12 @@ class RuleStrategist:
     alternative."""
 
     def choose(self, ctx: CaseContext, threads: dict[str, list[dict]], reads: dict[str, BehaviourRead]) -> Tactic:
-        sid = next(iter(threads))  # the orchestrator passes the one thread being answered
-        events = threads[sid]
+        sid, events = the_thread(threads)
         if accept_ready(ctx, sid, events):
             status, left = latest(events).get("status"), moves_left(ctx.case, events)
             return Tactic(sid, "accept", rationale=f"rule: accept ({status}, {left} messages left)")
-        if walk_allowed(ctx, threads):
-            return Tactic(sid, "walk_away", rationale="rule: the alternative beats every standing offer")
+        if walk_allowed(ctx, events):
+            return Tactic(sid, "walk_away", rationale="rule: our alternative beats its standing offer")
         first = our_messages(events) == 0
         read = reads.get(sid)
         dossier = ctx.dossiers.get(sid)
@@ -159,7 +163,7 @@ class RuleStrategist:
         if len(levers) < 2:  # probe at least one non-price term
             levers = negotiable_levers(ctx, (*levers, "payment_days", "contract_months", "effective_date"))
         levers = levers[:3]
-        claims = tuple(i for i, _ in usable_claims(ctx, sid, cited_refs(threads))[: 3 if first else 2])
+        claims = tuple(i for i, _ in usable_claims(ctx, sid, cited_refs(events))[: 3 if first else 2])
         question = COST_BREAKDOWN if first else None
         return Tactic(sid, "send", levers, claims, question, "rule: trade price against what it values")
 
@@ -255,13 +259,11 @@ def refined_read(sid: str, raw: dict | None, rule: BehaviourRead, events: list[d
 
 
 def safe(ctx: CaseContext, threads: dict[str, list[dict]], raw: dict, rule: Tactic) -> Tactic:
-    """The model's tactic within our policy. Anything it gets wrong is replaced by the rule's choice."""
-    sid = raw.get("supplier_id")
-    if not isinstance(sid, str) or sid not in threads:
-        return rule
-    events = threads[sid]
+    """The model's tactic for the one supplier, within our policy. Anything it gets wrong is replaced by the rule's
+    choice."""
+    sid, events = the_thread(threads)
     action = raw.get("action")
-    used = cited_refs(threads)
+    used = cited_refs(events)
     usable = {i for i, _ in usable_claims(ctx, sid, used)}
     picked = (i for i in _items(raw.get("claims")) if isinstance(i, int) and not isinstance(i, bool) and i in usable)
     claims = tuple(dict.fromkeys(picked))[:3]
@@ -279,7 +281,7 @@ def safe(ctx: CaseContext, threads: dict[str, list[dict]], raw: dict, rule: Tact
         elif not accept_ready(ctx, sid, events) and latest(events).get("status") == "open" and still_moving(ctx, sid):
             action, rationale = "send", f"safe: it is still moving, keep trading ({rationale})"
     elif action == "walk_away":
-        if not walk_allowed(ctx, threads):
+        if not walk_allowed(ctx, events):
             action, rationale = "send", f"safe: walk refused, no cheaper alternative ({rationale})"
     elif action != "send":
         return rule
@@ -305,13 +307,12 @@ class LLMStrategist:
         rule = self.fallback.choose(ctx, threads, reads)
         if self.complete is None:
             return rule
-        used = cited_refs(threads)
+        sid, events = the_thread(threads)
+        read = reads.get(sid) or BehaviourRead(sid, 0.5, 0.2, (), ())
         user = json.dumps(
             {
                 "case": _case_view(ctx),
-                "threads": [
-                    _thread_view(ctx, sid, ev, reads[sid], used) for sid, ev in threads.items() if sid in reads
-                ],
+                "thread": _thread_view(ctx, sid, events, read, cited_refs(events)),
                 "rule_suggestion": asdict(rule),
             },
             ensure_ascii=False,
@@ -321,17 +322,12 @@ class LLMStrategist:
         if not isinstance(reply, dict) or not isinstance(reply.get("tactic"), dict):
             return rule
         try:
-            model_reads = reply.get("reads") if isinstance(reply.get("reads"), dict) else {}
-            refined = {
-                sid: refined_read(sid, raw, reads[sid], threads[sid])
-                for sid, raw in model_reads.items()
-                if sid in reads
-            }
+            refined = refined_read(sid, reply.get("read"), read, events)
             tactic = safe(ctx, threads, reply["tactic"], rule)
         except Exception as e:  # a malformed answer must never cost the round
             log.warning("strategist answer unusable (%r) - using the rule", e)
             return rule
-        reads.update(refined)  # the orchestrator passes this dict on to plan_offers
+        reads[sid] = refined  # the orchestrator passes this dict on to plan_offers
         log.info("%s: strategist %s %s claims=%s (%s)", tactic.supplier_id, tactic.action, tactic.levers,
                  tactic.claims, tactic.rationale)  # fmt: skip
         return tactic

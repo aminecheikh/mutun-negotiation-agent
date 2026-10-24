@@ -57,34 +57,33 @@ def rule_tactic(ctx, threads):
 # ---- safe(): the model can never break policy ---------------------------------------------------
 
 
-def test_safe_when_unknown_supplier_returns_rule():
+def test_safe_when_model_names_another_supplier_still_answers_the_one_thread():
     ctx, threads = setup([supplier()])
-    rule = rule_tactic(ctx, threads)
-    assert safe(ctx, threads, {"supplier_id": "sup:99999", "action": "accept"}, rule) == rule
+    tactic = safe(ctx, threads, {"supplier_id": "sup:99999", "action": "send"}, rule_tactic(ctx, threads))
+    assert tactic.supplier_id == SID  # one-on-one: the model never picks a supplier
 
 
 def test_safe_when_accept_before_our_first_message_sends_with_cost_breakdown_question():
     ctx, threads = setup([supplier()])
-    tactic = safe(ctx, threads, {"supplier_id": SID, "action": "accept"}, rule_tactic(ctx, threads))
+    tactic = safe(ctx, threads, {"action": "accept"}, rule_tactic(ctx, threads))
     assert tactic.action == "send" and "cost breakdown" in tactic.question
 
 
 def test_safe_when_walk_without_alternative_sends_instead():
     ctx, threads = setup([supplier(), buyer(), supplier(status="final_offer", n=1)])
-    tactic = safe(ctx, threads, {"supplier_id": SID, "action": "walk_away"}, rule_tactic(ctx, threads))
+    tactic = safe(ctx, threads, {"action": "walk_away"}, rule_tactic(ctx, threads))
     assert tactic.action == "send"
 
 
 def test_safe_when_alternative_cheaper_and_supplier_final_allows_walk():
     ctx, threads = setup([supplier(), buyer(), supplier(status="final_offer", n=1)], alt_c=1.0)
-    tactic = safe(ctx, threads, {"supplier_id": SID, "action": "walk_away"}, rule_tactic(ctx, threads))
+    tactic = safe(ctx, threads, {"action": "walk_away"}, rule_tactic(ctx, threads))
     assert tactic.action == "walk_away"
 
 
 def test_safe_filters_claims_levers_and_question_with_figures():
     ctx, threads = setup([supplier(), buyer(refs=["sc:70270@2026Q3"]), supplier(n=1)])
     raw = {
-        "supplier_id": SID,
         "action": "send",
         "claims": [0, 1, 2, 7, "x"],
         "levers": ["payment_days", "tooling_eur", "made_up", "unit_price"],
@@ -98,9 +97,7 @@ def test_safe_filters_claims_levers_and_question_with_figures():
 
 def test_safe_when_supplier_agreed_accepts():
     ctx, threads = setup([supplier(), buyer(), supplier(status="agreed", n=1)])
-    tactic = safe(
-        ctx, threads, {"supplier_id": SID, "action": "send", "levers": ["unit_price"]}, rule_tactic(ctx, threads)
-    )
+    tactic = safe(ctx, threads, {"action": "send", "levers": ["unit_price"]}, rule_tactic(ctx, threads))
     assert tactic.action == "accept"
 
 
@@ -109,9 +106,7 @@ def test_safe_when_no_messages_left_accepts():
     for n in range(CASE.get("round_limit", 10)):
         events += [buyer(), supplier(n=n + 1)]
     ctx, threads = setup(events)
-    tactic = safe(
-        ctx, threads, {"supplier_id": SID, "action": "send", "levers": ["unit_price"]}, rule_tactic(ctx, threads)
-    )
+    tactic = safe(ctx, threads, {"action": "send", "levers": ["unit_price"]}, rule_tactic(ctx, threads))
     assert tactic.action == "accept"
 
 
@@ -139,14 +134,13 @@ def test_llm_strategist_when_valid_reply_uses_tactic_and_updates_reads():
         assert "Faster payment would help." in user and '"category_goal"' in user
         read = {"p_more": 0.8, "walk_risk": 0.05, "wants": ["payment_days"], "signals": ["Faster payment"]}
         tactic = {
-            "supplier_id": SID,
             "action": "send",
             "levers": ["unit_price", "payment_days"],
             "claims": [2],
             "question": "Which payment term would change your price?",
             "rationale": "cash",
         }
-        return json.dumps({"reads": {SID: read}, "tactic": tactic})
+        return json.dumps({"read": read, "tactic": tactic})
 
     tactic = LLMStrategist(complete).choose(ctx, threads, reads)
     assert tactic.action == "send" and tactic.levers == ("unit_price", "payment_days") and tactic.claims == (2,)
@@ -209,9 +203,9 @@ def test_rule_analyst_when_supplier_irritated_raises_walk_risk():
 def test_llm_strategist_when_fields_are_malformed_never_raises():
     ctx, threads = setup([supplier(), buyer(), supplier(n=1)])
     bad = [
-        {"reads": [1, 2], "tactic": {"supplier_id": SID, "action": "send", "claims": 3, "levers": "unit_price"}},
-        {"reads": {SID: {"wants": 5, "signals": None}}, "tactic": {"supplier_id": ["x"], "action": "send"}},
-        {"reads": {SID: "open"}, "tactic": {"supplier_id": SID, "action": "send", "claims": [True, None, 2.5]}},
+        {"read": [1, 2], "tactic": {"action": "send", "claims": 3, "levers": "unit_price"}},
+        {"read": {"wants": 5, "signals": None}, "tactic": {"supplier_id": ["x"], "action": "send"}},
+        {"read": "open", "tactic": {"action": "send", "claims": [True, None, 2.5]}},
     ]
     for answer in bad:
         reads = rule_read(ctx, threads)
@@ -237,7 +231,7 @@ def test_accept_when_at_target_but_still_moving_keeps_trading():
     ctx, threads = setup([supplier(), buyer(), supplier(price=17.0, n=1)])
     moving = at_target(ctx, threads, ConcessionFit(SID, (17.4, 17.0), 16.0, 2.3, False, p_room=0.7))
     assert not accept_ready(moving, SID, threads[SID])
-    tactic = safe(moving, threads, {"supplier_id": SID, "action": "accept"}, rule_tactic(moving, threads))
+    tactic = safe(moving, threads, {"action": "accept"}, rule_tactic(moving, threads))
     assert tactic.action == "send" and "still moving" in tactic.rationale
 
 
@@ -245,10 +239,7 @@ def test_accept_when_at_target_and_stopped_moving_accepts():
     ctx, threads = setup([supplier(), buyer(), supplier(price=17.0, n=1)])
     stopped = at_target(ctx, threads, ConcessionFit(SID, (17.4, 17.0, 16.99), 16.98, 0.06, True, p_room=0.1))
     assert accept_ready(stopped, SID, threads[SID])
-    assert (
-        safe(stopped, threads, {"supplier_id": SID, "action": "accept"}, rule_tactic(stopped, threads)).action
-        == "accept"
-    )
+    assert safe(stopped, threads, {"action": "accept"}, rule_tactic(stopped, threads)).action == "accept"
 
 
 def at_floor_band(ctx, floor):
@@ -260,7 +251,7 @@ def test_accept_when_price_at_floor_accepts_even_if_still_moving():
     ctx, threads = setup([supplier(), buyer(), supplier(price=16.0, n=1)])
     ctx = replace(at_floor_band(ctx, 16.2), fits={SID: ConcessionFit(SID, (17.4, 16.0), 15.5, 8.0, False, 0.9)})
     assert accept_ready(ctx, SID, threads[SID])
-    assert safe(ctx, threads, {"supplier_id": SID, "action": "accept"}, rule_tactic(ctx, threads)).action == "accept"
+    assert safe(ctx, threads, {"action": "accept"}, rule_tactic(ctx, threads)).action == "accept"
 
 
 def test_accept_when_opening_quote_at_floor_still_counters():
@@ -297,7 +288,8 @@ def seen_thread(ctx, threads):
         return "{}"
 
     LLMStrategist(complete).choose(ctx, threads, rule_read(ctx, threads))
-    return next(t for t in seen["user"]["threads"] if t["supplier_id"] == SID)
+    assert "threads" not in seen["user"]  # one supplier, never a list of bidders
+    return seen["user"]["thread"]
 
 
 def test_choose_when_fit_known_shows_where_the_supplier_stops_and_its_room():
@@ -318,5 +310,5 @@ def test_choose_when_trades_priced_shows_them_with_their_euro_value():
 def test_llm_strategist_prompt_embeds_analyst_guide():
     system = LLMStrategist(None).system
     assert "{analyst}" not in system
-    assert "READING A SUPPLIER" in system and "p_room" in system and "walk_risk" in system
+    assert "READING THE SUPPLIER" in system and "p_room" in system and "walk_risk" in system
     assert '"tactic"' in system  # the JSON braces of the reply format survive the substitution
