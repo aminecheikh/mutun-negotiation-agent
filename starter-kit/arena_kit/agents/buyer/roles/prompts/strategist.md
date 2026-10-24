@@ -18,7 +18,9 @@ You get JSON:
   alternative and its C, the round limit
 - threads: per open supplier - its dossier (persona, levers it values, evidence from our notes, letters,
   news, history), the price band (floor, fair, target, ceiling and their C), its standing term sheet and C,
-  status, our messages left, the concession fit of its prices, the rule-based read, its last e-mails
+  status, our messages left, the concession fit of its prices (where they converge, p_room: the chance it
+  still goes 1 % lower), trades (each term change worth money to us, in EUR and per unit: what we can ask
+  for in return for price movement), the rule-based read, its last e-mails
   (with the reasons it gave and how our cited data was judged), what we last offered, and the claims we may
   still cite (each ID counts once per case; cited ones are already removed)
 

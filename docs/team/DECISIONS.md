@@ -31,3 +31,7 @@ decision - why`. Changing `contracts.py` always needs an entry here.
   Anthropic client with `max_retries=0`; `buyer_factory` passes the larger role bound (17 s). - The SDK retried
   timeouts twice, so one late call held a worker of the 32-thread LLM pool ~135 s after the role fell back; with
   10 cases the pool could fill and every role would fall back. The kit's own `LLMAgent` keeps its 45 s.
+- 2026-10-24 19:15 - team (Amine, user-approved) - `CaseContext.fits: dict[str, ConcessionFit]` (default empty): the
+  pipeline puts this round's fit in before the strategist runs; the strategist's thread view shows it (`concession`)
+  and `ctx.trades` (`trades`, biggest 6). - Its prompt already promised "the concession fit of its prices", but the
+  view never had it, and no role read the priced trades (asked by Amine 21:00).

@@ -166,6 +166,7 @@ class RolePipeline:
         fit = self._fit(ctx, sid, events, used)
         timings["fit"] = int((time.monotonic() - t_fit) * 1000)
         th.fit = fit
+        ctx = replace(ctx, fits={**ctx.fits, sid: fit})  # the strategist sees where its prices converge
         rule_read = self._safe(lambda: self.rule_analyst.read(ctx, sid, events, fit), None, "rule_read")
         rule_read = rule_read or BehaviourRead(sid, 0.5, 0.2, (), ())
         read = self._stage(
