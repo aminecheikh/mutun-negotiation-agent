@@ -31,7 +31,10 @@ PROMPTS = Path(__file__).parent / "prompts"
 _POOL = ThreadPoolExecutor(max_workers=32, thread_name_prefix="llm")
 TOOL_ROUNDS = 1  # tool turns before the model must answer: each one is a full model call (~4-7 s)
 MAX_CALLS_PER_TURN = 6  # tool calls executed per turn; more get an error result
-FINAL_ANSWER_S = 4.0  # less time than this left after a tool turn: no point in another call, fall back
+# Saed's bench: a strategist answer takes up to ~6 s (p90 6.1 s). A tool turn is a full model call too, so it is
+# only started when an answer still fits after it; with less time left the model answers at once, without tools
+FINAL_ANSWER_S = 7.0
+ANSWER_NOW = "Answer now with the one JSON object described in the instructions - no tool calls, no other text."
 
 
 def prompt(name: str) -> str:
@@ -67,15 +70,24 @@ def record(role: str, system: str, user: str, reply: str | None, seconds: float,
         log.warning("LLM record failed: %s", e)
 
 
-def call_json(complete, system: str, user: str, timeout_s: float, name: str = "llm") -> dict | None:
+def call_json(complete, system: str, user: str, timeout_s: float, name: str = "llm", salvage=None) -> dict | None:
+    """The model's JSON answer, or None (the role falls back). `salvage(text)` may rescue a reply that is not
+    JSON (the writer: a "Subject: ... / body" e-mail); whatever it returns still passes the role's own checks."""
     if complete is None:
         return None
-    t0, text, outcome = time.monotonic(), None, "ok"
+    t0, text, outcome, out = time.monotonic(), None, "ok", None
     future = _POOL.submit(complete, system, user)
     try:
         text = future.result(timeout=timeout_s)
-        return parse(text)
+        try:
+            out = parse(text)
+        except Exception:
+            out = salvage(text) if salvage and isinstance(text, str) else None
+            if out is None:
+                raise
+            outcome = "salvaged"
     except FutureTimeout:
+        future.cancel()  # do not charge for stale queued work after returning a rule-based answer
         outcome = "timeout"
         log.warning("LLM call over %.0fs - using the fallback", timeout_s)
     except Exception as e:  # provider error or unparsable reply
@@ -83,7 +95,7 @@ def call_json(complete, system: str, user: str, timeout_s: float, name: str = "l
         log.warning("LLM call failed (%s) - using the fallback", e)
     finally:
         record(name, system, user, text, time.monotonic() - t0, outcome)
-    return None
+    return out
 
 
 def tools_enabled() -> bool:
@@ -151,7 +163,12 @@ def call_json_with_tools(
             left = deadline - time.monotonic()
             if left <= (FINAL_ANSWER_S if turn else 0.0):
                 raise TimeoutError(f"{left:.1f}s left for the answer")
-            final = turn == rounds
+            final = turn == rounds or left < 2 * FINAL_ANSWER_S  # no room for a tool turn and an answer: answer now
+            if final and turn:  # the answer turn after tool results: ask for the JSON explicitly (3 prose replies)
+                messages[-1] = {
+                    **messages[-1],
+                    "content": [*messages[-1]["content"], {"type": "text", "text": ANSWER_NOW}],
+                }
             blocks, stop = converse(system, messages, toolbox.schemas, final, left)
             uses = [b for b in blocks if getattr(b, "type", None) == "tool_use"]
             if final or not uses or stop != "tool_use":

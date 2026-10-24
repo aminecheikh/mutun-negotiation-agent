@@ -16,6 +16,7 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from ...cost import complete_offer, must_haves_ok, supplier_value, total_cost
+from . import observe
 from .contracts import Tactic
 from .state import CaseSession, ThreadState
 
@@ -166,17 +167,24 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
     left = th.moves_left(case)
     if th.our_rounds == 0 and th.status != "agreed":
         return Verdict("counter", "first answer: never take the opening quote")
+    if left > 0 and th.status in ("open", "final_offer") and cheaper_alternative(session, th) is not None:
+        # only the standing (first) sheet can be accepted: send its cheaper proposal back, it will agree (Saed, P18)
+        return Verdict("counter", "its alternative sheet is cheaper for us: send exactly that alternative back",
+                       note="send its own alternative back unchanged - it proposed it")  # fmt: skip
     band = session.band(th.supplier_id)
     early = target_is_prior(session, th)
-    at_target = ok and band is not None and th.c <= band.c_target * (1 + cfg.accept_eps) and not early
+    meets = band is None or th.c <= band.c_target * (1 + cfg.accept_eps)  # our expectation: the band target
+    at_target = ok and band is not None and meets and not early
     final_closed = th.status == "final_offer" and not counter_allowed(session, th)
+    repeated = th.status == "open" and repeated_offer(th)
     forced = [
         why
         for cond, why in (
-            (th.status == "agreed", "supplier agreed to our sheet"),
+            (th.status == "agreed" and meets, "supplier agreed to our sheet"),  # only what meets our expectation
             (left <= 0, "no messages left"),
             (at_target, "standing sheet at our target"),
             (final_closed, "final offer, no counter worth the risk"),
+            (repeated, "the same offer twice: its best, no more negotiating"),
             (session.in_close_window(), "case cap is near"),
         )
         if cond
@@ -189,10 +197,25 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
             if th.status in ("final_offer", "agreed") or left < 1 or session.in_close_window():
                 return Verdict("park", f"{forced[0]}, but a cheaper acceptable sheet is on the table")
             return Verdict("counter", f"{forced[0]}, but a cheaper acceptable sheet is on the table: negotiate on")
+        if left > 0 and not session.in_close_window() and not others_settled(session, th):
+            # several suppliers: compare their best offers once every one has given it, then accept one (the user)
+            if th.status in ("final_offer", "agreed"):
+                return Verdict("park", f"{forced[0]}, waiting for the other suppliers' best offers")
+            return Verdict("counter", f"{forced[0]}, the other suppliers have not given their best offers yet")
         return Verdict("accept", forced[0])
+    if ok and th.status == "agreed":
+        # it accepted our own sheet, and our offers never go below an earlier one: it cannot go lower from our side.
+        # Never raise our offer to it (P05: 35.03 agreed, we sent 35.15); take it once it wins the comparison
+        if cheaper is not None:
+            return Verdict("park", "agreed, but a cheaper acceptable sheet is on the table")
+        if left > 0 and not session.in_close_window() and not others_settled(session, th):
+            return Verdict("park", "agreed, waiting for the other suppliers' best offers")
+        return Verdict("accept", "supplier agreed to our sheet: it cannot go lower, within our margin")
     if left <= 0:
         return Verdict("dead", "no messages left and the sheet is not acceptable")
     if th.status == "final_offer":
+        if ok and cheaper is not None:  # its best, but another acceptable offer is cheaper: hold, do not push it
+            return Verdict("park", "final offer, but a cheaper acceptable sheet is on the table")
         if counter_allowed(session, th):
             return Verdict(
                 "counter", "final offer clearly above target: one counter", accept_permitted=ok,
@@ -201,7 +224,44 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
         return Verdict("dead", "final offer we cannot accept and should not push")
     if session.freeze and best_acceptable(session, idle_only=False) is not None:
         return Verdict("park", "freeze before the cap: an acceptable sheet is on the table")
-    return Verdict("counter", "negotiate", accept_permitted=ok and cheaper is None and not early)
+    settled = others_settled(session, th)
+    return Verdict("counter", "negotiate", accept_permitted=ok and cheaper is None and not early and settled)
+
+
+def cheaper_alternative(session: CaseSession, th: ThreadState) -> dict | None:
+    """The cheapest of the supplier's alternative sheets (its last e-mail) if it costs us less than its standing
+    sheet and passes our acceptability test - complete, ready to send back. None otherwise."""
+    last = th.events[-1] if th.events and th.events[-1].get("from") != "buyer" else {}
+    best, best_c = None, th.c * (1 - session.config.accept_eps)
+    for ts in (last.get("term_sheets") or [])[1:]:
+        terms = complete_offer(session.case, ts.get("terms") or {})
+        if terms.get("unit_price") is None or not must_haves_ok(session.case, terms, th.std):
+            continue
+        c = session.cost(th.supplier_id, terms)
+        if c < best_c and c < session.c_open and (session.c_alt is None or c <= session.c_alt):
+            best, best_c = terms, c
+    return best
+
+
+def repeated_offer(th: ThreadState) -> bool:
+    """The supplier sent the same terms in its last two replies to our offers: its best (the user: then stop)."""
+    sheets = observe.supplier_sheets(th.events)
+    ours = sum(1 for m in th.events if m.get("from") == "buyer" and m.get("term_sheets"))
+    return ours >= 2 and len(sheets) >= 3 and sheets[-1] == sheets[-2]
+
+
+def others_settled(session: CaseSession, th: ThreadState) -> bool:
+    """Every other live supplier has given its best offer: a final offer, an agreement to our sheet, or no
+    messages left. One supplier: trivially true."""
+    for other in session.alive():
+        if other is th or other.status == "final_offer" or other.moves_left(session.case) <= 0:
+            continue
+        if repeated_offer(other):  # the same offer twice: its best
+            continue
+        if other.status == "agreed" and acceptable(session, other):
+            continue  # it accepted our own sheet: its best answer to our offer
+        return False
+    return True
 
 
 def target_is_prior(session: CaseSession, th: ThreadState) -> bool:

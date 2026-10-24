@@ -81,14 +81,8 @@ def test_acceptable_when_final_offer_is_dearer_than_its_own_opening_refuses_it()
     assert policy.verdict(s, th).kind != "accept"
 
 
-def test_verdict_when_supplier_agreed_to_our_sheet_accepts():
-    s = session_for(S01, {SID: [quote(SID, 0, 17.4), ours(16.5), quote(SID, 1, 16.5, "agreed")]})
-    v = policy.verdict(s, s.threads[SID])
-    assert v.kind == "accept" and "agreed" in v.reason
-
-
-def test_verdict_when_another_supplier_may_still_go_lower_accepts_this_final_offer():
-    # no inter-supplier comparison (organisers): a thread is never held back by what another supplier might do
+def test_verdict_when_another_supplier_is_still_negotiating_waits_for_its_best_offer():
+    # the user: with several suppliers, compare their best offers once every one has given it, then accept one
     s = session_for(
         S02,
         {
@@ -98,7 +92,7 @@ def test_verdict_when_another_supplier_may_still_go_lower_accepts_this_final_off
     )
     v = policy.verdict(s, s.threads[A])
     assert policy.acceptable(s, s.threads[A])
-    assert v.kind == "accept"
+    assert v.kind == "park" and "best offers" in v.reason
 
 
 def test_verdict_when_rival_is_at_its_final_offer_too_accepts_the_cheaper():
@@ -299,12 +293,12 @@ class FakeTable:
 
 
 def test_verdict_when_a_cheaper_acceptable_sheet_exists_never_accepts_the_dearer():
-    a_events = [rfq_quote(A, 0, 17.2), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(A, 1, 16.0, "agreed")]
-    b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 16.4, "agreed")]
+    a_events = [rfq_quote(A, 0, 17.2), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(A, 1, 16.0, "final_offer")]
+    b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 16.4, "final_offer")]
     s = session_for(S02, {A: a_events, B: b_events})
     v = policy.verdict(s, s.threads[B])
-    assert v.kind == "park"  # B agreed, but A's acceptable sheet is cheaper: we sign A, not B
-    assert policy.verdict(s, s.threads[A]).kind == "accept"
+    assert v.kind == "park"  # both gave their best; A's is cheaper: we sign A, not B
+    assert policy.verdict(s, s.threads[A]).kind in ("accept", "counter")  # A: accept, or its one counter
 
 
 def test_verdict_when_dearer_thread_can_still_beat_the_cheaper_keeps_negotiating():
@@ -359,11 +353,12 @@ def test_reserve_when_two_threads_cite_the_same_id_only_the_first_keeps_it():
     assert known <= s.burned
 
 
-def test_verdict_when_another_supplier_has_room_does_not_hold_up_an_accept():
-    b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0)]
+def test_verdict_when_every_supplier_gave_its_final_offer_accepts_the_cheapest():
+    b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0, "final_offer")]
     s = session_for(S02, {A: A_COUNTERED, B: b_events})
-    s.threads[B].fit = ConcessionFit(B, (17.5, 17.0), 14.0, 2.9, False, p_room=0.9)  # B could go far lower
-    assert policy.verdict(s, s.threads[A]).kind == "accept"
+    cheaper, dearer = sorted(s.threads.values(), key=lambda t: t.c)
+    assert policy.verdict(s, cheaper).kind == "accept"
+    assert policy.verdict(s, dearer).kind == "park"
 
 
 # ---- keep-alive e-mails ---------------------------------------------------------------------------------------
@@ -588,9 +583,9 @@ class AgreeingTable:
         return {"ended": True, "deal": True}
 
 
-def test_send_when_the_supplier_agrees_accepts_at_once():
-    # P05 (d353d958b3a96e12): the accept of an agreement went out 46 s after the reply and the offer was stale
-    # (422); the user: when a supplier agrees to our offer, take it - right away
+def test_send_when_the_supplier_agrees_leaves_the_decision_to_the_verdict():
+    # sweep e848872: accepting an agreement inside send() signed P05's dearer supplier (0.07) a second before the
+    # cheaper one answered; the user: no instant accept - accept only what meets our expectation (the verdict)
     from arena_kit.agents.buyer.runner import ThreadWorker
 
     agent = BuyerAgent(DataTools(), None, None, None, None, None, OrchestratorConfig(), Telemetry("off"))
@@ -599,4 +594,147 @@ def test_send_when_the_supplier_agrees_accepts_at_once():
     th = s.threads[SID]
     message = {"subject": "Re", "body": "Our proposal.", "term_sheets": [{"terms": {"unit_price": 9.0}}], "refs": []}
     ThreadWorker(agent, s, Arbiter(s)).send(th, message, "counter")
-    assert s.ended and s.table.closed == [{"type": "accept", "term_sheet_id": f"offer:{SID[4:]}-9"}]
+    assert not s.ended and s.table.closed == [] and th.status == "agreed"
+
+
+def agreed_thread(price_share: float):
+    """Our sheet at `price_share` of the band target, and the supplier agreed to it."""
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th, band = s.threads[SID], s.band(SID)
+    terms = {**band.target_terms, "unit_price": round(band.target * price_share, 2)}
+    reply = quote(SID, 1, terms["unit_price"], "agreed")
+    reply["term_sheets"][0]["terms"] = terms
+    th.events += [{"from": "buyer", "body": "Ours.", "term_sheets": [{"terms": terms}]}, reply]
+    observe.rebuild(s, th)
+    return s, th
+
+
+def test_verdict_when_supplier_agrees_at_or_below_our_target_accepts():
+    s, th = agreed_thread(0.98)
+    assert policy.verdict(s, th).kind == "accept"
+
+
+def test_verdict_when_one_supplier_agrees_above_our_target_accepts_within_our_margin():
+    # the user: one supplier - accept when it cannot go lower and the deal is within our margin. It accepted our own
+    # sheet and our offers never go below an earlier one, so it cannot go lower from our side
+    s, th = agreed_thread(1.05)
+    assert policy.acceptable(s, th)
+    assert policy.verdict(s, th).kind == "accept"
+
+
+def test_others_settled_when_a_supplier_agreed_above_our_target_counts_it_as_its_best():
+    # P05 (02111fa2d1c4eb09): the cheapest supplier gave its final offer and waited while another kept agreeing
+    # to our sheet above its band target - an agreement is that supplier's best answer to our offer: settled
+    b_events = [rfq_quote(B, 0, 17.5), ours(17.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0, "agreed")]
+    s = session_for(S02, {A: A_COUNTERED, B: b_events})
+    assert s.threads[B].c > s.band(B).c_target  # agreed, but above our target
+    assert policy.others_settled(s, s.threads[A])
+
+
+def test_plan_offers_when_supplier_agreed_never_raises_our_offer():
+    # P05 (02111fa2d1c4eb09): we sent 35.15 to a supplier that had agreed to 35.03 - never pay more than an agreement
+    b_events = [rfq_quote(B, 0, 17.5), ours(17.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0, "agreed")]
+    s = session_for(S02, {A: A_COUNTERED, B: b_events})
+    assert s.threads[B].c > s.band(B).c_target  # agreed above our target
+    assert policy.verdict(s, s.threads[B]).kind != "counter"
+
+
+class RoundLimitTable:
+    """The arena when a thread has used its rounds: every message is refused, the standing sheet can be accepted."""
+
+    def __init__(self):
+        self.sent, self.closed = 0, []
+
+    def send(self, supplier_id, message):
+        self.sent += 1
+        raise ArenaError(422, "round limit reached: accept the standing term sheet or walk away")
+
+    def close(self, supplier_id, message):
+        self.closed.append(message["action"])
+        return {"ended": True, "deal": True}
+
+    def result(self):
+        return {"ended": True, "deal": True}
+
+
+def test_send_when_the_round_limit_is_reached_stops_sending_and_lets_the_policy_close():
+    # P05 (02111fa2d1c4eb09): the arena said "round limit reached: accept the standing term sheet or walk away";
+    # we re-sent three times, gave up on the thread, and the case timed out at 0
+    from arena_kit.agents.buyer.runner import ThreadWorker
+
+    agent = BuyerAgent(DataTools(), None, None, None, None, None, OrchestratorConfig(), Telemetry("off"))
+    s = agent.open_case(S01, {SID: [quote(SID, 0, 10.0), ours(8.0), quote(SID, 1, 9.0)]})
+    s.table = RoundLimitTable()
+    th = s.threads[SID]
+    message = {"subject": "Re", "body": "Our proposal.", "term_sheets": [{"terms": {"unit_price": 8.2}}], "refs": []}
+    ThreadWorker(agent, s, Arbiter(s)).send(th, message, "counter")
+    assert s.table.sent == 1 and th.moves_left(S01) == 0
+    assert policy.verdict(s, th).kind in ("accept", "dead")  # no messages left: take it if acceptable, never resend
+
+
+def test_close_when_the_arena_says_the_thread_ended_marks_it_dead():
+    # P05: accepts on a supplier that had walked were retried every second ("the thread ... has ended")
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+
+    class EndedTable(RoundLimitTable):
+        def close(self, supplier_id, message):
+            raise ArenaError(422, f"the thread with {supplier_id} has ended (supplier_walked)")
+
+    s.table = EndedTable()
+    Arbiter(s)._close(th, {"action": {"type": "accept", "term_sheet_id": "offer:x"}}, "test")
+    assert not th.alive
+
+
+# ---- the same offer twice is its best -----------------------------------------------------------------------------
+
+
+def test_verdict_when_one_supplier_repeats_its_offer_accepts_it_within_our_margin():
+    # the user: when the supplier gives the same offer twice, do not negotiate any more
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0), ours(8.0), quote(SID, 1, 9.6), ours(8.3), quote(SID, 2, 9.6)]})
+    th = s.threads[SID]
+    assert policy.acceptable(s, th)
+    v = policy.verdict(s, th)
+    assert v.kind == "accept" and "same offer" in v.reason
+
+
+def test_others_settled_when_a_supplier_repeated_its_offer_counts_it_as_its_best():
+    b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0),
+                ours(15.2, extra={"lead_time_days": 42}), rfq_quote(B, 2, 17.0)]  # fmt: skip
+    s = session_for(S02, {A: A_COUNTERED, B: b_events})
+    assert policy.others_settled(s, s.threads[A])
+
+
+# ---- a cheaper alternative from the supplier is sent back ---------------------------------------------------------
+
+
+def with_cheaper_alternative(status: str):
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0)]})
+    th = s.threads[SID]
+    reply = quote(SID, 1, 9.6, status)
+    reply["term_sheets"].append(
+        {"term_sheet_id": f"offer:{SID[4:]}-1-a", "terms": {"unit_price": 9.1, "payment_days": 30}}
+    )
+    th.events += [ours(8.5), reply]
+    observe.rebuild(s, th)
+    return s, th
+
+
+def test_verdict_when_a_final_offer_carries_a_cheaper_alternative_sends_that_alternative():
+    # Saed: P18 accepted the main sheet of a final offer while its alternative was cheaper for us (0.44 vs 0.47);
+    # only the standing (first) sheet can be accepted, so send exactly the alternative back - it proposed it
+    s, th = with_cheaper_alternative("final_offer")
+    alt = policy.cheaper_alternative(s, th)
+    assert alt is not None and alt["unit_price"] == 9.1
+    v = policy.verdict(s, th)
+    assert v.kind == "counter" and "alternative" in v.reason
+    assert policy.offers_more(s, th, [alt])  # its own proposal: more for it than our last sheet, not a push
+
+
+def test_keepalive_questions_never_ask_for_a_cost_breakdown():
+    # Saed (PR #4): no cost-breakdown requests anywhere - questions ask for a term that could change its price
+    from arena_kit.agents.buyer.pipeline import QUESTIONS
+
+    for language in QUESTIONS.values():
+        for question in language.values():
+            assert "breakdown" not in question.lower() and "aufschlüssel" not in question.lower()

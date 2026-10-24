@@ -5,7 +5,8 @@ Price of the main sheet, each round:
            (split-the-difference, Raiffa), so this anchor puts the midpoint on our target; never below the
            plausible cost floor (an impossible ask wastes rounds and trust)
   time     anchor -> ceiling on a Boulware curve: (t / T) ** (1 / beta), beta < 1 holds early and concedes late
-           (time-dependent tactics, Faratin, Sierra & Jennings 1998)
+           (time-dependent tactics, Faratin, Sierra & Jennings 1998); above our target its steps never grow -
+           shrinking steps signal a limit (Tey et al. 2021)
   pace     until our target, at least a linear step per round (reaching it halfway): visible movement
   reply    at least what the supplier conceded in its last move (absolute tit-for-tat, same paper): "it gives
            nothing without a move from you" (the brief) - and matched moves meet at the midpoint, i.e. the target.
@@ -49,9 +50,15 @@ def plan(
         sheet = complete_offer(case, theirs)
         return OfferPlan(supplier_id, (sheet,), (total_cost(case, sheet, std, supplier),), "no band: echo its terms")
     credible = ctx.credibility.get(supplier_id)
+    alternative = _cheaper_alternative(case, events, std, supplier)
+    if alternative is not None:  # its own cheaper proposal goes back unchanged: it will agree to it (Saed, P18)
+        c_alt = total_cost(case, alternative, std, supplier)
+        return OfferPlan(
+            supplier_id, (alternative,), (c_alt,), "its own alternative sheet is cheaper for us: sent back"
+        )
     price = next_price(case, band, events, credible.lowest_price if credible else 0.0)
     main = _main_sheet(case, band, theirs, price, std, supplier, _our_last_terms(events))
-    main = _not_below_c_minimum(case, main, std, supplier, min(band.ceiling, theirs["unit_price"]))
+    main = _not_below_c_minimum(case, main, std, supplier, band, min(band.ceiling, theirs["unit_price"]))
     c_main = total_cost(case, main, std, supplier)
     levers = tuple(f for f in tactic.levers if f != "unit_price" and f in case["negotiable"])
     fields = list(dict.fromkeys([*levers, *case["negotiable"]]))
@@ -84,6 +91,10 @@ def next_price(case: dict, band, events: list[dict], lowest: float = 0.0) -> flo
     horizon = max(case.get("round_limit", 10) - 1, 1)
     share = min(len(ours) / horizon, 1.0) ** (1 / BOULWARE_BETA)
     price = anchor + (band.ceiling - anchor) * share
+    if len(ours) >= 2 and ours[-1] >= band.target and ours[-1] > ours[-2]:
+        # above our target the curve's late steps grow; shrinking steps signal a limit (Tey et al. 2021, research
+        # 02): never a larger step than our last one. Matching its move and the stand-still step still apply
+        price = min(price, ours[-1] + (ours[-1] - ours[-2]))
     if ours:
         price = max(price, ours[-1])
         if ours[-1] < band.target:  # a visible step every round until our target, even if it waits for us
@@ -100,22 +111,39 @@ def next_price(case: dict, band, events: list[dict], lowest: float = 0.0) -> flo
     return round(min(max(price, lowest), limit), 2)
 
 
-def _not_below_c_minimum(case: dict, sheet: dict, std: dict, supplier, limit: float) -> dict:
-    """The same sheet at the price where C on its terms is lowest, between its price and `limit`. Without the
+def _not_below_c_minimum(case: dict, sheet: dict, std: dict, supplier, band, limit: float) -> dict:
+    """The same sheet, never below the price where C on its terms is lowest (never above `limit`). Without the
     squeeze charge C rises with price and the sheet stays as it is; with it (stabilise / secure_supply, a supplier
-    below its sustainable margin) a lower price can cost us more - never worth offering. Coarse grid, then fine."""
-    low = sheet["unit_price"]
-    if supplier is None or limit <= low:
+    below its sustainable margin) a lower price can cost us more - never worth offering. The minimum is searched
+    between fixed bounds (half the band's ceiling .. the ceiling), so it is the same price every round: a floor
+    that moved with the round's price crept up by cents while the supplier was still moving (P01)."""
+    if supplier is None or limit <= sheet["unit_price"]:
         return sheet
+    low, high = band.ceiling / 2, band.ceiling
 
     def cheapest(a: float, b: float) -> dict:
         grid = [a + (b - a) * i / PRICE_STEPS for i in range(PRICE_STEPS + 1)]
         options = [complete_offer(case, {**sheet, "unit_price": round(p, 2)}) for p in grid]
         return min(options, key=lambda s: (total_cost(case, s, std, supplier), s["unit_price"]))
 
-    best = cheapest(low, limit)
-    width = (limit - low) / PRICE_STEPS
-    return cheapest(max(low, best["unit_price"] - width), min(limit, best["unit_price"] + width))
+    best = cheapest(low, high)
+    width = (high - low) / PRICE_STEPS
+    floor = cheapest(max(low, best["unit_price"] - width), min(high, best["unit_price"] + width))["unit_price"]
+    if floor <= sheet["unit_price"]:
+        return sheet
+    return complete_offer(case, {**sheet, "unit_price": round(min(floor, limit), 2)})
+
+
+def _cheaper_alternative(case: dict, events: list[dict], std: dict, supplier) -> dict | None:
+    """The supplier's cheapest alternative sheet in its last e-mail, if it costs us less than its main sheet."""
+    last = events[-1] if events and events[-1].get("from") != "buyer" else {}
+    sheets = [complete_offer(case, ts.get("terms") or {}) for ts in last.get("term_sheets") or []]
+    sheets = [s for s in sheets if s.get("unit_price") is not None and must_haves_ok(case, s, std)]
+    if len(sheets) < 2 or (last.get("term_sheets") or [{}])[0].get("terms", {}).get("unit_price") is None:
+        return None
+    main_c = total_cost(case, complete_offer(case, last["term_sheets"][0]["terms"]), std, supplier)
+    best = min(sheets[1:], key=lambda s: total_cost(case, s, std, supplier), default=None)
+    return best if best is not None and total_cost(case, best, std, supplier) < main_c else None
 
 
 def _our_last_terms(events: list[dict]) -> dict | None:
@@ -141,15 +169,28 @@ def _main_sheet(case: dict, band, theirs: dict, price: float, std: dict, supplie
 
 
 def reprice(case: dict, sheet: dict, cost: float, std: dict, supplier) -> dict | None:
-    """The same sheet at the price where it costs `cost` (secant on C, which is near-linear in price)."""
-    p1 = sheet["unit_price"]
-    p2 = p1 * 1.01 + 0.01
-    c1, c2 = (total_cost(case, {**sheet, "unit_price": p}, std, supplier) for p in (p1, p2))
-    if c2 == c1:
+    """The same sheet at the price where it costs `cost`. C rises with price above the price where it is lowest
+    (below that, the squeeze charge makes it rise again): find that minimum on a grid, then bisect on the rising
+    side. A straight-line step failed right at the C minimum of squeeze cases (no variants at all)."""
+
+    def c_at(price: float) -> float:
+        return total_cost(case, {**sheet, "unit_price": round(price, 2)}, std, supplier)
+
+    base = sheet["unit_price"]
+    if base <= 0:
         return None
-    price = round(p1 + (cost - c1) * (p2 - p1) / (c2 - c1), 2)
-    if price <= 0:
+    grid = [base * (0.5 + i / PRICE_STEPS) for i in range(PRICE_STEPS + 1)]  # 0.5x .. 1.5x its price
+    low = min(grid, key=c_at)
+    high = grid[-1]
+    if cost < c_at(low):  # even at its cheapest these terms cost more (at the C minimum every other package does)
+        out = complete_offer(case, {**sheet, "unit_price": round(low, 2)})
+        return out if c_at(low) <= cost * (1 + EQUAL_C_TOLERANCE) else None
+    if cost > c_at(high):
         return None
+    for _ in range(40):  # bisection to well under a cent
+        mid = (low + high) / 2
+        low, high = (mid, high) if c_at(mid) < cost else (low, mid)
+    price = round(high, 2)
     out = complete_offer(case, {**sheet, "unit_price": price})
     return out if abs(total_cost(case, out, std, supplier) - cost) <= cost * EQUAL_C_TOLERANCE else None
 

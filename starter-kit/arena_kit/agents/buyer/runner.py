@@ -147,6 +147,11 @@ class ThreadWorker:
                 with s.gate(asked_at):
                     reply = s.table.send(th.supplier_id, message)
             except ArenaError as e:
+                if e.status == 422 and "round limit" in str(e.detail).lower():
+                    # "accept the standing term sheet or walk away": no message can go out - the policy decides
+                    log.warning("%s/%s: round limit reached - no more messages", s.case["case_id"], th.supplier_id)
+                    th.exhausted = True
+                    return
                 if e.status == 422:  # invalid message, nothing happened, no round used: repair once
                     log.warning("%s/%s: 422 %s - repairing", s.case["case_id"], th.supplier_id, e.detail)
                     message = guard.hard_repair(s, th, message)
@@ -177,8 +182,6 @@ class ThreadWorker:
             th.slowest_round_s = max(th.slowest_round_s, received - asked_at)
             observe.rebuild(s, th)
             s.offers |= {ts["term_sheet_id"] for ts in reply.get("term_sheets") or [] if ts.get("term_sheet_id")}
-        if th.status == "agreed":  # it took our offer: close now, before the offer goes stale (P05: 46 s, 422)
-            self.arbiter.try_accept(th, "supplier agreed to our sheet: taken at once")
         claims = observe.report_claims(s, th, message, reply) if delivered else {}
         self._log_round(th, kind, verdict=verdict, out=out, message=message, problems=problems, reply=reply,
                         delivered=delivered, claims=claims, round_s=round(received - asked_at, 1))  # fmt: skip

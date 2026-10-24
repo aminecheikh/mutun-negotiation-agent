@@ -40,6 +40,7 @@ class ThreadState:
     rule_only_once: bool = False  # after a resume: the first answer uses rule twins only (the clock may be short)
     walk_hint: bool = False  # the strategist asked to walk away (the arbiter decides at case level)
     refused: set[str] = field(default_factory=set)  # sheet IDs the arena refused to let us accept: never again
+    exhausted: bool = False  # the arena said this thread's round limit is reached: no more messages, accept or not
     slowest_round_s: float = 0.0  # longest decision + reply so far on this thread
     fit: ConcessionFit | None = None
     read: BehaviourRead | None = None
@@ -54,7 +55,7 @@ class ThreadState:
         return bool(self.events) and self.events[-1].get("from") != "buyer"
 
     def moves_left(self, case: dict) -> int:
-        return moves_left(case, self.events)
+        return 0 if self.exhausted else moves_left(case, self.events)
 
 
 class SendGate:

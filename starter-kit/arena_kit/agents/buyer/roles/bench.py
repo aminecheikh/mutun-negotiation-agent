@@ -1,5 +1,5 @@
-"""Offline bench for the LLM roles (owner: Saed; S6): replay recorded threads through the strategist and the
-writer with the real model, N in parallel like the Live Final, and report latency, how often the model's
+"""Offline bench for the LLM roles (owner: Saed; S6): replay recorded one-on-one negotiations through the strategist
+and the writer with the real model, N in parallel like the Live Final, and report latency, how often the model's
 answer was used (not a fallback) and why the writer's check rejected e-mails. No arena session is used.
 
     uv run python -m arena_kit.agents.buyer.roles.bench [--parallel 10] [--points 3] [--show 2]
@@ -56,12 +56,16 @@ def threads_from_trace(trace: list[dict]) -> dict[str, list[dict]]:
         else:
             last_supplier = actor
             sheet = {"term_sheet_id": move.get("offer_id"), "terms": move.get("terms") or {}}
+            alts = [
+                {"term_sheet_id": a.get("offer_id"), "terms": a.get("terms") or {}}
+                for a in move.get("alternatives") or []
+            ]
             threads.setdefault(actor, []).append(
                 {
                     "from": f"sales@{actor}",
                     "status": move.get("status"),
                     "body": body,
-                    "term_sheets": [sheet] if move.get("terms") else [],
+                    "term_sheets": [sheet, *alts] if move.get("terms") else [],
                     "claim_results": move.get("claim_results"),
                     "missing_fields": move.get("missing_fields"),
                     "attachments": [],
@@ -71,12 +75,13 @@ def threads_from_trace(trace: list[dict]) -> dict[str, list[dict]]:
 
 
 def points(threads: dict[str, list[dict]], n: int) -> list[dict[str, list[dict]]]:
-    """Up to n moments where it is our turn: each thread cut right after a supplier message."""
+    """Up to n moments where it is our turn: the supplier's thread cut right after one of its messages. One-on-one,
+    as the orchestrator calls the roles: only that supplier's thread, nothing from any other."""
     cuts = []
     for sid, events in threads.items():
         for i, m in enumerate(events):
             if m.get("from") != "buyer" and m.get("status") not in ("walked_away", "no_bid"):
-                cuts.append({**{s: ev[:1] for s, ev in threads.items() if s != sid}, sid: events[: i + 1]})
+                cuts.append({sid: events[: i + 1]})
     if len(cuts) <= n:
         return cuts
     step = (len(cuts) - 1) / (n - 1) if n > 1 else 0
@@ -148,7 +153,7 @@ def main() -> None:
         s = record["session"]
         case = cases.get(s["case_id"])
         trace = (s.get("result") or {}).get("trace") or []
-        if case and trace:
+        if case and trace and len(case.get("suppliers") or []) == 1:  # one-on-one cases only (team decision)
             jobs += [(case, cut) for cut in points(threads_from_trace(trace), args.points)]
     print(f"{len(jobs)} decision points from {len(list(RUNS.glob('*.json')))} sessions, {args.parallel} in parallel")
     t0 = time.monotonic()

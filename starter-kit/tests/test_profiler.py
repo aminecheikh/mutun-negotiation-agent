@@ -86,3 +86,22 @@ def test_precomputed_cache_is_valid_for_every_supplier():
     for sid, p in cache.items():
         assert p["persona"] in {"cash_short", "full_order_book", "monopolist", "partner", "price_fighter", "unknown"}
         assert all(t["id"] for t in p["traits"]), sid
+
+
+def test_refine_when_sunday_release_facts_bypasses_old_profile_and_falls_back_to_current_rules():
+    from dataclasses import replace
+
+    fresh = replace(
+        DOSSIER,
+        persona="cash_short",
+        evidence=("release fact news:NEW: bank is watching; liquidity constrained", *DOSSIER.evidence),
+    )
+    calls = []
+
+    def complete(system, user):
+        calls.append(user)
+        return "unavailable"
+
+    profiler = LLMProfiler(complete, cache={SID: validated(GOOD, DOSSIER)})
+    assert profiler.refine({}, fresh) == fresh  # the model failed: today's rules, not yesterday's profile
+    assert len(calls) == 1 and "news:NEW" in calls[0]

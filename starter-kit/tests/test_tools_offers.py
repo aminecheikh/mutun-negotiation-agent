@@ -286,3 +286,50 @@ def test_plan_when_supplier_does_not_move_never_repeats_our_price(tools):
     ours = [p.term_sheets[0]["unit_price"] for p in plans]
     for before, after in zip(ours, ours[1:], strict=False):
         assert after > before or after >= 52.9 - 0.005  # a visible step, unless we already reached its price
+
+
+def test_c_minimum_floor_when_the_round_changes_stays_the_same_price(tools):
+    # Saed (sweep e848872): P01's offer crept up (134.87 -> 134.88) while the supplier was still moving: the floor's
+    # grid ran from this round's price to its current price, so the same floor moved by a cent each round
+    case = CASES["case:P01"]
+    sid, opening = P01[1], complete_offer(CASES["case:P01"], P01[2])
+    events = [supplier_msg(sid, opening, 0)]
+    ctx = tools.prepare(case, {sid: events})
+    supplier, band = tools.supplier(ctx, sid, opening), ctx.bands[sid]
+    floors = {
+        offers._not_below_c_minimum(case, {**band.target_terms, "unit_price": low}, None, supplier, band, limit)[
+            "unit_price"
+        ]
+        for low, limit in ((120.0, 138.55), (121.5, 138.0), (122.3, 137.4))
+    }
+    assert len(floors) == 1
+
+
+def test_plan_when_supplier_offers_a_cheaper_alternative_sends_exactly_that_alternative(tools):
+    # Saed: send the supplier's cheaper alternative back as our sheet (it will agree to its own proposal)
+    case_id, sid, opening = P01
+    case = CASES[case_id]
+    events = [supplier_msg(sid, opening, 0)]
+    ctx = tools.prepare(case, {sid: events})
+    reply = supplier_msg(sid, {**opening, "unit_price": 136.0}, 1)
+    alternative = {**opening, "unit_price": 131.0, "payment_days": 30}
+    reply["term_sheets"].append({"term_sheet_id": f"offer:{sid[4:]}-1-a", "terms": alternative})
+    events = [*events, buyer_msg({**opening, "unit_price": 128.0}), reply]
+    plan = tools.plan_offers(ctx, sid, events, Tactic(sid, "send"), READ)
+    assert plan.term_sheets[0] == complete_offer(case, alternative)
+
+
+@pytest.mark.parametrize("case", list(CASES.values()), ids=list(CASES))
+def test_plan_when_above_target_our_steps_never_grow(tools, case):
+    # research 02 (Tey et al. 2021): growing late steps (Boulware) tell the supplier we have more to give - 11 of 19
+    # case files showed them, up to +13 in the last rounds; shrinking steps signal a limit. Above our target, with
+    # a supplier conceding evenly, a step of ours is never larger than our previous one
+    base = case["buyer"].get("current_unit_price") or case["buyer"]["fallback_unit_price"]
+    opening = complete_offer(case, {"unit_price": round(base * 1.06, 2)})
+    sid = case["suppliers"][0]
+    theirs = [round(opening["unit_price"] * (1 - 0.003 * i), 2) for i in range(case.get("round_limit", 10))]
+    ctx, plans = play_rounds(tools, case, sid, opening, theirs)
+    band, ours = ctx.bands[sid], [p.term_sheets[0]["unit_price"] for p in plans]
+    steps = [(b, a - b) for b, a in zip(ours, ours[1:], strict=False)]
+    above = [step for before, step in steps if before >= band.target]
+    assert all(later <= earlier + 0.011 for earlier, later in zip(above, above[1:], strict=False)), above

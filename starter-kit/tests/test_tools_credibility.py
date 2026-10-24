@@ -28,13 +28,22 @@ def opening_thread(case: dict, sid: str, price: float) -> list[dict]:
     return [{"from": "sales", "status": "open", "term_sheets": [sheet], "attachments": [], "body": ""}]
 
 
-def test_assess_when_evidence_is_firm_allows_offers_down_to_its_floor():
-    c = credibility.assess("sup:x", floor=100.0, supplier_price=130.0, estimate=Estimate(100.0, "should-cost", 5.0))
-    assert c.lowest_price == pytest.approx(95.0)
+def test_assess_when_evidence_is_firm_allows_offers_down_to_its_cost_plus_a_healthy_margin():
+    # Saed (sweep e848872): first offers worth more than the best deal (P08 1.23, P10 1.09) - should-cost is "full
+    # cost without margin" (company.md); no supplier sells at bare cost, so the lowest credible price keeps a margin
+    c = credibility.assess("sup:x", floor=100.0, supplier_price=130.0, estimate=Estimate(100.0, "should-cost", 5.0),
+                           margin=0.08)  # fmt: skip
+    assert c.lowest_price == pytest.approx(100.0 / 0.92, abs=0.01)
+
+
+def test_assess_when_the_case_states_a_sustainable_margin_uses_it():
+    c = credibility.assess("sup:x", floor=100.0, supplier_price=130.0, estimate=Estimate(100.0, "should-cost", 5.0),
+                           margin=0.10)  # fmt: skip
+    assert c.lowest_price == pytest.approx(100.0 / 0.90, abs=0.01)
 
 
 def test_assess_when_evidence_is_rough_never_goes_further_under_its_offer_than_our_error():
-    c = credibility.assess("sup:x", floor=80.0, supplier_price=100.0, estimate=Estimate(80.0, "own prices", 20.0))
+    c = credibility.assess("sup:x", floor=60.0, supplier_price=100.0, estimate=Estimate(60.0, "own prices", 20.0))
     assert c.lowest_price == pytest.approx(80.0) and "20" in c.reason
 
 
@@ -44,9 +53,9 @@ def test_assess_when_there_is_no_cost_evidence_stays_close_to_its_offer():
 
 
 def test_assess_follows_the_suppliers_current_offer():
-    est = Estimate(80.0, "own prices", 20.0)
-    high = credibility.assess("sup:x", floor=70.0, supplier_price=100.0, estimate=est)
-    lower = credibility.assess("sup:x", floor=70.0, supplier_price=90.0, estimate=est)
+    est = Estimate(60.0, "own prices", 20.0)
+    high = credibility.assess("sup:x", floor=60.0, supplier_price=100.0, estimate=est)
+    lower = credibility.assess("sup:x", floor=60.0, supplier_price=90.0, estimate=est)
     assert lower.lowest_price < high.lowest_price
 
 
@@ -61,3 +70,11 @@ def test_plan_when_any_case_opens_our_first_offer_is_credible(tools, case):
     assert lowest <= opening
     plan = tools.plan_offers(ctx, sid, events, Tactic(sid, "send"), None)
     assert plan.term_sheets[0]["unit_price"] >= lowest - 0.005
+
+
+def test_assess_when_its_price_is_already_under_our_cost_estimate_does_not_bind_us_to_its_price():
+    # P02: the supplier sells under our should-cost; cost plus margin would only repeat its own price back - its price
+    # shows our estimate is too high, so the evidence does not bind
+    c = credibility.assess("sup:x", floor=374.95, supplier_price=370.96, estimate=Estimate(374.95, "should-cost", 5.0),
+                           margin=0.005)  # fmt: skip
+    assert c.lowest_price < 370.96 and "under our cost estimate" in c.reason

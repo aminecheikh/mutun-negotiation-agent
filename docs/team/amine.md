@@ -5,8 +5,8 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 
 ## Now
 
-- Sweep 885eec2 on main: 55.1 (baseline 54.4). Next: no offer below the C minimum in stabilise cases (P02/P03),
-  then P05 RFQ holding, P11 stall, P10 firm-evidence opening; then A6 Sunday release.
+- Sweep e848872: 58.6 (baseline 54.4). Since then on fix/negotiation-issues: closing rule, Saed's PR #4 and notes,
+  same-offer-twice rule, tapering steps. Next: a hosted sweep on these; then A6 Sunday release.
 
 ## Tasks
 
@@ -51,6 +51,16 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 - @jeddou (19:15): two more changes in your files (please review): `runner.iteration` calls `pipeline.sync` before
   the verdict (bands re-priced by a cost breakdown reach the policy at once); a counter to a `final_offer` goes out
   only if `policy.offers_more` (worth more to the supplier than our last message), else accept or hold.
+- @jeddou (22:30): with the user's OK, more in your files (please review): `policy.verdict` - several suppliers
+  compare best offers once each gave its best (final, agreement, no messages, or the same offer twice), then accept
+  one; an agreement is never offered more; `cheaper_alternative` sends a supplier's cheaper alternative back;
+  `others_settled`, `repeated_offer`; `runner.send` stops on 422 'round limit reached' (`th.exhausted`) and
+  `arbiter._close` marks an ended thread dead; keep-alive questions ask for terms; `arbiter` logs since_reply_s.
+  Open: the arena may serialise one session's calls - an accept waited ~30 s behind two supplier replies in P05.
+- @saed (22:30): merged your PR #4 into fix/negotiation-issues (strategist.md conflict: your ordered decision kept;
+  `accept_ready` returns True for agreed). Your notes are done: credible first offers (margin over firm cost),
+  P01 creep (stable C-minimum floor), cheaper alternatives sent back, tool loop ends 1 s before the 17 s bound and
+  asks for JSON only on the answer turn. Also `roles/llm.py` writes every call to runs/llm/<date>/.
 - @jeddou @saed (18:55): kit changes in DECISIONS.md: `llm.py` (max_retries=0, timeout parameter) and `data.py` (one lock).
 
 ## Log
@@ -114,6 +124,17 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
   one accept named a stale offer ID (422); (3) P11 repeated the same offer 3 rounds, went final (0.54);
   (4) P10 still opens 28 % under on a firm should-cost and gets an instant final offer.
 
+- 22:30 - since 20:40, user-approved, test-first, branch fix/negotiation-issues: squeeze-case floor + no repeated
+  price on a standstill (24ccdb4), stuck counts only offers (0c0c6f1), every supplier gets an offer (525fe5b), LLM
+  call records in runs/llm (d2c4476); sweep e848872 58.6. Closing rule per the user: no instant accept, one supplier
+  accepts when it cannot go lower within our margin, several suppliers compare best offers then accept one
+  (a5b8eae); P05 then scored 0 - agreements now count as a supplier's best, round-limit and ended-thread 422s end
+  the sending (cf0e20e). Merged Saed's PR #4 (fdbfca7). Saed's notes: credible first offers keep a healthy margin
+  over firm cost evidence (4b6c993), a C-minimum floor that does not creep and a repricer that works there
+  (133acc8), a supplier's cheaper alternative is sent back (8adf7c8), tool loop fits the clock and ends with JSON
+  (8d54375), keep-alives ask for terms (4d75d57). The user: same offer twice = its best (b1ef5b5). Research: steps
+  never grow above target (feaf893). 592 tests.
+
 ## Runs
 
 | When | Commit | Cases | Sessions | Mean | Notes |
@@ -125,3 +146,5 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 | Sat 19:13 | 4c30c05 | practice (10) | 10 | 50.2 | baseline 54.4; alternatives ignored (P18 0.01), closed at target after 1 msg (P01, P03) |
 | Sat 19:26 | 26b72a8 | practice P18 | 1 | 0.00 | accepted the supplier's alternative by ID: 422 "not a standing offer", retried until timeout (fixed 4408cf5) |
 | Sat 20:30 | 885eec2 | practice (10) | 10 | 55.1 | baseline 54.4, last 50.2; P18 0.36, P07 0.68, P08 0.61 up; P02 0 and P03 offer-less (squeeze); P05 0.33 held two agreed suppliers |
+| Sat 21:17 | e848872 | practice (10) | 10 | 58.6 | P02 0.33 (first ever), P11 0.71, P18 0.50; P05 0.07: instant accept signed the dearer supplier |
+| Sat 21:37 | a5b8eae | practice P05 | 1 | 0.00 | waited on an above-target agreement; cheapest supplier walked; round-limit 422 ignored; timeout |

@@ -45,7 +45,7 @@ def tool_use(name, args, id_="t1"):
 
 ANSWER = json.dumps(
     {
-        "reads": {SID: {"p_more": 0.7, "walk_risk": 0.1, "wants": ["payment_days"], "signals": []}},
+        "read": {"p_more": 0.7, "walk_risk": 0.1, "wants": ["payment_days"], "signals": []},
         "tactic": {"supplier_id": SID, "action": "send", "levers": ["unit_price", "payment_days"], "claims": [],
                    "question": None, "rationale": "price_terms: 14 days is worth it"},
     }
@@ -74,7 +74,7 @@ def test_loop_runs_the_tool_and_returns_the_final_json():
     tools, ctx, threads, reads = setup([supplier(), buyer(), supplier(17.0, n=1)])
     box = StrategistToolbox(ctx, threads, reads, tools.plan_offers, tools.supplier_from_thread)
     fake = FakeConverse([tool_use("price_terms", {"supplier_id": SID, "changes": {"payment_days": 14}})])
-    reply = call_json_with_tools(fake, "sys", "user", box, timeout_s=5.0)
+    reply = call_json_with_tools(fake, "sys", "user", box, timeout_s=30.0)
     assert reply["tactic"]["supplier_id"] == SID
     assert box.calls == ["price_terms"]
     assert [s["final"] for s in fake.seen] == [False, True]  # the answer turn cannot call tools again
@@ -94,7 +94,7 @@ def test_loop_turns_a_bad_argument_into_an_error_result():
     tools, ctx, threads, reads = setup([supplier()])
     box = StrategistToolbox(ctx, threads, reads)
     fake = FakeConverse([tool_use("price_terms", {"supplier_id": SID, "changes": {"colour": "red"}})])
-    assert call_json_with_tools(fake, "sys", "user", box, timeout_s=5.0) is not None
+    assert call_json_with_tools(fake, "sys", "user", box, timeout_s=30.0) is not None
     result = fake.seen[1]["messages"][-1]["content"][0]
     assert result["is_error"] and "not negotiable" in result["content"]
 
@@ -213,3 +213,28 @@ def test_tools_timeout_is_longer_than_the_single_call():
     assert LLMStrategist(converse=FakeConverse([])).timeout_s > LLMStrategist().timeout_s
     config = OrchestratorConfig()
     assert config.strategist_tools_timeout_s + config.writer_timeout_s < config.move_budget_s
+
+
+# ---- Saed (sweep e848872): 3 tool calls returned no JSON, 4 took over 15 s -----------------------------------------
+
+
+def test_loop_when_the_answer_turn_comes_asks_for_the_json_only():
+    tools, ctx, threads, reads = setup([supplier(), buyer(), supplier(17.0, n=1)])
+    box = StrategistToolbox(ctx, threads, reads, tools.plan_offers, tools.supplier_from_thread)
+    fake = FakeConverse([tool_use("price_terms", {"supplier_id": SID, "changes": {"payment_days": 14}})])
+    call_json_with_tools(fake, "sys", "user", box, timeout_s=30.0)
+    last = fake.seen[1]["messages"][-1]["content"]
+    assert any(b.get("type") == "text" and "JSON" in b.get("text", "") for b in last)
+
+
+def test_loop_when_the_clock_is_short_skips_the_tools():
+    tools, ctx, threads, reads = setup([supplier()])
+    fake = FakeConverse([tool_use("price_terms", {"supplier_id": SID, "changes": {"payment_days": 14}})])
+    call_json_with_tools(fake, "sys", "user", StrategistToolbox(ctx, threads, reads), timeout_s=8.0)
+    assert [s["final"] for s in fake.seen] == [True]  # no time for a tool turn and an answer: answer at once
+
+
+def test_strategist_with_tools_finishes_before_the_orchestrator_stops_waiting():
+    from arena_kit.agents.buyer.config import OrchestratorConfig
+
+    assert LLMStrategist(converse=FakeConverse([])).timeout_s < OrchestratorConfig().strategist_timeout_s
