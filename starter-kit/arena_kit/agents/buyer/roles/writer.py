@@ -154,10 +154,20 @@ def template(ctx: CaseContext, tactic: Tactic, plan: OfferPlan, claims: list[str
     return Email(subject=subject, body="\n".join(lines))
 
 
+# Claims of our own movement; only allowed when the packages really are above our previous offer.
+MOVED_RE = re.compile(
+    r"\b(?:we|our (?:offer|proposal|position))\b[^.\n]{0,40}\b(?:have |has )?(?:moved|improved|raised|increased|"
+    r"come (?:closer|towards)|stepped)\b",
+    re.I,
+)
+
+
 class LLMWriter:
     def __init__(self, complete=None):
         self.complete = complete
         self.system = prompt("writer")
+        self.last_problems: list[str] = []  # why the last model e-mail was rejected (logs, bench)
+        self.last_used_model = False
 
     def write(self, ctx: CaseContext, tactic: Tactic, plan: OfferPlan, events: list[dict]) -> Email:
         sid = tactic.supplier_id
@@ -171,6 +181,7 @@ class LLMWriter:
         last = latest(events)
         supplier_text = str(last.get("body", ""))[:1500]
         dossier = ctx.dossiers.get(sid)
+        moved = movement(plan, events)
         user = json.dumps(
             {
                 "case_title": ctx.case["title"],
@@ -185,21 +196,26 @@ class LLMWriter:
                 "supplier_status": last.get("status"),
                 "supplier_last_email": supplier_text,
                 "tactic": {"question": tactic.question, "rationale": tactic.rationale},
-                "movement": movement(plan, events),
+                "movement": moved,
                 "claim_sentences": sentences,
                 "term_sheets": plan.term_sheets,
             },
             ensure_ascii=False,
             default=str,
         )
+        self.last_problems, self.last_used_model = [], False
         reply = call_json(self.complete, self.system, user, TIMEOUT_S)
-        if not reply or not reply.get("body"):
+        if not isinstance(reply, dict) or not isinstance(reply.get("body"), str) or not reply["body"].strip():
             return fallback
-        body = str(reply["body"]).strip()
+        body = reply["body"].strip()
         allowed_text = f"{supplier_text}\n{tactic.question or ''}"
         problems = check(body, sentences, set(refs), allowed_text, ctx.case["title"])
+        if not moved["we_moved"] and (claim := MOVED_RE.search(body)):
+            problems.append(f"claims a move we did not make: {claim.group(0)!r}")
         if problems:
+            self.last_problems = problems
             log.warning("%s: writer e-mail rejected (%s) - using the template", sid, "; ".join(problems))
             return fallback
+        self.last_used_model = True
         subject = str(reply.get("subject") or "").strip() or fallback.subject
         return Email(subject=subject[:300], body=body, refs=refs)

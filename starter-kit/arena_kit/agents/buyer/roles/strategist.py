@@ -193,13 +193,19 @@ def _case_view(ctx: CaseContext) -> dict:
     }
 
 
+def _items(x) -> list:
+    """A model field that should be a list: anything else (a string, a number, null) counts as empty."""
+    return list(x) if isinstance(x, list | tuple) else []
+
+
 def refined_read(sid: str, raw: dict | None, rule: BehaviourRead, events: list[dict]) -> BehaviourRead:
     """The model's read, bounded: probabilities in [0, 1], wants only known terms, signals only real quotes."""
     if not isinstance(raw, dict):
         return rule
     text = "\n".join(str(m.get("body") or "") for m in events if m.get("from") != "buyer")
-    wants = tuple(dict.fromkeys(w for w in raw.get("wants") or () if w in TERMS)) or rule.wants
-    signals = tuple(s for s in raw.get("signals") or () if isinstance(s, str) and s and s in text)[:3]
+    wants = tuple(dict.fromkeys(w for w in _items(raw.get("wants")) if isinstance(w, str) and w in TERMS))
+    wants = wants or rule.wants
+    signals = tuple(s for s in _items(raw.get("signals")) if isinstance(s, str) and s and s in text)[:3]
     return BehaviourRead(
         sid, _clip(raw.get("p_more"), rule.p_more), _clip(raw.get("walk_risk"), rule.walk_risk), wants,
         signals or rule.signals,
@@ -209,14 +215,16 @@ def refined_read(sid: str, raw: dict | None, rule: BehaviourRead, events: list[d
 def safe(ctx: CaseContext, threads: dict[str, list[dict]], raw: dict, rule: Tactic) -> Tactic:
     """The model's tactic within our policy. Anything it gets wrong is replaced by the rule's choice."""
     sid = raw.get("supplier_id")
-    if sid not in threads:
+    if not isinstance(sid, str) or sid not in threads:
         return rule
     events = threads[sid]
     action = raw.get("action")
     used = cited_refs(threads)
     usable = {i for i, _ in usable_claims(ctx, sid, used)}
-    claims = tuple(dict.fromkeys(i for i in raw.get("claims") or () if isinstance(i, int) and i in usable))[:3]
-    levers = negotiable_levers(ctx, raw.get("levers") or ()) or (rule.levers if rule.supplier_id == sid else ())
+    picked = (i for i in _items(raw.get("claims")) if isinstance(i, int) and not isinstance(i, bool) and i in usable)
+    claims = tuple(dict.fromkeys(picked))[:3]
+    levers = [lever for lever in _items(raw.get("levers")) if isinstance(lever, str)]
+    levers = negotiable_levers(ctx, levers) or (rule.levers if rule.supplier_id == sid else ())
     question = raw.get("question")
     if not isinstance(question, str) or not question.strip() or any(ch.isdigit() for ch in question):
         question = None
@@ -267,10 +275,18 @@ class LLMStrategist:
         reply = call_json(self.complete, self.system, user, self.timeout_s)
         if not isinstance(reply, dict) or not isinstance(reply.get("tactic"), dict):
             return rule
-        for sid, raw in (reply.get("reads") or {}).items():
-            if sid in reads:  # the orchestrator passes this dict on to plan_offers
-                reads[sid] = refined_read(sid, raw, reads[sid], threads[sid])
-        tactic = safe(ctx, threads, reply["tactic"], rule)
+        try:
+            model_reads = reply.get("reads") if isinstance(reply.get("reads"), dict) else {}
+            refined = {
+                sid: refined_read(sid, raw, reads[sid], threads[sid])
+                for sid, raw in model_reads.items()
+                if sid in reads
+            }
+            tactic = safe(ctx, threads, reply["tactic"], rule)
+        except Exception as e:  # a malformed answer must never cost the round
+            log.warning("strategist answer unusable (%r) - using the rule", e)
+            return rule
+        reads.update(refined)  # the orchestrator passes this dict on to plan_offers
         log.info("%s: strategist %s %s claims=%s (%s)", tactic.supplier_id, tactic.action, tactic.levers,
                  tactic.claims, tactic.rationale)  # fmt: skip
         return tactic

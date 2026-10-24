@@ -198,3 +198,17 @@ def test_rule_analyst_when_supplier_irritated_raises_walk_risk():
     )
     read = rule_read(ctx, threads)[SID]
     assert read.walk_risk > 0.2 and any("without any movement" in s.lower() for s in read.signals)
+
+
+def test_llm_strategist_when_fields_are_malformed_never_raises():
+    ctx, threads = setup([supplier(), buyer(), supplier(n=1)])
+    bad = [
+        {"reads": [1, 2], "tactic": {"supplier_id": SID, "action": "send", "claims": 3, "levers": "unit_price"}},
+        {"reads": {SID: {"wants": 5, "signals": None}}, "tactic": {"supplier_id": ["x"], "action": "send"}},
+        {"reads": {SID: "open"}, "tactic": {"supplier_id": SID, "action": "send", "claims": [True, None, 2.5]}},
+    ]
+    for answer in bad:
+        reads = rule_read(ctx, threads)
+        tactic = LLMStrategist(lambda s, u, a=answer: json.dumps(a)).choose(ctx, threads, reads)
+        assert tactic.supplier_id == SID and tactic.action in ("send", "accept")
+        assert all(isinstance(i, int) and not isinstance(i, bool) for i in tactic.claims)

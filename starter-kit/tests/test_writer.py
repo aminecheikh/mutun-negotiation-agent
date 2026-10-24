@@ -172,3 +172,16 @@ def test_template_when_we_raise_our_offer_says_we_moved():
     plan = OfferPlan(SID, ({"unit_price": 49.5, "payment_days": 30, "contract_months": 12},), (1.0,), "")
     email = template(ctx("unknown"), TACTIC, plan, [], thread([52.9, 51.9], ours=[48.67]))
     assert "We have moved towards your position." in email.body
+
+
+def test_writer_when_model_claims_a_move_we_did_not_make_uses_template():
+    plan = OfferPlan(SID, ({"unit_price": 48.67, "payment_days": 30, "contract_months": 12},), (1.0,), "")
+    events = thread([52.9, 51.9], ours=[48.67])
+
+    def complete(system, user):
+        return json.dumps({"subject": "Re", "body": body("Thank you.", "We have moved towards your position.")})
+
+    writer = LLMWriter(complete)
+    email = writer.write(ctx("unknown"), TACTIC, plan, events)
+    assert "moved towards" not in email.body and not writer.last_used_model
+    assert any("move we did not make" in p for p in writer.last_problems)
