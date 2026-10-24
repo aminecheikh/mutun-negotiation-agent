@@ -84,9 +84,8 @@ def price_bands(case: dict, threads: dict[str, list[dict]], package) -> dict[str
     for sid, events in threads.items():
         terms = quotes[sid]
         if terms.get("unit_price") is not None:  # no bid: no band
-            rivals = [t["unit_price"] for s, t in quotes.items() if s != sid and t.get("unit_price") is not None]
-            sig = read_signals(events, package)
-            out[sid] = supplier_band(case, package, sid, terms, standard_terms(events), rivals, sig)
+            sig = read_signals(events, package)  # each supplier on its own: no other bidder's quote (organisers)
+            out[sid] = supplier_band(case, package, sid, terms, standard_terms(events), sig)
     return out
 
 
@@ -95,7 +94,7 @@ def _first_quote(events: list[dict]) -> dict:
     return next(sheets, standing(events)[1])
 
 
-def supplier_band(case: dict, package, sid: str, terms: dict, std: dict, rivals=(), signals=None) -> PriceBand:
+def supplier_band(case: dict, package, sid: str, terms: dict, std: dict, signals=None) -> PriceBand:
     sig = signals or SupplierSignals()
     cost = cost_estimate(case, package, sid, sig)
     supplier = supplier_estimate(case, package, sid, terms, std, cost)
@@ -108,7 +107,7 @@ def supplier_band(case: dict, package, sid: str, terms: dict, std: dict, rivals=
     floor, lowest_plausible, why = _floor(package, sid, supplier, cost)
     best = _best_package(case, opening, std, supplier, lowest_plausible, ceiling) if floor else None
     if best is None:
-        price, reason = _anchor_without_cost(case, terms["unit_price"], fair, rivals, ceiling)
+        price, reason = _anchor_without_cost(case, terms["unit_price"], fair, ceiling)
         best = _cheapest_terms_at(case, opening, std, price)
         why.append(f"target without a cost estimate: {reason}; terms chosen for the lowest C at that price")
     fair_why = f"fair: {fair.source}" if fair else "fair: no cost drivers"
@@ -135,15 +134,14 @@ def _cheapest_terms_at(case: dict, opening: dict, std: dict, price: float) -> di
     return min(valid, key=lambda c: total_cost(case, c, std))
 
 
-def _anchor_without_cost(case: dict, opening: float, fair, rivals, ceiling: float) -> tuple[float, str]:
+def _anchor_without_cost(case: dict, opening: float, fair, ceiling: float) -> tuple[float, str]:
     """Without a cost estimate: the lowest price the case itself justifies - the cost drivers' fair price,
-    today's price (no increase without a reason), the cheapest other bidder, our fallback - else a share of
-    the opening, said plainly, for the concession fit to correct."""
+    today's price (no increase without a reason), our fallback - else a share of the opening, said plainly,
+    for the concession fit to correct. Never another bidder's quote (no inter-supplier comparison)."""
     b = case["buyer"]
     anchors = [
         (fair.value if fair else None, "fair price from the part's cost drivers"),
         (b.get("current_unit_price"), "today's price: no increase without a reason"),
-        (min(rivals) if rivals else None, "the cheapest other bidder's quote"),
         (b.get("fallback_unit_price"), "our fallback price"),
     ]
     usable = [(price, why) for price, why in anchors if price and price < ceiling]

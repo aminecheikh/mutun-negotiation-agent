@@ -5,11 +5,11 @@ own `facts`) the way the arena checks it (brief/api.md "What counts"), so it com
 `irrelevant`, never `contradicted`. Only claims that favour us are returned, strongest first. `strength` only
 ranks claims for the strategist; it never decides a price.
 
-Kinds: index_change (the part's cost drivers and the series the supplier names itself), rival_quote (quotes
-of this case), rival_offer (cheaper standing offers of other bidders in this session), scorecard (on-time
+Kinds: index_change (the part's cost drivers and the series the supplier names itself), scorecard (on-time
 delivery below target), quality (ppm above what it commits to), po_history (cheaper past orders of the part),
 forecast (our demand rises: volume to trade), should_cost (estimate below its price), notice (a letter giving
-less notice than the contract requires).
+less notice than the contract requires). Never another supplier's quote or offer: the organisers ruled out
+inter-supplier comparison, so each supplier is argued with on its own data only.
 """
 
 import re
@@ -45,11 +45,10 @@ def candidates(case: dict, package, supplier_id: str, threads: dict[str, list[di
     threads = threads or {}
     ask, asked_pct = _position(case, facts, threads, supplier_id)
     named = _named_series(package, threads.get(supplier_id, []))
-    found = [*_rival_offers(threads, supplier_id, ask), *_scorecard(facts, supplier_id, threads)]
+    found = list(_scorecard(facts, supplier_id, threads))
     found += _notice(case, facts, supplier_id)
     for part in case.get("parts", []):
         found += _index_changes(package, facts, part, asked_pct, named)
-        found += _rival_quotes(case, facts, part, supplier_id, ask)
         found += _po_history(package, facts, part, supplier_id, ask)
         found += _forecast(facts, part)
         found += _should_cost(facts, part, ask)
@@ -124,35 +123,6 @@ def _short_name(name: str, limit: int = 60) -> str:
     while len(short) > limit and "," in short:
         short = short.rsplit(",", 1)[0].strip()
     return short
-
-
-def _rival_quotes(case: dict, facts: _Facts, part: str, sid: str, ask: float | None) -> list[Claim]:
-    """Quotes of this case (its refs or our alternative) by another supplier for the same part, below the ask."""
-    alt = (case.get("buyer", {}).get("alternative") or {}).get("ref")
-    out = []
-    for ref in dict.fromkeys([*case.get("refs", []), alt]):
-        quote = facts.get(ref) if ref and ref.startswith("quote:") else None
-        if not quote or quote.get("part") != part or quote.get("supplier") == sid or not ask:
-            continue
-        price = quote.get("unit_price")
-        if price and price < ask:
-            sentence = f"We hold a quote at EUR {price:.2f} per unit for the same part ({ref})."
-            out.append(_claim(sentence, (ref,), "rival_quote", price, (ask - price) / ask * 10))
-    return out
-
-
-def _rival_offers(threads: dict, sid: str, ask: float | None) -> list[Claim]:
-    """In an RFQ: the cheapest standing offer of another bidder, if below this supplier's."""
-    offers = []
-    for other, events in threads.items():
-        offer_id, terms = standing(events) if other != sid and events else (None, {})
-        if offer_id and terms.get("unit_price"):
-            offers.append((terms["unit_price"], offer_id))
-    if not offers or not ask or min(offers)[0] >= ask:
-        return []
-    price, offer_id = min(offers)
-    sentence = f"Another supplier offers EUR {price:.2f} per unit for this part ({offer_id})."
-    return [_claim(sentence, (offer_id,), "rival_offer", price, (ask - price) / ask * 10)]
 
 
 def _scorecard(facts: _Facts, sid: str, threads: dict) -> list[Claim]:

@@ -40,12 +40,9 @@ def recomputed(case: dict, claim, threads) -> float | None:
     if claim.kind == "index_change":
         earlier, later = (fact(case, r)["value"] for r in refs)
         return (later / earlier - 1) * 100
-    if claim.kind in ("rival_quote", "should_cost"):
+    if claim.kind == "should_cost":
         f = fact(case, refs[0])
         return f.get("unit_price") or f.get("unit_cost")
-    if claim.kind == "rival_offer":
-        sid = next(s for s, ev in threads.items() if ev[-1]["term_sheets"][0]["term_sheet_id"] == refs[0])
-        return threads[sid][-1]["term_sheets"][0]["terms"]["unit_price"]
     if claim.kind == "scorecard":
         return sum(fact(case, r)["otd_pct"] for r in refs) / len(refs)
     if claim.kind == "quality":
@@ -133,15 +130,18 @@ def test_candidates_when_past_orders_were_cheaper_cites_two_to_eight_lines_of_th
     assert all(FACTS[r]["unit_price"] < 138.55 for r in po.refs)
 
 
-def test_candidates_when_rfq_rival_offers_less_cites_its_offer_to_the_dearer_bidder(package):
+def test_candidates_when_rfq_never_cite_another_supplier(package):
+    # the organisers: no inter-supplier comparison - each supplier is negotiated on its own, so no claim names
+    # another bidder's offer or quote
     case = CASES["case:P05"]
     prices = {"sup:70210": 36.0, "sup:70240": 31.5, "sup:70250": 38.5}
     threads = threads_for(case, prices)
-    dear = claims.candidates(case, package, "sup:70250", threads)
-    cheapest = claims.candidates(case, package, "sup:70240", threads)
-    rival = next(c for c in dear if c.kind == "rival_offer")
-    assert rival.refs == ("offer:70240-0",) and rival.figure == 31.5
-    assert not [c for c in cheapest if c.kind == "rival_offer"]
+    for sid in case["suppliers"]:
+        others = {o[4:] for o in case["suppliers"] if o != sid}
+        for claim in claims.candidates(case, package, sid, threads):
+            assert not claim.kind.startswith("rival")
+            owners = {r.split(":", 1)[1].split("-")[0] for r in claim.refs if r.startswith(("offer:", "quote:"))}
+            assert not owners & others
 
 
 def test_candidates_when_case_only_facts_hold_a_letter_uses_them():

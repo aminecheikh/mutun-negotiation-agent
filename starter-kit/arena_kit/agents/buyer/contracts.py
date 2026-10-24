@@ -29,7 +29,7 @@ class Claim:
 
     sentence: str
     refs: tuple[str, ...]
-    kind: str  # index_change | rival_quote | scorecard | quality | po_history | should_cost | forecast | notice
+    kind: str  # index_change | scorecard | quality | po_history | should_cost | forecast | notice
     figure: float | None
     favours_buyer: bool
     strength: float  # 0..1, how much it should hurt the supplier's position
