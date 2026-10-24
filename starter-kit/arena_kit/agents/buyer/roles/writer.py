@@ -296,6 +296,7 @@ class LLMWriter:
                 "case_title": ctx.case["title"],
                 "briefing": ctx.case.get("briefing", ""),
                 "round": sum(m.get("from") == "buyer" for m in events) + 1,
+                "round_limit": ctx.case.get("round_limit", 10),
                 "language": language_of(events),
                 "supplier": {
                     "name": dossier.name if dossier else sid,

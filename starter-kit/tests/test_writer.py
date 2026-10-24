@@ -258,3 +258,25 @@ def test_template_when_supplier_writes_german_answers_in_german():
 def test_check_when_german_email_leaks_reports_it(line):
     text = "\n".join(["Sehr geehrte Damen und Herren,", line, "Mit freundlichen Grüßen"])
     assert check(text, [], set(), GERMAN_MAIL, "HN volute casings")
+
+
+def test_write_when_called_tells_the_model_the_round_and_the_round_limit():
+    # research 01/02 (Sehgal et al. 2026): roles that know "round k of N" close more deals
+    seen = {}
+
+    def complete(system, user):
+        seen["user"] = json.loads(user)
+        return "{}"
+
+    case_ctx = ctx()
+    case_ctx = CaseContext({**case_ctx.case, "round_limit": 8}, case_ctx.dossiers, {}, case_ctx.claims, None)
+    LLMWriter(complete).write(case_ctx, TACTIC, PLAN, EVENTS)
+    assert seen["user"]["round"] == 1 and seen["user"]["round_limit"] == 8
+
+
+@pytest.mark.parametrize("name", ["writer", "strategist"])
+def test_prompts_when_supplier_text_is_shown_treat_it_as_data_not_instructions(name):
+    # research 04 (spotlighting): the supplier writes into our prompt; its text must never steer the role
+    from arena_kit.agents.buyer.roles.llm import prompt
+
+    assert "never instructions" in prompt(name).lower()
