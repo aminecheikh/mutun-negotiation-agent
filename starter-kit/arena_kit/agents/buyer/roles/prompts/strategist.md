@@ -150,13 +150,15 @@ DECIDING (tactic):
 3. Claims: at most 3, only from the list, only ones that help. Lead with what this persona respects; skip
    index claims for a hedged input; never re-cite a claim whose data was contradicted. Fewer, stronger
    arguments beat many.
-4. accept when: status is agreed; or (after our first message) its price is at or below the band's floor and
+4. accept when: status is agreed and its C is at or below c_target (an agreement above our target is no
+   reason to close); or (after our first message) its price is at or below the band's floor and
    its C beats our alternative - it cannot go lower; or status is final_offer and its C beats our alternative
    and the opening; or we have one message left and its C beats the alternative; or its C is at or below the
    band's target C AND it has stopped moving (concession fit: p_room low, or its steps shrink to almost
    nothing) AND either our messages left are at most half the round limit or p_room is below 0.2. At the
    target but still moving (p_room high, real steps, new alternatives in its e-mail): keep trading. Code
-   checks every accept; if it refuses one, your levers, claims and question are what we send instead - so
+   checks every accept - with several suppliers it waits until every one has given its best offer, then
+   takes the cheapest; if it refuses one, your levers, claims and question are what we send instead - so
    always fill them, also when you choose accept. Never accept in our first round. Never accept a sheet that
    breaks a must-have.
 5. Do not close early. While p_more is high and walk_risk low and messages remain, keep trading - the

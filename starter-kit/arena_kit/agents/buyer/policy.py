@@ -168,12 +168,13 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
         return Verdict("counter", "first answer: never take the opening quote")
     band = session.band(th.supplier_id)
     early = target_is_prior(session, th)
-    at_target = ok and band is not None and th.c <= band.c_target * (1 + cfg.accept_eps) and not early
+    meets = band is None or th.c <= band.c_target * (1 + cfg.accept_eps)  # our expectation: the band target
+    at_target = ok and band is not None and meets and not early
     final_closed = th.status == "final_offer" and not counter_allowed(session, th)
     forced = [
         why
         for cond, why in (
-            (th.status == "agreed", "supplier agreed to our sheet"),
+            (th.status == "agreed" and meets, "supplier agreed to our sheet"),  # only what meets our expectation
             (left <= 0, "no messages left"),
             (at_target, "standing sheet at our target"),
             (final_closed, "final offer, no counter worth the risk"),
@@ -189,10 +190,17 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
             if th.status in ("final_offer", "agreed") or left < 1 or session.in_close_window():
                 return Verdict("park", f"{forced[0]}, but a cheaper acceptable sheet is on the table")
             return Verdict("counter", f"{forced[0]}, but a cheaper acceptable sheet is on the table: negotiate on")
+        if left > 0 and not session.in_close_window() and not others_settled(session, th):
+            # several suppliers: compare their best offers once every one has given it, then accept one (the user)
+            if th.status in ("final_offer", "agreed"):
+                return Verdict("park", f"{forced[0]}, waiting for the other suppliers' best offers")
+            return Verdict("counter", f"{forced[0]}, the other suppliers have not given their best offers yet")
         return Verdict("accept", forced[0])
     if left <= 0:
         return Verdict("dead", "no messages left and the sheet is not acceptable")
     if th.status == "final_offer":
+        if ok and cheaper is not None:  # its best, but another acceptable offer is cheaper: hold, do not push it
+            return Verdict("park", "final offer, but a cheaper acceptable sheet is on the table")
         if counter_allowed(session, th):
             return Verdict(
                 "counter", "final offer clearly above target: one counter", accept_permitted=ok,
@@ -201,7 +209,22 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
         return Verdict("dead", "final offer we cannot accept and should not push")
     if session.freeze and best_acceptable(session, idle_only=False) is not None:
         return Verdict("park", "freeze before the cap: an acceptable sheet is on the table")
-    return Verdict("counter", "negotiate", accept_permitted=ok and cheaper is None and not early)
+    settled = others_settled(session, th)
+    return Verdict("counter", "negotiate", accept_permitted=ok and cheaper is None and not early and settled)
+
+
+def others_settled(session: CaseSession, th: ThreadState) -> bool:
+    """Every other live supplier has given its best offer: a final offer, an agreement that meets our expectation
+    (the band target), or no messages left. One supplier: trivially true."""
+    for other in session.alive():
+        if other is th or other.status == "final_offer" or other.moves_left(session.case) <= 0:
+            continue
+        band = session.band(other.supplier_id)
+        if other.status == "agreed" and acceptable(session, other):
+            if band is None or other.c <= band.c_target * (1 + session.config.accept_eps):
+                continue
+        return False
+    return True
 
 
 def target_is_prior(session: CaseSession, th: ThreadState) -> bool:

@@ -96,12 +96,18 @@ def test_safe_filters_claims_levers_and_question_with_figures():
     assert tactic.question is None
 
 
-def test_safe_when_supplier_agreed_accepts():
-    ctx, threads = setup([supplier(), buyer(), supplier(status="agreed", n=1)])
+def test_safe_when_supplier_agreed_at_or_below_our_target_accepts():
+    ctx, threads = setup([supplier(), buyer(), supplier(12.0, status="agreed", n=1)])  # far below any target
     tactic = safe(
         ctx, threads, {"supplier_id": SID, "action": "send", "levers": ["unit_price"]}, rule_tactic(ctx, threads)
     )
     assert tactic.action == "accept"
+
+
+def test_accept_ready_when_supplier_agreed_above_our_target_is_not_forced():
+    # the user: an agreement is taken only if it meets our expectation (the band target)
+    ctx, threads = setup([supplier(), buyer(), supplier(17.3, status="agreed", n=1)])
+    assert not accept_ready(ctx, SID, threads[SID])
 
 
 def test_safe_when_no_messages_left_accepts():

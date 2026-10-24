@@ -98,8 +98,10 @@ def accept_ready(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
     c = standing_c(ctx, events)
     band = ctx.bands.get(sid)
     alt = ctx.c_alternative if ctx.c_alternative is not None else math.inf
-    if status == "agreed" or moves_left(ctx.case, events) <= 0:
+    if moves_left(ctx.case, events) <= 0:
         return True
+    if status == "agreed":  # as the policy: an agreement is taken only if it meets our expectation (the band target)
+        return band is None or c <= band.c_target * (1 + OrchestratorConfig().accept_eps)
     if our_messages(events) == 0:
         return False  # the opening quote is the score's zero line: taking it scores 0
     if at_floor(ctx, sid, events) and c < alt:
