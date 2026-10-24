@@ -2,6 +2,7 @@
 modules below; replace their placeholder logic, keep the signatures (or change them in contracts.py
 with the team)."""
 
+from ....docs import standard_terms
 from ..contracts import BehaviourRead, CaseContext, ConcessionFit, OfferPlan, Tactic
 from . import bands, claims, concession, dossier, offers
 
@@ -19,10 +20,17 @@ class DataTools:
             c_alternative=bands.alternative_cost(case),
         )
 
+    def supplier(self, ctx: CaseContext, supplier_id: str, terms: dict, std: dict | None = None) -> dict | None:
+        """Our estimate of the supplier (full cost, cost of money, standard terms) for supplier_value."""
+        return bands.supplier_estimate(ctx.case, self.package, supplier_id, terms, std or {})
+
     def fit_concessions(self, ctx: CaseContext, supplier_id: str, events: list[dict]) -> ConcessionFit:
         return concession.fit(supplier_id, events)
 
     def plan_offers(
         self, ctx: CaseContext, supplier_id: str, events: list[dict], tactic: Tactic, read: BehaviourRead
     ) -> OfferPlan:
-        return offers.plan(ctx, supplier_id, events, tactic, read)
+        quotes = (m["term_sheets"][0]["terms"] for m in events if m.get("from") != "buyer" and m.get("term_sheets"))
+        opening = next(quotes, {})
+        supplier = self.supplier(ctx, supplier_id, opening, standard_terms(events)) if opening else None
+        return offers.plan(ctx, supplier_id, events, tactic, read, supplier)
