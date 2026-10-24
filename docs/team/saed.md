@@ -59,6 +59,7 @@ Branch `feat/roles-saeb` · owns `starter-kit/arena_kit/agents/buyer/roles/` (co
 - 22:40 - merged main e848872 (tools-aware strategist PR #3, credible offers, agreement fixes, LLM call records): 5 conflicts in roles/ resolved keeping both sides (one-thread I/O + tool loop; record() + cancel + salvage; lever floor/rotation + target_is_prior + full tactic on refused accepts; alternatives/price_pct + credibility; merged prompt). 554 passed, ruff clean; bench 93/93 strategist, writer 62/67 (5 cost asks caught by the check, template sent), 0 unsafe; sandbox D01 **0.863** with the full tools-aware agent.
 - 23:15 - sweep analysis (61.3, see Asks) and writer fix: an e-mail whose only problem is a question about the supplier's costs now loses that sentence (`without_cost_asks`) and keeps the model's text if the rest passes the check (P02/P03 sent the template for it); pattern also catches 'explain your costs'/'cost drivers', not 'we understand your costs'. 557 passed; bench 145/145 strategist, writer 97/99 (was 62/67), 0 unsafe.
 - 23:55 - merged main e4863ee (PR #4 in, alternative-back, repeated-offer stop, credible first offers). Fix: `lever_floor` forces a cheaper alternative's terms only at `closing` (final offer, repeated offer, last messages); prompt says negotiate from it mid-way. 594 passed; sandbox D01 0.843, D02 0.399.
+- 00:10 - practice sweep on 8030653 (10 sessions): **INVALID - the Anthropic API credit ran out**, all 69 LLM calls failed ('credit balance is too low'), so every case ran on the rule fallback: mean 50.6 (P11 0 after the supplier's final at its opening price; the rule path still sends 'We are reviewing your offer internally' keep-alives without an offer - @jeddou). Useful number: rules-only ~51 vs ~60 with the roles. Needs credits on the account behind LLM_* in starter-kit/.env before any further run and before the final.
 
 ## Runs
 
@@ -77,3 +78,4 @@ Branch `feat/roles-saeb` · owns `starter-kit/arena_kit/agents/buyer/roles/` (co
 | 22:05 | no cost asks + prompt rewrite | D01 (sandbox) | 0 | 83.5 | up from 81.6 |
 | 22:40 | merged main e848872 | D01 (sandbox) | 0 | 86.3 | ties best D01; tools-aware strategist |
 | 23:00 | practice sweep (teammate) | 10 practice | 10 | 61.3 | best so far; P05 .07->.36, P02/P08 new bests |
+| 00:05 | 8030653 (no LLM credit) | 10 practice | 10 | 50.6 | INVALID: all LLM calls failed, rules only |
