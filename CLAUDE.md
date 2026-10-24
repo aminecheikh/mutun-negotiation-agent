@@ -10,12 +10,18 @@ Read `brief/brief.md` and `brief/api.md` for the rules; `docs/ROADMAP.md` for pl
 
 - `starter-kit/arena_kit/` - the organisers' kit (client, play loop, cost function, simulator). Change
   it only where needed (e.g. registering `--agent buyer` in `cli.py`); keep their tests passing.
-- `starter-kit/arena_kit/agents/buyer/` - **our agent**. `contracts.py` holds the shared types between:
-  - `tools/` - deterministic: dossier, price bands, claims, concession fit, offer engine (owner: Amine)
-  - `roles/` - LLM roles: analyst, strategist, writer, their prompts and playbook (owner: Saed)
-  - `agent.py` - the orchestrator: `decide(case, threads)`, timing, guard, closing (owner: Jeddou)
+- `starter-kit/arena_kit/agents/buyer/` - **our agent** (`--agent buyer`). `contracts.py` holds the shared
+  types; every module starts as a working placeholder that its owner replaces:
+  - `tools/` - deterministic: `bands`, `offers`, `claims`, `concession`, `dossier` (owner: Amine)
+  - `roles/` - LLM roles + `prompts/`: Profiler (once per case), Analyst -> Strategist -> Writer (each
+    round); `llm.py` gives every call a hard timeout and a rule-based fallback (owner: Saed)
+  - `agent.py` + `guard.py` - the orchestrator: one round = fit -> read -> choose -> plan -> write ->
+    guard; any exception falls back to the kit's naive move (owner: Jeddou)
 - `starter-kit/scripts/` - ops: `harvest.py` saves ended sessions and writes a readable digest.
-- `starter-kit/runs/` - session dumps and logs (gitignored).
+- `starter-kit/runs/` - session dumps, logs and `ledger.jsonl` of every arena run (gitignored).
+- `docs/team/` - per-person tracking files and `DECISIONS.md` (see Team protocol below).
+- `.claude/hooks/` - `session_start.py` (who you work with, their tasks, others' asks) and
+  `after_arena_run.py` (logs every `arena play|run`, harvests foreground runs).
 - `data/` (repo) and `starter-kit/data/package` (from `uv run arena data`) - the same data package.
 
 ## Commands (run from `starter-kit/`)
@@ -48,6 +54,26 @@ uv run arena me                                 # quota left
 - `stabilise` / `secure_supply` cases charge for squeezing the supplier below its sustainable margin:
   always evaluate C with the relationship term (`cost.relationship_cost` with an estimated `full_cost`).
 
+## Team protocol (every Claude session follows this)
+
+1. **Know who you work with.** The SessionStart hook names the member from the branch
+   (`feat/tools` Amine, `feat/roles` Saed, `feat/orchestrator` Jeddou; `MUTUN_MEMBER` overrides). If it
+   says unknown, ask before writing anything under `docs/team/`.
+2. **Stay in your lane.** Edit only the member's own directories (table in `docs/team/README.md`). A
+   change elsewhere - another layer, the kit, `contracts.py` - goes to the user first; if agreed, the
+   owner is told via **Asks to others** and a `contracts.py` change gets an entry in `DECISIONS.md`.
+3. **Keep the member's file current** (`docs/team/<member>.md`): replace **Now** when the work changes,
+   set task status in **Tasks**, append to **Log** after each meaningful step with evidence (commit, test
+   result, score, replay link). Never edit another member's file; write requests to them in your own
+   **Asks to others**.
+4. **Every arena run is recorded.** The PostToolUse hook logs `arena play|run` to `runs/ledger.jsonl`
+   and harvests foreground runs. For background runs, run `scripts/harvest.py --set <set> --digest` when
+   the notification arrives. Then add a row to **Runs** and use skill `replay-analysis` on weak cases.
+5. **Prefer free runs.** Order: unit tests -> local `arena-sim` -> sandbox (D01/D02) -> hosted practice.
+   Check the member's quota budget in `docs/team/README.md` and `uv run arena me` before a hosted run.
+6. **Before merging into `feat/negotiation-agent`**: `uv run pytest` and `uv run ruff check .` green,
+   one sandbox game with `--agent buyer` finishes, the member's file is up to date.
+
 ## Lessons from replays (keep this list current)
 
 - Baseline (kit LLM agent, 2026-10-24): mean 54.4. Losses came from too generous first offers
@@ -61,5 +87,7 @@ uv run arena me                                 # quota left
 - Python 3.12, type hints on signatures, frozen dataclasses for shared types, ruff (line length 120).
 - Tests with pytest in `starter-kit/tests/`, named `test_<what>_<when>_<expected>`; tools are pure
   functions over the SQLite package, so test them against real rows.
-- Branches: `feat/<area>` off `feat/negotiation-agent`, merge back often (at least every few hours).
-  Conventional commits. The final runs from `feat/negotiation-agent` (or `main` after merge).
+- Branches: `feat/tools`, `feat/roles`, `feat/orchestrator` off `feat/negotiation-agent`; merge back at
+  each checkpoint (19:00, 22:00, ~02:00, Sun 10:00). Conventional commits with the task ID, e.g.
+  `feat(tools): A1 floor from should-cost`. The final runs from `feat/negotiation-agent`.
+- No TODO without a task ID from `docs/team/<member>.md`.

@@ -49,40 +49,31 @@ The orchestrator is **plain code, not an LLM agent**: a fixed pipeline with LLM 
 With 60 s per move and 10 cases in parallel, a free-form agent conversation is too slow and too hard to
 debug, and a deterministic pipeline is easier to explain to the jury.
 
+## Agent roster
+
+| Agent | Kind | When | Owner | Why it exists |
+|---|---|---|---|---|
+| Profiler | LLM, cached | once per case | Saed | turns notes, letters, news into a persona and the terms it values |
+| Analyst | LLM + numbers from `concession` | each round, per live thread | Saed | "is it still open?": `p_more`, `walk_risk`, what it signalled |
+| Strategist | LLM | each round | Saed | send / accept / walk, which levers and claims, which question |
+| Writer | LLM | each round | Saed | the e-mail around fixed claim sentences and term sheets |
+| Tools | code | prepare + each round | Amine | bands, offers, claims, concession fit, dossier numbers |
+| Orchestrator + guard | code | each round | Jeddou | runs the steps, timeouts, fallbacks, accept/walk checks, RFQ focus |
+
+Considered and left out: an LLM critic before sending (the guard checks IDs, must-haves and C
+deterministically, and a 4th LLM call costs ~10 s of the 60 s), a separate RFQ or closer agent (policy code
+in the orchestrator), an LLM orchestrator (see above). Possible later: an LLM **sparring supplier** for free
+local tests, built on the public data, if quota runs short (Sunday stretch, Saed + Jeddou).
+
 ## Team
 
-### Jeddou - orchestrator (`agents/buyer/agent.py`, `cli.py`, `scripts/`)
-1. Walking skeleton: `BuyerAgent.decide()` wired to stub tools/roles, `--agent buyer` in `cli.py`,
-   plays D01 end to end. **First, so the others can plug in.**
-2. Timing: per-call timeouts (e.g. analyst 12 s, strategist 12 s, writer 12 s; run analyst calls of
-   several threads in parallel), deterministic fallback (tools offer + template e-mail).
-3. Guard and closer: must-haves, `C <= ceiling`, beats the alternative, no accept before round 3 unless
-   `C <= c_target`, walk when nothing beats the alternative; reuse `play.closing_move` near the cap.
-4. RFQ policy: which thread gets this round's message, keep all bidders alive, close the best.
-5. Ops: practice sweeps + `harvest.py`, quota ledger, final rehearsal, README, final runner.
+Tasks, status and logs live in `docs/team/` (one file per person, task IDs A1-A7, S1-S7, J1-J6), not
+here. The scaffold (placeholders in every module, `--agent buyer`, tests, hooks) is already in place.
 
-### Saed - LLM roles (`agents/buyer/roles/`)
-1. Writer: polite, <= 120 words, uses only the given claim sentences and term sheets, never leaks
-   urgency, budget or missing alternative.
-2. Strategist: returns `Tactic` JSON; picks levers and claims from the dossier persona and behaviour read.
-3. Analyst: reads the supplier's e-mail + `ConcessionFit` -> `BehaviourRead` (`p_more`, `walk_risk`,
-   what it wants). Numbers come from the fit; the analyst interprets words.
-4. Playbook: mine `runs/digest-practice.md` per persona (what moved it, what backfired) into prompts.
-5. Offline prompt tests: replay recorded threads from `runs/sessions/` into the roles (no quota):
-   valid JSON, latency, no invented numbers or IDs.
-6. Sunday: pitch slides (one replay walked through).
-
-### Amine - deterministic tools (`agents/buyer/tools/`), in this order
-1. `bands.py`: floor (should-cost, country factor), fair (index pass-through), ceiling (alternative,
-   fallback, rival quotes, C_open), target (min C incl. relationship term in stabilise/secure_supply).
-2. `offers.py`: opening anchor near floor, Boulware concession toward ceiling over the round limit,
-   2-3 sheets of equal C for us that differ in what the supplier gets (price vs payment days vs
-   effective date vs volume/length); index clause only when it lowers C.
-3. `claims.py`: claim sentences pre-checked against `facts.json` (index changes of the part's own cost
-   drivers, rival quotes, PO history, scorecards, notice periods).
-4. `concession.py`: fit of the supplier's price path -> `ConcessionFit`.
-5. `dossier.py`: persona, levers, history prior, second source, how late we pay, evidence lines.
-6. `tools/__init__.py`: `DataTools(package)` implementing the `Tools` protocol.
+- **Amine - tools** (`agents/buyer/tools/`): bands -> offers -> claims -> concession -> dossier.
+- **Saed - roles** (`agents/buyer/roles/`): writer -> strategist -> analyst -> profiler -> playbook, then slides.
+- **Jeddou - orchestrator + ops** (`agent.py`, `guard.py`, `cli.py`, `scripts/`): scaffold review -> accept
+  policy -> timing -> RFQ policy -> sweeps -> final runbook.
 
 ## Timeline
 

@@ -1,9 +1,12 @@
 """The shared types between the three layers of the buyer agent. Change them only by team agreement.
 
-  tools (deterministic)  ->  roles (LLM)  ->  orchestrator (decide)
-  CaseContext, PriceBand,    Tactic, Email,    picks the roles per round, applies the guard,
-  Claim, Dossier,            BehaviourRead     turns OfferPlan + Email into an arena message
-  ConcessionFit, OfferPlan
+  tools (deterministic)  ->  roles (LLM)       ->  orchestrator (decide)
+  CaseContext, PriceBand,    Dossier (refined),     picks the roles per round, applies the guard,
+  Claim, Dossier,            BehaviourRead,         turns OfferPlan + Email into an arena message
+  ConcessionFit, OfferPlan   Tactic, Email
+
+Roles: Profiler (once per case), Analyst -> Strategist -> Writer (each round). Analyst and Strategist
+are separate types so they can be one LLM call or two; the orchestrator decides by measured latency.
 
 Numbers come from tools only. Roles read them and choose and write; they never compute prices.
 All types are frozen: build a new one instead of mutating.
@@ -130,11 +133,18 @@ class Email:
 
 
 class Tools(Protocol):
-    def prepare(self, case: dict) -> CaseContext: ...
+    def prepare(self, case: dict, threads: dict[str, list[dict]]) -> CaseContext: ...
     def fit_concessions(self, ctx: CaseContext, supplier_id: str, events: list[dict]) -> ConcessionFit: ...
     def plan_offers(
         self, ctx: CaseContext, supplier_id: str, events: list[dict], tactic: Tactic, read: BehaviourRead
     ) -> OfferPlan: ...
+
+
+class Profiler(Protocol):
+    """Once per case, before round 1: reads a dossier's evidence (notes, letters, news) and sets its
+    persona and levers. Cache per supplier: the clock is already running when it is called."""
+
+    def refine(self, case: dict, dossier: Dossier) -> Dossier: ...
 
 
 class Analyst(Protocol):
