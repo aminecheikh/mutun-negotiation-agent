@@ -19,6 +19,7 @@ from ...cost import complete_offer
 from ..llm import ID_RE
 from . import policy
 from .contracts import Email
+from .roles.writer import check as check_email_text
 from .state import CaseSession, ThreadState
 
 MAX_BODY, MAX_SUBJECT, MAX_REFS, MAX_SHEETS = 8000, 300, 20, 3
@@ -134,6 +135,19 @@ def clean_body(session: CaseSession, th: ThreadState, body: str) -> tuple[str, s
     return text, set(ID_RE.findall(text)), problems
 
 
+def clean_subject(session: CaseSession, subject: str) -> tuple[str, list[str]]:
+    """Apply the writer's text rules to the subject too. Claims belong in the checked body, where their IDs
+    can be reserved; a supplier's subject is not permission to echo a leak or invent a figure."""
+    title = str(session.case.get("title") or "")
+    subject = str(subject or "").strip() or f"Re: {title}"
+    problems = check_email_text(subject, [], set(), "", title)
+    if LEAKS.search(subject) or ID_RE.search(subject) or "\n" in subject or "\r" in subject:
+        problems.append("unsafe subject text")
+    if problems:
+        return "Re: Offer discussion", [f"subject replaced: {p}" for p in problems]
+    return subject[:MAX_SUBJECT], []
+
+
 def build_message(session: CaseSession, th: ThreadState, sheets, email: Email | None) -> Checked | None:
     """The arena message, or None when nothing sendable is left (the caller falls back to the template)."""
     if email is None:
@@ -144,7 +158,8 @@ def build_message(session: CaseSession, th: ThreadState, sheets, email: Email | 
     if len(body.split()) < MIN_WORDS:
         return None
     refs = [r for r in dict.fromkeys(email.refs or ()) if r in cited][:MAX_REFS]
-    subject = str(email.subject or "").strip()[:MAX_SUBJECT] or f"Re: {session.case.get('title', '')}"[:MAX_SUBJECT]
+    subject, subject_problems = clean_subject(session, email.subject)
+    problems += subject_problems
     message = {"subject": subject, "body": body, "term_sheets": [{"terms": s} for s in kept], "refs": refs}
     return Checked(message, tuple(problems))
 
@@ -153,11 +168,10 @@ def reserve(session: CaseSession, th: ThreadState, message: dict) -> dict:
     """Right before the POST, under the case lock: drop arguments another thread cited meanwhile and mark this
     message's IDs as used. Threads prepare their e-mails in parallel; without this two bidders could both cite the
     same index pair in the same second (the arena then answers `duplicate`)."""
-    if not message.get("body"):
-        return message
-    body, cited, _ = clean_body(session, th, message["body"])
-    session.burned |= {r for r in cited if not r.startswith("offer:")}
-    th.cited_offers |= {r for r in cited if r.startswith("offer:")}
+    if message.get("action"):
+        return message  # closing actions have no e-mail fields
+    subject, _ = clean_subject(session, message.get("subject"))
+    body, cited, _ = clean_body(session, th, message.get("body"))
     refs = [r for r in message.get("refs") or [] if r in cited][:MAX_REFS]
     if len(body.split()) < MIN_WORDS:
         body = (
@@ -165,7 +179,10 @@ def reserve(session: CaseSession, th: ThreadState, message: dict) -> dict:
             "and let us know which conditions you can confirm. Kind regards, Hollerau Purchasing"
         )
         refs = []
-    return {**message, "body": body, "refs": refs}
+        cited = set()
+    session.burned |= {r for r in cited if not r.startswith("offer:")}
+    th.cited_offers |= {r for r in cited if r.startswith("offer:")}
+    return {**message, "subject": subject, "body": body, "refs": refs}
 
 
 def accept_ok(session: CaseSession, th: ThreadState) -> bool:

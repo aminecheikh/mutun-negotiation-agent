@@ -109,3 +109,29 @@ Before using the final runner:
 Open strategic questions remain documented in `docs/issues.md`: whether suppliers tolerate keep-alive
 questions after final offers, the writer's English-only fallback, and the estimated supplier relationship
 cost. This review preserves those explicit assumptions; it does not claim an optimal negotiation policy.
+
+## Follow-up review - 24 October 2026
+
+Recovered the earlier review conversation and checked the latest remote branches, team asks, deterministic
+tools, role implementations and all three active prompts. PR #1 is merged; `origin/main` and `origin/feat/tools`
+remain at `1dde1b2`, with Saed's `98f9013` already integrated. The recovery and client-timeout fixes above were
+still local, so the follow-up PR includes them as well as these additional corrections:
+
+- A safe body could carry an unsafe subject: budgets, private supplier information, invented figures and
+  untracked data IDs bypassed validation. Subjects now reuse Saed's existing text checks plus the guard's
+  German leak checks. Invalid subjects become a neutral heading. The last send guard and keep-alive path
+  apply this too, including when the supplier supplied the subject. The writer prompt states the same rule.
+- Citation reservation happened before the final short-body fallback. Evidence removed by that fallback
+  was incorrectly marked used for the rest of the case. Only IDs in the final outgoing body are now reserved;
+  the lock still prevents parallel bidders from citing the same evidence.
+
+Eight new regression cases failed before these fixes; the ninth confirms safe subjects remain unchanged.
+The targeted orchestrator/recovery/writer check passed with 66 tests and one optional fixture skip.
+The full suite passed with **443 tests and 2 skipped**; Ruff lint and formatting checks passed.
+The local two-wave rehearsal completed 6/6 cases with zero timeouts or cap closures, and 48 verified claims
+with zero duplicate or contradicted claims. Evidence: `starter-kit/runs/codex-followup-review/report.json`
+and `sessions.json`; the report correctly identifies an uncommitted working tree based on `ec25076`.
+
+Preflight again loaded 10,356 facts and passed the forbidden-endpoint scan. It failed the required arena
+and LLM environment checks; the Sunday release is absent. No hosted quota or model API calls were used.
+Hosted-model latency, supplier behavior and negotiation-score improvements remain unverified.

@@ -88,7 +88,8 @@ def keepalive_email(session: CaseSession, th: ThreadState) -> Email:
     question = questions.get(str(session.case.get("type")), questions["default"])
     subject = str(latest(th.events).get("subject") or "").strip() or session.case.get("title", "")
     subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
-    return Email(subject=subject[:300], body=KEEPALIVE[language].format(question=question))
+    subject, _ = guard.clean_subject(session, subject)
+    return Email(subject=subject, body=KEEPALIVE[language].format(question=question))
 
 
 class RolePipeline:

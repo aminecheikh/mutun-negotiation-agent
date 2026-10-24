@@ -7,6 +7,8 @@ How it works: the module docstrings (start with `runner.py`, then `policy.py`). 
 ## Now
 
 - Claude's PR #1 and the team's follow-up through `1dde1b2` integrated locally without conflicts.
+  Follow-up review is on `fix/orchestrator-review`, including the previously unpublished review fixes.
+  Subject validation and final-body citation reservation now have regression coverage.
   Independent review fixes, release evidence ingestion, sweep and local rehearsal tooling completed;
   see `docs/orchestrator-review.md`. Next: configure the final machine's credentials, run live-model
   sandbox checks and a controlled hosted sweep. No hosted quota used by this review.
@@ -24,6 +26,10 @@ How it works: the module docstrings (start with `runner.py`, then `policy.py`). 
 | J6 | Preflight, self-contained rehearsal, README run section, freeze, runner | local rehearsal and documentation done; final-machine preflight/freeze pending | Sun 10:30-13:15 |
 
 ## Asks to others
+
+- @saed - follow-up review reuses your writer text validator for email subjects in the orchestrator
+  guard; the writer prompt now explicitly keeps claims/figures out of the subject. Keep-alive subjects
+  receive the same check. No role or tool contract changed; see `docs/orchestrator-review.md`.
 
 - @amine - SDK retry question resolved: the live buyer sets `max_retries=0` and a 12-second
   provider timeout; role deadlines and rule fallbacks remain in place. Offline precomputation keeps
@@ -49,6 +55,11 @@ How it works: the module docstrings (start with `runner.py`, then `policy.py`). 
   cap handling and guard failures; bounded attachment work; added release evidence and cache fallback
   corrections. Pulled the team's merged PR (`d05f691`) without conflicts. Added sweep/rehearsal tools,
   tested local waves and documented remaining hosted/model checks in `docs/orchestrator-review.md`.
+- 2026-10-24 follow-up - re-fetched every remote branch and confirmed PR #1 merged; checked Amine's tools
+  and Saed's roles/prompts against the runner. Reproduced and fixed subject safety and premature citation
+  burning; local rehearsal: 6/6 cases, zero timeouts, 48 verified claims, no duplicates/contradictions.
+  Full suite: 443 passed, 2 optional skips; Ruff lint and format checks passed.
+  Final-machine preflight still needs arena/model configuration and Sunday's release.
 
 ## Runs
 
@@ -57,3 +68,4 @@ How it works: the module docstrings (start with `runner.py`, then `policy.py`). 
 | Sat 15:20 | 7f92ca7 | 10 hosted | 10 | 54.4 | kit `--agent llm` baseline |
 | Sat 21:40 | 0046f39 + roles (local) | arena-sim S01-S03, real data | 0 (local) | 73.1 | scripted sim supplier: not comparable with hosted scores; 27 claims, all verified |
 | Sat review | working tree based on d05f691 | local 2-wave rehearsal, S01-S03 | 0 (local) | not a hosted benchmark | 6/6 closed before cap; 0 timeouts; 53 verified claims, 0 duplicates/contradictions |
+| Sat follow-up | working tree based on ec25076 | local 2-wave rehearsal, S01-S03 | 0 (local) | not a hosted benchmark | 6/6 closed before cap; 0 timeouts; 48 verified claims, 0 duplicates/contradictions |

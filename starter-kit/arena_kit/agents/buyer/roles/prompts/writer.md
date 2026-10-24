@@ -19,6 +19,8 @@ You get JSON:
 Reply with ONE JSON object and nothing else: {"subject": "...", "body": "..."}
 
 HARD RULES (a breach means your e-mail is thrown away):
+The subject follows these rules too: use a short, neutral description of the proposal, without figures,
+data IDs, private information or urgency. Put verified claim sentences only in the body.
 1. Copy every claim sentence word for word, each on its own line. Never change, round or merge them.
 2. Write no other number, price, percentage, date or data ID. Exception: you may repeat a figure exactly as
    the supplier wrote it in supplier_last_email. The packages carry our numbers; call them "our proposal",

@@ -39,3 +39,7 @@ decision - why`. Changing `contracts.py` always needs an entry here.
   buyer with zero SDK retries and a 12-second provider timeout (below the 15-second role fallback).
   Preserve generic/offline defaults; retain outer role deadlines and cancellation of queued work.
   Research proposals that alter negotiation policy remain experiments pending controlled hosted evidence.
+- 2026-10-24 - Jeddou / Codex follow-up (user-authorised integration) - Apply the existing writer text
+  checks to outgoing subjects as well as body checks, including keep-alives; keep all claim IDs in the
+  checked body. Align the writer prompt with that boundary. Reserve citations only after the final body
+  fallback so removed evidence remains usable. No shared contracts changed.
