@@ -54,6 +54,23 @@ uv run arena me                                 # quota left
 - `stabilise` / `secure_supply` cases charge for squeezing the supplier below its sustainable margin:
   always evaluate C with the relationship term (`cost.relationship_cost` with an estimated `full_cost`).
 
+## Generalise, don't overfit (the final is cases we have never seen)
+
+- **Decisions come from mechanisms, not from practice outcomes**: the cost formula, the supplier rules in
+  the brief, the structure of the data. A practice case shows *whether* something works, never *which number*
+  to pick. Never write logic or a prompt line that names a practice case, supplier, part or price.
+- **Constants come from documents or first principles** (`company.md`, the brief, the literature), each with
+  a comment saying where. Do not tune a constant until the practice scores look right: with 10 cases that
+  is fitting noise. If a value must be tuned, tune it on behaviour seen across many runs (sandbox included),
+  keep it to few parameters, and prefer the choice that is least bad across case types.
+- **Priors from data, corrections from the live negotiation.** Every estimate is a starting point that the
+  supplier's own moves can overrule (concession fit, its answers to our term sheets, documents it sends).
+- **Degrade gracefully.** Every tool and role must work when data is missing: unknown supplier or part,
+  no should-cost, bundles, other price units, other negotiable fields, case-only `facts`, the Sunday release.
+- **Test properties, not practice numbers.** Besides unit tests on known rows, run the code on all 19
+  practice case files (9 were never played: a holdout) and on mutated copies (`tests/test_tools_robustness.py`).
+  `tools/calibrate.py` is a sanity check (no absurd targets), not a target to fit.
+
 ## Team protocol (every Claude session follows this)
 
 1. **Know who you work with.** The SessionStart hook names the member from the branch

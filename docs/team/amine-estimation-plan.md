@@ -54,6 +54,16 @@ more than X). **Our concession (A2):** Boulware with beta ~0.5 as the baseline, 
 its last move (relative tit-for-tat), never past the target before the last rounds, never past the ceiling.
 Tune beta on sandbox + replays per case type.
 
+## Generalisation (see CLAUDE.md)
+
+- Constants and their source: country factors and our 8 % rate (company.md), 5 % aim below the floor (company.md:
+  a plant-specific should-cost errs ~5 %), 8 % typical margin, credit premia and the below-cost tolerance
+  (assumptions: few, documented, not tuned on practice scores).
+- Guards for unseen cases: a cost estimate more than 3x off the case's price level is treated as another unit
+  and ignored; large option spaces are sampled (fixed seed) so every option is considered; prices stay > 0.
+- Weak spot to fix with live evidence, not more constants: no should-cost row -> the price-based floor can use
+  another supplier's price. Next: prefer this supplier's own prices; the concession fit (A4) corrects the rest.
+
 ## Order of work
 
 1. `estimates.py` (new, pure data): full cost, cost of money, fair price, index change - tests on real rows.

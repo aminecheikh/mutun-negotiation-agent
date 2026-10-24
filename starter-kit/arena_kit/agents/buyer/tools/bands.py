@@ -10,6 +10,7 @@ Without a data package or a cost estimate (bundles): target falls back to fair o
 
 import itertools
 import math
+import random
 
 from ....cost import closing_terms, complete_offer, must_haves_ok, supplier_value, total_cost
 from ....docs import standard_terms
@@ -19,9 +20,14 @@ from . import estimates
 
 PLACEHOLDER_TARGET_SHARE = 0.92
 BELOW_COST_TOLERANCE = 0.05  # how far under full cost a supplier with a below-cost history may go
-MAX_AIM_BELOW_FLOOR_PCT = 5  # the target may sit this far under the floor estimate, never more
+# the target may sit this far under the floor estimate, never more: the stated error of a plant-specific
+# should-cost model (company.md, ~5 %); wider errors mean a weak estimate, not a supplier that goes lower
+MAX_AIM_BELOW_FLOOR_PCT = 5
+# a cost estimate this many times off the case's own price level is in another unit (per 100, per kg): ignore it
+MAX_COST_TO_PRICE_RATIO = 3.0
 PRICE_STEPS = 40  # price grid per package between its feasible minimum and the ceiling
-MAX_PACKAGES = 300  # option combinations searched per supplier
+MAX_PACKAGES = 300  # option combinations searched per supplier; above that a fixed-seed sample
+MIN_PRICE = 0.01
 
 
 def alternative_cost(case: dict) -> float | None:
@@ -37,11 +43,15 @@ def supplier_estimate(case: dict, package, supplier_id: str, terms: dict, std: d
     if package is None or len(case["parts"]) != 1:
         return None
     cost = estimates.full_cost(package, case["parts"][0], supplier_id)
-    if cost is None:
+    if cost is None or not _same_scale(cost.value, terms["unit_price"]):
         return None
     standard = {k: v for k, v in closing_terms(case, terms, std).items() if k != "unit_price"}
     rate = estimates.cost_of_money(package, supplier_id).value
     return {"full_cost": cost.value, "interest_rate": rate, "standard": standard}
+
+
+def _same_scale(cost: float, price: float) -> bool:
+    return price > 0 and 1 / MAX_COST_TO_PRICE_RATIO <= cost / price <= MAX_COST_TO_PRICE_RATIO
 
 
 def price_bands(case: dict, threads: dict[str, list[dict]], package) -> dict[str, PriceBand]:
@@ -109,10 +119,18 @@ def _ceiling(case: dict, opening: dict, std: dict, supplier: dict | None) -> tup
 
 
 def _packages(case: dict, opening: dict):
-    """Every combination of the case's allowed options for the negotiable fields (price set later)."""
+    """The case's allowed option combinations for the negotiable fields (price set later): all of them, or a
+    fixed-seed sample of MAX_PACKAGES in which every option of every field appears at least once."""
     fields = [f for f in case["negotiable"] if f != "unit_price" and case.get("term_options", {}).get(f)]
-    combos = itertools.product(*(case["term_options"][f] for f in fields))
-    for combo in itertools.islice(combos, MAX_PACKAGES):
+    options = [case["term_options"][f] for f in fields]
+    if math.prod(len(o) for o in options) <= MAX_PACKAGES:
+        combos = list(itertools.product(*options))
+    else:
+        rng = random.Random(0)
+        width = max(len(o) for o in options)
+        combos = [tuple(o[i % len(o)] for o in options) for i in range(width)]  # every option once
+        combos += [tuple(rng.choice(o) for o in options) for _ in range(MAX_PACKAGES - width)]
+    for combo in combos:
         yield complete_offer(case, {**opening, **dict(zip(fields, combo, strict=True))})
 
 
@@ -124,7 +142,7 @@ def _best_package(case: dict, opening: dict, std: dict, supplier: dict, floor: f
             continue
         v1, v2 = (supplier_value(case, {**package, "unit_price": p}, supplier) for p in (1.0, 2.0))
         lowest = 1.0 + (floor - v1) / (v2 - v1) if v2 != v1 else ceiling
-        lowest = min(lowest, ceiling)  # even a squeezed supplier gets an offer at the ceiling
+        lowest = min(max(lowest, MIN_PRICE), ceiling)  # positive; even a squeezed supplier gets the ceiling
         step = (ceiling - lowest) / PRICE_STEPS
         for i in range(PRICE_STEPS + 1):
             candidate = complete_offer(case, {**package, "unit_price": math.ceil((lowest + i * step) * 100) / 100})

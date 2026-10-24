@@ -16,3 +16,7 @@ decision - why`. Changing `contracts.py` always needs an entry here.
   quotes and the quote PDFs' standard terms.
 - 2026-10-24 18:40 - Amine - `PriceBand` gains `target_terms: dict` (default empty): the whole target package, not
   only its price - the offer engine and the accept policy need payment days, dates and clauses, not just a number.
+- 2026-10-24 19:10 - team (Amine) - Generalise, don't overfit: logic and constants come from mechanisms and
+  documents, never from practice outcomes; estimates are priors the live negotiation corrects; every module is
+  tested for properties on all 19 case files and mutated copies. Rules in CLAUDE.md. - The final uses suppliers,
+  parts and situations practice never shows; 10 scored practice cases are too few to fit anything.

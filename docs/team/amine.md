@@ -29,6 +29,8 @@ Branch `feat/tools` · owns `starter-kit/arena_kit/agents/buyer/tools/` · skill
 - 18:40 - A1 bands.py v1: target = cheapest package in C (relationship incl.) the supplier can accept, searched over all options; ceiling from opening/alternative; `python -m arena_kit.agents.buyer.tools.calibrate` compares with arena C_best - target/best 1.01-1.02 where should-cost models the supplier's plant (P01-P03), 0.75-0.97 on price-fallback estimates (P04, P08, P11, P18: still too aggressive)
 - 18:00 - research + plan for the hidden quantities: docs/team/amine-estimation-plan.md
 
+- 19:10 - robustness: bands tested on all 19 case files x 6 mutations (unknown supplier/part, bundle, prices x100, many options) - fixed negative target on unit mismatch and biased option search; generalisation rules in CLAUDE.md
+
 ## Runs
 
 | When | Commit | Cases | Sessions | Mean | Notes |
