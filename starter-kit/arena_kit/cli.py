@@ -26,6 +26,19 @@ def load_env(path=".env"):
                 os.environ.setdefault(key.strip(), value)
 
 
+AGENTS = ["naive", "llm", "buyer", "buyer_v1", "buyer_v2"]
+
+
+def buyer_version(name):
+    """Our buyer: `buyer` follows AGENTIC_STRUCTURE (1, the default: the v2 multi-agent buyer; 0: the v1 pipeline);
+    `buyer_v1` / `buyer_v2` pick one explicitly. None for the kit's own agents."""
+    if name == "buyer":
+        from .agents.buyer_v2.config import agentic_structure
+
+        return 2 if agentic_structure() == 1 else 1
+    return {"buyer_v1": 1, "buyer_v2": 2}.get(name)
+
+
 def agent_factory(name, data):
     from .agents import LLMAgent, NaiveAgent, llm_from_env
 
@@ -37,7 +50,11 @@ def agent_factory(name, data):
 
         package = DataPackage(data)
         package.lookup("")  # build the ID index once, before agents share it
-    if name == "buyer":
+    if buyer_version(name) == 2:
+        from .agents.buyer_v2 import buyer_v2_factory
+
+        return buyer_v2_factory(package)
+    if buyer_version(name) == 1:
         from .agents.buyer import buyer_factory
 
         return buyer_factory(package)
@@ -69,11 +86,11 @@ def main(argv=None):
     c.add_argument("--set", **sets)
     p = sub.add_parser("play", help="play one case")
     p.add_argument("case_id")
-    p.add_argument("--agent", default="naive", choices=["naive", "llm", "buyer"])
+    p.add_argument("--agent", default="naive", choices=AGENTS)
     p.add_argument("--data", **data)
     a = sub.add_parser("run", help="play every case of a set in parallel")
     a.add_argument("--set", **sets)
-    a.add_argument("--agent", default="naive", choices=["naive", "llm", "buyer"])
+    a.add_argument("--agent", default="naive", choices=AGENTS)
     a.add_argument("--data", **data)
     a.add_argument("--parallel", type=int, default=8, help="cases at once (at most 10)")
     a.add_argument("--waves", type=int, default=5, help="final: stop after this many waves have closed (rehearsal: 2)")
@@ -97,7 +114,12 @@ def main(argv=None):
         return serve(args.data)
     client = ArenaClient()
     play_one, play_many, play_in_waves = play, play_all, play_waves
-    if getattr(args, "agent", None) == "buyer":  # our agent: one worker per supplier thread + a case arbiter
+    version = buyer_version(getattr(args, "agent", None))
+    if version == 2:  # v2: specialist agents in parallel + a negotiator, one worker per thread + a coordinator
+        from .agents.buyer_v2.runner import play_case, play_final, play_set
+
+        play_one, play_many, play_in_waves = play_case, play_set, play_final
+    elif version == 1:  # v1: roles + orchestrator, one worker per supplier thread + a case arbiter
         from .agents.buyer.runner import play_case, play_final, play_set
 
         play_one, play_many, play_in_waves = play_case, play_set, play_final
