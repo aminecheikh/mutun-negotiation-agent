@@ -29,6 +29,7 @@ Read `brief/brief.md` and `brief/api.md` for the rules; `docs/ROADMAP.md` for pl
 ## Commands (run from `starter-kit/`)
 
 ```bash
+uv sync --all-extras                            # a bare `uv sync` drops anthropic (LLM roles fall back) and the sim
 uv run pytest                                   # kit + our tests
 uv run ruff check . && uv run ruff format --check .
 uv run arena play case:D01 --agent buyer -v     # sandbox: free, no quota
