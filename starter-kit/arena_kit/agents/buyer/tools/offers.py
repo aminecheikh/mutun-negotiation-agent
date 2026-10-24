@@ -11,8 +11,11 @@ Price of the main sheet, each round:
            nothing without a move from you" (the brief) - and matched moves meet at the midpoint, i.e. the target.
            Never past the midpoint of the current gap: a big drop from an inflated opening is not a step to copy
            (split-the-difference, Raiffa); below our target, not past the target either
+  stand    when the supplier stood still, never our last price again: a step toward its price (the pace above,
+           else a share of the gap), never past the midpoint - its standstill says our target was low
   limits   never above the ceiling or its standing price, never below our previous offer, never below the
-           lowest credible price (tools.credibility: our cost evidence and its current offer)
+           lowest credible price (tools.credibility: our cost evidence and its current offer), never below the
+           price where C stops falling (the squeeze charge makes a lower price dearer: stabilise cases)
 The main sheet is the cheapest package in C the supplier can still accept at this price: the band's target
 package, its own terms or our last ones (the target package's short payment or pickup only pays near the target
 price). Up to two more sheets change one term each and are re-priced to cost us the same C: worth more to the
@@ -23,7 +26,7 @@ from ....cost import complete_offer, cost_breakdown, must_haves_ok, supplier_val
 from ....docs import standard_terms
 from ....play import standing
 from ..contracts import BehaviourRead, CaseContext, OfferPlan, Tactic
-from .bands import HOLD_AT_STANDARD
+from .bands import HOLD_AT_STANDARD, PRICE_STEPS
 from .concession import supplier_prices
 
 BOULWARE_BETA = 0.5  # Faratin et al. 1998: beta < 1 is Boulware
@@ -48,6 +51,7 @@ def plan(
     credible = ctx.credibility.get(supplier_id)
     price = next_price(case, band, events, credible.lowest_price if credible else 0.0)
     main = _main_sheet(case, band, theirs, price, std, supplier, _our_last_terms(events))
+    main = _not_below_c_minimum(case, main, std, supplier, min(band.ceiling, theirs["unit_price"]))
     c_main = total_cost(case, main, std, supplier)
     levers = tuple(f for f in tactic.levers if f != "unit_price" and f in case["negotiable"])
     fields = list(dict.fromkeys([*levers, *case["negotiable"]]))
@@ -85,11 +89,33 @@ def next_price(case: dict, band, events: list[dict], lowest: float = 0.0) -> flo
         if ours[-1] < band.target:  # a visible step every round until our target, even if it waits for us
             pace = (band.target - anchor) / max(horizon * TARGET_BY_SHARE_OF_ROUNDS, 1)
             price = max(price, min(ours[-1] + pace, band.target))
+        if len(theirs) >= 2 and theirs[-1] >= theirs[-2] and price <= ours[-1] < theirs[-1]:  # it stood still
+            pace = (band.target - anchor) / max(horizon * TARGET_BY_SHARE_OF_ROUNDS, 1)
+            step = max(pace, (theirs[-1] - ours[-1]) / horizon)
+            price = max(price, min(ours[-1] + step, (ours[-1] + theirs[-1]) / 2))
         if len(theirs) >= 2 and theirs[-2] > theirs[-1]:
             matched = ours[-1] + TIT_FOR_TAT * (theirs[-2] - theirs[-1])
             cap = (ours[-1] + theirs[-1]) / 2
             price = max(price, min(matched, cap, band.target) if ours[-1] < band.target else min(matched, cap))
     return round(min(max(price, lowest), limit), 2)
+
+
+def _not_below_c_minimum(case: dict, sheet: dict, std: dict, supplier, limit: float) -> dict:
+    """The same sheet at the price where C on its terms is lowest, between its price and `limit`. Without the
+    squeeze charge C rises with price and the sheet stays as it is; with it (stabilise / secure_supply, a supplier
+    below its sustainable margin) a lower price can cost us more - never worth offering. Coarse grid, then fine."""
+    low = sheet["unit_price"]
+    if supplier is None or limit <= low:
+        return sheet
+
+    def cheapest(a: float, b: float) -> dict:
+        grid = [a + (b - a) * i / PRICE_STEPS for i in range(PRICE_STEPS + 1)]
+        options = [complete_offer(case, {**sheet, "unit_price": round(p, 2)}) for p in grid]
+        return min(options, key=lambda s: (total_cost(case, s, std, supplier), s["unit_price"]))
+
+    best = cheapest(low, limit)
+    width = (limit - low) / PRICE_STEPS
+    return cheapest(max(low, best["unit_price"] - width), min(limit, best["unit_price"] + width))
 
 
 def _our_last_terms(events: list[dict]) -> dict | None:
