@@ -272,3 +272,10 @@ def test_choose_when_trades_priced_shows_them_with_their_euro_value():
     trade = Trade("payment_days", 30, 60, 1234.0, 0.21)
     view = seen_thread(replace(ctx, trades={SID: (trade,)}), threads)
     assert view["trades"] == [{"field": "payment_days", "theirs": 30, "ours": 60, "eur": 1234.0, "per_unit": 0.21}]
+
+
+def test_llm_strategist_prompt_embeds_analyst_guide():
+    system = LLMStrategist(None).system
+    assert "{analyst}" not in system
+    assert "READING A SUPPLIER" in system and "p_room" in system and "walk_risk" in system
+    assert '"tactic"' in system  # the JSON braces of the reply format survive the substitution

@@ -288,7 +288,8 @@ class LLMStrategist:
     def __init__(self, complete=None, fallback: RuleStrategist | None = None, timeout_s: float = TIMEOUT_S):
         self.complete, self.timeout_s = complete, timeout_s
         self.fallback = fallback or RuleStrategist()
-        self.system = prompt("strategist")
+        # S2+S3 in one call: the analyst's reading guide (prompts/analyst.md) sits inside the strategist prompt
+        self.system = prompt("strategist").replace("{analyst}", prompt("analyst").strip())
 
     def choose(self, ctx: CaseContext, threads: dict[str, list[dict]], reads: dict[str, BehaviourRead]) -> Tactic:
         rule = self.fallback.choose(ctx, threads, reads)

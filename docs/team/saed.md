@@ -40,6 +40,7 @@ Branch `feat/roles-saeb` · owns `starter-kit/arena_kit/agents/buyer/roles/` (co
 - 18:01 - merged main (Amine's thread-safe tools, visible steps, strategist levers): bench WITHOUT lock now 0 errors / 43 rounds (was 6/40) - race fixed. Wired the roles into `buyer_factory` (Saeb's OK, Jeddou told). Writer: "we have moved" check no longer flags "you have moved". Sandbox, full agent: **D01 0.803** (best so far; placeholders 0.11, kit 0.73), **D02 0.398** (before 0.21-0.23) - 384 passed
 - 18:54 - team decision: final focus is one-on-one deals (take it or leave it, no comparison between bidders). Strategist prompt is now one-on-one only (RFQ rule, rival-offer and multi-thread wording removed); accept/walk compare the supplier's offer with our alternative only. Bench unchanged in behaviour.
 - 19:28 - merged main (orchestrator J1-J4, language, trades): 456 passed, bench 52/52 strategist, 0 unsafe. Diagnosed the new sweep (~50 vs 54.4): early forced accepts at the band target (P01 1 round 0.65, P03/P10 2 rounds), P02 empty sheets then walk, P18 non-credible anchor + my index-clause ban. Fixes in roles: removed the ban (C decides; test flipped), `accept_ready`/`safe` accept at target only when the supplier stopped moving (`still_moving`: p_room >= 0.35 or real non-shrinking steps), prompt rule 4 + 'closing early lost the most points'. 458 passed; sandbox D01 **0.863** (best so far, 4 rounds).
+- 19:35 - S3 prompt: `prompts/analyst.md` was still the TODO placeholder (nothing loaded it; the read ran from a section inside strategist.md). It is now the full reading guide (p_more / walk_risk from concession.last_step_pct, p_room, reservation_estimate; German phrases; wants mapping incl. trades the supplier offered; exact quotes) and `LLMStrategist` embeds it via `{analyst}` - one source, still one call. 459 passed, ruff clean; sandbox D01 0.823.
 
 ## Runs
 
@@ -48,3 +49,4 @@ Branch `feat/roles-saeb` · owns `starter-kit/arena_kit/agents/buyer/roles/` (co
 | 16:59 | uncommitted S2 | D01 (sandbox) | 0 | 0.11 | rule path (no key); plumbing ok, 0.0 s per decision; low score from the offers placeholder (no levers, no steps) - ask to Amine |
 | 18:01 | wired roles + tools fixes | D01, D02 (sandbox) | 0 | 60.0 | D01 0.80, D02 0.40; replays via `scripts/harvest.py --set sandbox` |
 | 19:28 | accept gate + no index ban | D01 (sandbox) | 0 | 86.3 | best D01 so far; was 80.3 / 82.3 |
+| 19:35 | analyst.md in strategist prompt | D01 (sandbox) | 0 | 82.3 | within D01's 80-86 range; no behaviour regression |
