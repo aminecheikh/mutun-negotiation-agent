@@ -48,6 +48,7 @@ class ThreadFacts:
     our_last_c: float  # the C of our current position: the cheapest sheet of our latest offer (inf before it)
     our_prices: tuple[float, ...]  # main price of each of our offers, oldest first
     supplier_prices: tuple[float, ...]  # its standing price after each of its messages, oldest first
+    supplier_cs: tuple[float, ...]  # C of each of its standing sheets, oldest first (same order)
     acceptable: bool  # its standing sheet may be accepted (must-haves, not dearer than opening/alternative)
     why_not: str  # why it is not acceptable ("" if it is)
     accepted_ours: bool  # it accepted our offer (status agreed, or its standing sheet is our offer or better)
@@ -170,6 +171,14 @@ def thread_facts(state: CaseState, supplier_id: str, events: list[dict]) -> Thre
         and isinstance((m["term_sheets"][0].get("terms") or {}).get("unit_price"), int | float)
     )
 
+    supplier_cs = tuple(
+        cost(state, supplier_id, _sheet_terms(m["term_sheets"][0]), std)
+        for m in events
+        if m.get("from") != "buyer"
+        and m.get("term_sheets")
+        and isinstance((m["term_sheets"][0].get("terms") or {}).get("unit_price"), int | float)
+    )
+
     def is_ours(sheet: Sheet) -> bool:
         if not our_offer or sheet.price is None:
             return False
@@ -193,6 +202,7 @@ def thread_facts(state: CaseState, supplier_id: str, events: list[dict]) -> Thre
         our_last_c=our_last_c,
         our_prices=our_prices,
         supplier_prices=supplier_prices,
+        supplier_cs=supplier_cs,
         acceptable=acceptable,
         why_not=why,
         accepted_ours=accepted,
@@ -254,11 +264,36 @@ def arguments(state: CaseState, supplier_id: str) -> list[Argument]:
         and not any(r.startswith(("offer:", "quote:")) for r in c.refs)
         and c.kind not in {"rival_quote", "rival_offer"}
     ]
-    usable.sort(key=lambda c: -c.strength)
+    usable.sort(key=lambda c: (-effect(c), -c.strength))
     return [
-        Argument(token_for(state, c.refs), true_unit(state, c), tuple(c.refs), c.kind, round(c.strength, 2))
+        Argument(token_for(state, c.refs), true_unit(state, c), tuple(c.refs), c.kind, round(effect(c) * c.strength, 2))
         for c in usable
     ]
+
+
+def effect(claim) -> float:
+    """How likely this argument changes the supplier's calculation (KIND_EFFECT). A cost driver that ROSE is read
+    by suppliers as confirming their case ('your figures confirm our case: that driver rose', 17 replays): it ranks
+    below a falling driver even when it bounds an increase."""
+    base = KIND_EFFECT.get(claim.kind, 0.5)
+    if claim.kind == "index_change" and isinstance(claim.figure, int | float) and claim.figure > 0:
+        return min(base, RISING_DRIVER_EFFECT)
+    return base
+
+
+# How often a verified argument of each kind changed a supplier's calculation in our practice replays (94
+# sessions, every supplier): facts about ITS cost structure and OUR commitments move it; what we paid it before
+# never does - it knows its own prices. A prior on the argument, not a rule: the market agent still chooses.
+KIND_EFFECT = {
+    "index_change": 1.0,  # 15 of 15 'took it into account'
+    "should_cost": 1.0,  # 14 of 14
+    "notice": 0.95,  # 9 of 10
+    "forecast": 0.8,  # volume change: 22 of 29
+    "quality": 0.7,
+    "scorecard": 0.4,  # delivery record: 20 of 61
+    "po_history": 0.1,  # 0 of 79: 'it holds, but it does not change our calculation'
+}
+RISING_DRIVER_EFFECT = 0.4
 
 
 UOM = {"pc": ("unit", "pieces"), "kg": ("kg", "kg"), "m": ("m", "m")}

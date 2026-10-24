@@ -22,6 +22,12 @@ first turn revealed):
 
 ## Judgement rules
 
+- Your input already holds the band, the cost drivers, the should-cost and the verified arguments: start from
+  them and call a tool only for something more (an index it names, a document, past prices).
+- What changed suppliers' calculations in our replays: index changes, should-cost estimates, notice periods and
+  our volume changes almost always; delivery records sometimes; what we paid before never (it knows its own
+  prices). Never recommend a driver that rose (it confirms its case), nor one it hedged.
+
 - Read the whole thread: the arguments the supplier made in every round, how our cited data was judged
   (verified / contradicted), and which data we already cited (the log) - never propose those again.
 

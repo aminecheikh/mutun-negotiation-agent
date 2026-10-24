@@ -172,10 +172,11 @@ class Brain:
                 continue
             # the profile and market agents read documents: a little longer, the negotiator still has its window
             deadline = received_at + cfg.static_analysts_by_s if spec.static else analysts_deadline
+            pre = A.precomputed(role, toolset(list(spec.tools), ctx), f)
             calls.append(AgentCall(
-                role=role, system=A.system_prompt(role), user=A.analyst_input(role, state, f, events),
+                role=role, system=A.system_prompt(role), user=A.analyst_input(role, state, f, events, pre),
                 deadline=deadline, schema=A.SCHEMAS[role], tools=toolset(list(spec.tools), ctx),
-                tool_turns=cfg.analyst_tool_turns, context=context,
+                tool_turns=min(cfg.analyst_tool_turns, spec.tool_turns), context=context,
             ))  # fmt: skip
         results = self.llm.run_many(calls)
         reports, status = {}, {}
@@ -231,6 +232,15 @@ class Brain:
             problems += p
             if sheet.get("unit_price") is not None:
                 proposed.append(sheet)
+        # AC_next (research 02): what the negotiator wants to offer next is no better for us than its standing sheet
+        # (judged before the step cap trims it) - then its sheet is the deal: take it now, a round earlier and safer
+        raw_cs = [F.cost(state, sid, n, f.std) for n in (guard.normalise(state, p, f) for p in proposed) if n]
+        if raw_cs and f.standing and min(raw_cs) >= f.standing.c * (1 - state.config.same_cost_rel):
+            ok, _ = guard.accept_ok(state, f)
+            if ok:
+                detail["guard"] = problems
+                return Move("accept", sid, "AC_next: its standing sheet is at least as good as our next offer",
+                            term_sheet_id=f.standing.id, detail={**detail, "c": f.standing.c})  # fmt: skip
         checked = guard.check_counter(state, f, proposed)
         detail["guard"] = problems + checked.notes
         if not checked.sheets:

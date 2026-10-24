@@ -170,7 +170,7 @@ def test_every_counter_costs_us_less_than_its_standing_sheet():
     checked = guard.check_counter(st, f, [{"unit_price": 17.0, "payment_days": 14}, {"unit_price": 16.2}])
     for sheet in checked.sheets:
         assert F.cost(st, SID, sheet, f.std) < f.standing.c and sheet["unit_price"] <= f.standing.price
-    assert any("not less than its own offer" in n for n in checked.notes)
+    assert any("not less than its own offer" in n or "step capped" in n for n in checked.notes)
 
 
 def test_counter_never_takes_back_our_current_offer():

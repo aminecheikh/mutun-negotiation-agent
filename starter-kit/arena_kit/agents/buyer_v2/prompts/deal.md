@@ -20,6 +20,14 @@ design:
 
 ## Judgement rules
 
+- Your input already holds the priced view (its offers, the path fit, the band, the lever trades, the engine's
+  counter for the biggest levers): start from it and call a tool only for a package of your own design.
+- The frame lists the levers worth the most to us. Design at least one candidate around the biggest one unless
+  it refused that term. Paying earlier than our reference costs us interest: a candidate with early payment is
+  only good when the price cut it buys is larger than that cost - say so in `why`.
+- Our next step may cost us at most what the frame allows (its last step, never more than half the gap): design
+  candidates inside that, with precise prices.
+
 - Read the whole thread and our log: price each candidate against the path of both sides' concessions so far. The
   next step should be smaller than our previous one, and proportionate to the supplier's last move.
 

@@ -40,7 +40,7 @@ class V2Config:
     negotiator_effort: str = "medium"
     analyst_max_tokens: int = 8000  # thinking counts against max_tokens
     negotiator_max_tokens: int = 12000
-    analyst_tool_turns: int = 2  # tool rounds before a specialist must report
+    analyst_tool_turns: int = 1  # tool rounds before a specialist must report (its numbers come precomputed)
     negotiator_tool_turns: int = 1
     max_tool_calls_per_turn: int = 8
     analyst_slots: int = 32  # concurrent specialist calls across all cases (rate-limit guard)
@@ -50,6 +50,9 @@ class V2Config:
     same_price_eps: float = 0.005  # EUR: two unit prices this close are the same price
     same_cost_rel: float = 0.0005  # relative C: "costs us no more than our own offer" (rounding of the arena)
     max_claims: int = 3  # api.md: at most 3 checked arguments per message
+    # concession discipline (research 02: relative tit-for-tat, decreasing steps, never close the gap ourselves)
+    step_gap_share: float = 0.5  # our step never covers more than this share of the remaining gap in C
+    step_min_rel: float = 0.003  # a visible step when it stands still: this share of its standing C
     max_email_words: int = 230
     # ---- the case (brief: 8-minute waves in the final; kit play.py margins) --------------------------
     close_margin_s: float = 90.0  # accept the best acceptable sheet this long before the wave's cap

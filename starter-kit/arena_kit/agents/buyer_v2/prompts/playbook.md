@@ -34,7 +34,9 @@ meet is new: apply the principle that the evidence in front of you supports, nev
 ## 3. Claim value with discipline (distributive bargaining)
 
 - **Anchor credibly.** The first serious number sets the reference point. Too modest leaves money on the table;
-  too extreme reads as disrespect and ends in impasse or an early final offer. Ground the anchor in data the
+  too extreme reads as disrespect and ends in impasse or an early final offer. In our own replays, first
+  counters 4-8 % under the quote closed best, and counters more than about 15 % under were answered with a
+  final offer almost every time. Ground the anchor in data the
   supplier can check.
 - **Concede in decreasing steps.** Large first moves, smaller later ones signal that we approach our limit.
   Equal or growing steps invite more pushing.
@@ -44,6 +46,9 @@ meet is new: apply the principle that the evidence in front of you supports, nev
 - **Tit for tat:** answer a real concession with a proportionate one; answer no movement with patience and a
   different package, not with a bigger gift.
 - **Do not split the difference early.** The midpoint of two positions favours whoever anchored more boldly.
+- **Never close the gap yourself while the other side still moves.** When the remaining gap is small and it
+  made a real step, hold the price and vary a term; let it cover the last stretch. An answer of "agreed"
+  means our last package was inside its acceptance zone, so we gave more than needed.
 - **Silence and questions are moves.** A good question ("which volume commitment would change your price?",
   "could you send a cost breakdown?") often earns more than an argument.
 - **Respect a final offer.** Push once more only with a genuinely new move of ours and only if the gap is large
@@ -72,7 +77,10 @@ Treat every profile as a hypothesis that the supplier's own words confirm or ref
 
 - Verified data moves a supplier only when it addresses what the supplier itself claims (it blames energy - show
   what energy prices really did) or when the supplier did not know it. Otherwise expect "it holds, but it does
-  not change our calculation".
+  not change our calculation". In our replays, index changes, should-cost estimates, notice periods and our
+  volume changes changed suppliers' calculations almost every time; delivery records sometimes; what we paid
+  before never (it knows its own prices). Suppliers ask again and again which volume we can commit to - answer
+  with the volume of our enquiry and the term sheets that carry it.
 - Fewer, stronger arguments beat a list. Cite each fact once, early; a repeat is "already taken into account".
 - Quality data matters in quality cases; delivery data where reliability is the issue; never embarrass the person
   with private notes about its finances or internal matters.

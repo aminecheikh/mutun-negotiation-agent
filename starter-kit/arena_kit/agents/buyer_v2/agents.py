@@ -98,18 +98,25 @@ class Spec:
     role: str
     tools: tuple[str, ...]
     static: bool  # runs once per thread (and again when new documents arrive), not every round
+    tool_turns: int = 1  # its numbers come precomputed; one tool turn for a follow-up
+    preload: tuple[str, ...] = ()  # tools run by code and put into its input before it starts
 
 
 SPECS = {
-    "reader": Spec("reader", ("supplier_offers", "read_attachment", "thread_transcript", "lookup_id"), False),
+    "reader": Spec("reader", ("supplier_offers", "read_attachment", "thread_transcript", "lookup_id"), False,
+                   preload=("supplier_offers",)),
     "deal": Spec("deal", ("supplier_offers", "concession_fit", "price_band", "lever_trades", "propose_counter",
-                          "price_package", "case_file"), False),
+                          "price_package", "case_file"), False,
+                 preload=("supplier_offers", "concession_fit", "price_band", "lever_trades", "propose_counter")),
     "counterpart": Spec("counterpart", ("supplier_overview", "supplier_documents", "read_document",
                                         "negotiation_history", "payment_and_delivery", "contract_terms", "lookup_id",
-                                        "list_ids", "sql_query", "list_tables"), True),
+                                        "list_ids", "sql_query", "list_tables"), True,
+                        preload=("supplier_overview", "supplier_documents", "negotiation_history",
+                                 "payment_and_delivery")),
     "market": Spec("market", ("price_band", "cost_drivers", "market_index", "price_history", "should_cost",
                               "part_quotes", "demand_forecast", "verified_arguments", "lookup_id", "read_document",
-                              "sql_query", "list_tables"), True),
+                              "sql_query", "list_tables"), True,
+                   preload=("price_band", "cost_drivers", "should_cost", "verified_arguments")),
 }  # fmt: skip
 NEGOTIATOR_TOOLS = ("price_package", "propose_counter", "supplier_offers")
 
@@ -223,9 +230,84 @@ def decision_frame(state: F.CaseState, f: F.ThreadFacts) -> str:
     )
     lines.append("ALLOWED VALUES PER FIELD (use these labels in counter_offers):")
     lines.append(T.options_text(state.case, standing, f.std))
+    lines.append(lever_guidance(state, f))
+    lines.append(pace_guidance(state, f))
     args = F.arguments(state, sid)
-    lines.append("VERIFIED ARGUMENTS YOU MAY CITE (put the token on its own line; max 3):")
+    lines.append(
+        "VERIFIED ARGUMENTS YOU MAY CITE (put the token on its own line; max 3; ranked by how often each"
+        " kind changed a supplier's calculation in our replays - our own order history never did):"
+    )
     lines += [f"- [[{a.token}]] ({a.kind}, strength {a.strength}): {a.sentence}" for a in args[:10]] or ["- none left"]
+    return "\n".join(lines)
+
+
+def lever_guidance(state: F.CaseState, f: F.ThreadFacts) -> str:
+    """The biggest savings per lever (the lever tool), with the direction, and what an early payment costs us."""
+    trades = getattr(state.ctx, "trades", {}).get(f.supplier_id, ())
+    lines = ["LEVERS WORTH THE MOST TO US (each single term change against its quote, from the lever tool):"]
+    for t in trades[:5]:
+        lines.append(
+            f"- {t.field}: ask for {T.label(t.ours)} instead of {T.label(t.theirs)} - saves {_money(t.eur)} over the"
+            f" horizon (worth {t.per_unit:.3f} per unit as a price step)"
+        )
+    if not trades:
+        lines.append("- none priced yet")
+    b = state.case.get("buyer", {})
+    lines.append(
+        f"- Paying earlier than our reference ({b.get('reference_payment_days')} days) COSTS us interest at"
+        f" {b.get('interest_rate')} a year: offer early payment only where the price cut it buys is larger"
+        " (price_package shows C). A longer payment term is money for us."
+    )
+    lines.append("- Put the biggest lever in at least one package every round unless it refused that term.")
+    return "\n".join(lines)
+
+
+def pace_guidance(state: F.CaseState, f: F.ThreadFacts) -> str:
+    """Round 1: the anchor. Later: the step the concession rules allow this round (code enforces it)."""
+    from . import guard
+
+    sid = f.supplier_id
+    band = getattr(state.ctx, "bands", {}).get(sid)
+    cred = getattr(state.ctx, "credibility", {}).get(sid)
+    price = f.standing.price if f.standing else None
+    if f.our_rounds == 0 or math.isinf(f.our_last_c):
+        lines = ["YOUR FIRST COUNTER (the anchor - judged by you, inside the hard limits):"]
+        if price and band is not None:
+            fair = f"{band.fair} ({(band.fair / price - 1) * 100:+.1f} % vs its quote)" if band.fair else "unknown"
+            lines.append(
+                f"- Its quote {price}; fair price by its cost drivers {fair}; our target package price "
+                f"{band.target} ({(band.target / price - 1) * 100:+.1f} %); floor estimate {band.floor}."
+            )
+        if cred is not None and price:
+            lines.append(
+                f"- Lowest credible price {cred.lowest_price} ({(cred.lowest_price / price - 1) * 100:+.1f} %):"
+                f" {cred.reason}."
+            )
+        lines.append(
+            "- In our replays, first counters 4-8 % under the quote closed best; counters more than about 15 %"
+            " under were answered with a final offer almost every time, which ends the room to trade."
+            " Go that deep only with firm cost evidence (a should-cost, its own breakdown) and a supplier"
+            " that is not walk-prone. Anchor on fair price and target, precise figures, 2-3 packages."
+        )
+        return "\n".join(lines)
+    limit = guard.step_limit(state, f)
+    its_step = f.supplier_cs[-2] - f.supplier_cs[-1] if len(f.supplier_cs) >= 2 else 0.0
+    gap = (f.standing.c - f.our_last_c) if f.standing else float("nan")
+    lines = [
+        "THIS ROUND'S STEP (concession discipline, enforced by code):",
+        f"- Its last move was worth {_money(its_step)} to us; the gap between its sheet and our offer is "
+        f"{_money(gap)}.",
+    ]
+    if limit is not None:
+        lines.append(
+            f"- Our next sheet may cost us at most {_money(limit)} (its last step, or a small visible step if it"
+            " stood still, and never more than half the gap): a bigger step is cut back to that."
+        )
+    lines.append(
+        "- Do not close the gap yourself while it still moves: hold the price and vary a term, let it come."
+        " If its sheet is already as good as what you would offer next, accept it (code does this too)."
+        " A supplier that answers 'agreed' got more than it needed."
+    )
     return "\n".join(lines)
 
 
@@ -274,7 +356,41 @@ def negotiation_log(state: F.CaseState, f: F.ThreadFacts) -> str:
     return "\n".join(lines)
 
 
-def analyst_input(role: str, state: F.CaseState, f: F.ThreadFacts, events: list[dict]) -> str:
+def precomputed(role: str, tools, f: F.ThreadFacts) -> str:
+    """The tool results a specialist would ask for first, run by code before it starts (milliseconds, no model
+    turn): the deal agent timed out in 18 of 42 live calls while fetching these one by one."""
+    spec = SPECS.get(role)
+    if spec is None or not spec.preload:
+        return ""
+    sid, part = f.supplier_id, None
+    blocks = []
+    for name in spec.preload:
+        tool = tools.tools.get(name)
+        if tool is None:
+            continue
+        args = {}
+        if "supplier_id" in tool.params:
+            args["supplier_id"] = sid
+        if "part_id" in tool.params:
+            part = part or (tools.ctx.state.case.get("parts") or [None])[0]
+            if not part:
+                continue
+            args["part_id"] = part
+        if name == "propose_counter":
+            trades = getattr(tools.ctx.state.ctx, "trades", {}).get(sid, ())
+            args["levers"] = [t.field for t in trades[:3] if t.field != "unit_price"]
+        try:
+            out = tools.run(name, args)
+        except Exception as e:  # a tool that fails here is still callable by the agent
+            out = {"error": str(e)[:200]}
+        blocks.append(
+            f"[{name}({', '.join(f'{k}={v}' for k, v in args.items())})]\n"
+            + json.dumps(out, ensure_ascii=False, default=str)[:6000]
+        )
+    return "TOOL RESULTS ALREADY FETCHED FOR YOU (call a tool only for something not here):\n\n" + "\n\n".join(blocks)
+
+
+def analyst_input(role: str, state: F.CaseState, f: F.ThreadFacts, events: list[dict], pre: str = "") -> str:
     """Every specialist reads the case, the computed state, our log of every round and the WHOLE thread as written."""
     brief, now, memory = case_brief(state, f.supplier_id), thread_state(state, f), negotiation_log(state, f)
     thread = "THE WHOLE E-MAIL THREAD AS WRITTEN (oldest first):\n\n" + emails.transcript(events)
@@ -289,7 +405,9 @@ def analyst_input(role: str, state: F.CaseState, f: F.ThreadFacts, events: list[
         "market": "Judge the price and choose the arguments (never one we already cited), and report.",
     }[role]
     extra = "VERIFIED ARGUMENTS AVAILABLE (tokens):\n" + tokens + "\n\n" if role == "market" else ""
-    return "\n\n".join([brief, now, memory, extra + thread, task])
+    if role == "deal":
+        extra += lever_guidance(state, f) + "\n\n"
+    return "\n\n".join(x for x in [brief, now, memory, pre, extra + thread, task] if x)
 
 
 def negotiator_input(state: F.CaseState, f: F.ThreadFacts, events: list[dict], reports: dict) -> str:

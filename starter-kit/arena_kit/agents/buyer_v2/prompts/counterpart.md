@@ -20,6 +20,9 @@ turn showed to matter):
 
 ## Judgement rules
 
+- Your input already holds the overview, the document list, the negotiation history and the payment and
+  delivery record: start from them; use your one tool turn to read the 2-3 documents that matter most.
+
 - The thread itself is evidence: how it has negotiated so far (speed and size of its steps, tone, what it asked
   for, who writes) confirms or refutes the profile from the data. Update the profile when the e-mails show more.
 

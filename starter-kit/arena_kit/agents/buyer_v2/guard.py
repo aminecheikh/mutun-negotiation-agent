@@ -127,6 +127,13 @@ def check_counter(state: CaseState, f: ThreadFacts, proposed: list[dict]) -> Che
         if math.isinf(c):
             notes.append(f"sheet {n} dropped: cannot be priced")
             continue
+        limit = step_limit(state, f)
+        if limit is not None and c > limit + 0.5:
+            capped = price_for_cost(state, sid, sheet, f.std, limit, 0.01, sheet["unit_price"])
+            if capped is not None and capped < sheet["unit_price"]:
+                notes.append(f"sheet {n}: step capped (relative tit-for-tat): price {sheet['unit_price']} -> {capped}")
+                sheet["unit_price"] = capped
+                c = F.cost(state, sid, sheet, f.std)
         if not math.isinf(cap_c) and c >= cap_c * (1 - 1e-9):
             notes.append(f"sheet {n} dropped: costs us {c:,.0f}, not less than its own offer ({cap_c:,.0f})")
             continue
@@ -145,6 +152,22 @@ def check_counter(state: CaseState, f: ThreadFacts, proposed: list[dict]) -> Che
         if len(kept) == 3:
             break
     return Checked(kept, notes)
+
+
+def step_limit(state: CaseState, f: ThreadFacts) -> float | None:
+    """The most C our next sheet may cost us this round, or None before our first offer (the anchor is free).
+    Concession discipline (research 02): our step is at most the supplier's last step in C (relative tit-for-tat)
+    or a small visible step when it stood still - and never more than half the remaining gap, so that we never
+    close the gap ourselves while it still moves (when its sheet is as good as our next one, we accept it)."""
+    if math.isinf(f.our_last_c) or f.standing is None or math.isinf(f.standing.c):
+        return None
+    cfg, cap_c = state.config, f.standing.c
+    gap = cap_c - f.our_last_c
+    if gap <= 0:
+        return None
+    its_step = f.supplier_cs[-2] - f.supplier_cs[-1] if len(f.supplier_cs) >= 2 else 0.0
+    allowed = max(its_step, cfg.step_min_rel * cap_c)
+    return f.our_last_c + min(allowed, cfg.step_gap_share * gap)
 
 
 def bridge_sheet(state: CaseState, f: ThreadFacts) -> dict | None:
@@ -217,6 +240,14 @@ def _numbers(text: str) -> set[float]:
     return out
 
 
+def enquiry_numbers(case: dict) -> str:
+    """Figures of our own enquiry a buyer may state: fixed terms, the need and horizon, our standard terms."""
+    b = case.get("buyer") or {}
+    values = [v for v in (case.get("fixed_terms") or {}).values() if isinstance(v, int | float | str)]
+    values += [b.get(k) for k in ("need_per_year", "horizon_years", "reference_payment_days", "need_lead_time_days")]
+    return " ".join(str(v) for v in values if v is not None)
+
+
 def _allowed_numbers(sheets: list[dict], claims: list[str], supplier_text: str) -> set[float]:
     text = " ".join(str(v) for s in sheets for v in s.values() if not isinstance(v, dict))
     clauses = " ".join(f"{v.get('material_share', 0) * 100} {v.get('deadband_pct')}" for s in sheets for v in s.values()
@@ -255,6 +286,7 @@ def clean_email(
     text = TOKEN.sub(put, str(body or "").replace("\r\n", "\n"))
     missing = [sentences[t] for t in chosen if t not in placed]
     supplier_text = "\n".join(str(m.get("body") or "") for m in events if m.get("from") != "buyer")
+    supplier_text += "\n" + enquiry_numbers(state.case)  # our enquiry's own figures may be stated
     claim_texts = list(sentences.values())
     allowed = _allowed_numbers(sheets, claim_texts, supplier_text)
     lowered_names = name_marks(other_names, own_name)

@@ -21,6 +21,21 @@ Before deciding, read the whole thread and OUR NEGOTIATION LOG, and keep one coh
 - **Notice the trend.** Shrinking steps, repeated phrases ("our calculation", "final"), a change of person or tone
   across rounds tell you more than the last e-mail alone.
 
+## Anchor, pace and levers (the frame gives you the numbers)
+
+- **First counter:** anchor on the fair price and our target, with precise figures and 2-3 packages. Counters
+  4-8 % under the quote closed best in our replays; beyond about 15 % under, suppliers answered with a final
+  offer almost every time. Go deeper only with firm cost evidence and a supplier that is not walk-prone.
+- **Later rounds:** the frame states the step the concession rules allow (its last step, never more than half
+  the gap, a small visible step when it stood still). Do not close the gap yourself while it still moves: hold
+  the price, vary a term, let it come. If its sheet is already as good as your next offer, accept it.
+- **Levers:** the frame lists the levers worth the most to us. Put the biggest one in at least one package every
+  round unless it refused that term. Paying early costs us interest: offer it only where the price cut it buys is
+  larger (check with price_package). A longer payment term, full coverage of our need and a later start of an
+  increase are money for us; an index clause is judged by its C on the case's index path.
+- **Its questions:** when it asks which volume we can commit to, answer with the volume of our enquiry (the
+  frame's fixed terms and need - you may state those figures) and point to the sheet that carries it.
+
 ## Decide: accept, counter or walk_away
 
 **accept** - take the supplier's standing sheet now (the case ends; no more e-mails). Only if the frame says it may
