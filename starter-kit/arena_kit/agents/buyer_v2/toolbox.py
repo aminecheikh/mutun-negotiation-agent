@@ -543,10 +543,21 @@ def propose_counter(ctx: ToolContext, supplier_id: str, levers: list | None = No
     chosen = tuple(str(x) for x in (levers or ()) if str(x) in st.negotiable) or ("unit_price",)
     read = BehaviourRead(supplier_id, 0.5, 0.2, (), ())
     plan = st.tools.plan_offers(st.ctx, supplier_id, events, Tactic(supplier_id, "send", chosen), read)
-    check = guard.check_counter(st, f, list(plan.term_sheets))
+    sheets, note = list(plan.term_sheets), None
+    quote = f.standing.price if f.standing else None
+    floor = F.credible_floor(st, supplier_id, quote)
+    if sheets and floor is not None and not F.floor_is_credible(st, supplier_id, quote):
+        # the engine priced from a cost floor above the supplier's own quote: our estimate, not its price
+        cheapest = min(x.get("unit_price") for x in sheets if x.get("unit_price") is not None)
+        if cheapest > floor:
+            sheets = [{**x, "unit_price": round(x["unit_price"] - (cheapest - floor), 2)} for x in sheets]
+            note = (f"the engine priced from a cost floor above this supplier's own quote, so its anchor was raised"
+                    f" to {cheapest}; re-priced down to the credible {floor}")  # fmt: skip
+    check = guard.check_counter(st, f, sheets)
     return {
         "levers": list(chosen),
-        "engine_rationale": plan.rationale,
+        "engine_rationale": plan.rationale if note is None else f"{plan.rationale}; {note}",
+        "anchor_correction": note,
         "sheets": [{"terms": T.describe(s), "c_eur": F.cost(st, supplier_id, s, f.std)} for s in check.sheets],
         "corrections": check.notes,
     }

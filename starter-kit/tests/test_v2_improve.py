@@ -188,6 +188,41 @@ def test_the_enforced_floor_follows_the_no_evidence_rule_when_the_evidence_contr
     assert kept and kept[0]["unit_price"] == expected, "the broken floor must not raise our anchor any more"
 
 
+def test_the_engines_anchor_is_corrected_when_its_floor_contradicts_the_quote():
+    """The engine prices from the band, so a floor above the quote raises its anchor too (P05: 35.03 on a 36.00
+    quote, agreed in round one). Where v2 owns the number it is re-priced to the credible floor."""
+    import copy
+
+    from arena_kit.agents.buyer_v2.toolbox import ToolContext, toolset
+
+    case = copy.deepcopy(S01)
+    case["buyer"]["category_goal"] = "leverage"
+    events = [quote(SID, 0, 17.4)]
+    st = state_for(case, {SID: events})
+    band, cred = st.ctx.bands[SID], st.ctx.credibility[SID]
+    st.ctx = st.ctx.__class__(**{
+        **st.ctx.__dict__,
+        "bands": {SID: band.__class__(**{**band.__dict__, "floor": 20.0})},
+        "credibility": {SID: cred.__class__(**{**cred.__dict__, "lowest_price": 17.3})},
+    })  # fmt: skip
+    ctx = ToolContext(st, {SID: events}, None, focus=SID)
+    out = toolset(["propose_counter"], ctx).run("propose_counter", {"supplier_id": SID, "levers": ["payment_days"]})
+    assert out["anchor_correction"], "the correction must be stated, not silent"
+    floor = F.credible_floor(st, SID, 17.4)
+    prices = [float(x["terms"].split("unit_price ")[1].split(",")[0]) for x in out["sheets"]]
+    assert prices and min(prices) <= floor + 0.01 < 17.3
+
+
+def test_a_coherent_band_leaves_the_engines_anchor_alone():
+    from arena_kit.agents.buyer_v2.toolbox import ToolContext, toolset
+
+    events = [quote(SID, 0, 17.4)]
+    st = state_for(S01, {SID: events})
+    ctx = ToolContext(st, {SID: events}, None, focus=SID)
+    out = toolset(["propose_counter"], ctx).run("propose_counter", {"supplier_id": SID, "levers": ["payment_days"]})
+    assert out.get("anchor_correction") is None
+
+
 def test_a_credible_floor_is_still_enforced():
     st = state_for(S01, {SID: [quote(SID, 0, 17.4)]})
     floor = F.credible_floor(st, SID, 17.4)
