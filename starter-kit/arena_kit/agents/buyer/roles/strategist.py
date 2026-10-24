@@ -43,14 +43,17 @@ MAX_TRADES = 6  # the biggest savings first (tools.levers sorts them); enough to
 # ---- shared helpers (pure) ---------------------------------------------------------------------
 
 
-def standing_c(ctx: CaseContext, events: list[dict]) -> float:
-    """C of the supplier's standing sheet with its standard terms; inf if it has none or cannot be priced."""
+def standing_c(ctx: CaseContext, events: list[dict], supplier_id: str) -> float:
+    """C of the supplier's standing sheet with its standard terms, on the same supplier estimate as the tools and
+    the band (relationship charge in stabilise / secure_supply cases, CLAUDE.md); inf if it cannot be priced.
+    `supplier_estimates` comes with Jeddou's contracts change (fix/orchestrator-review); without it: no charge."""
     _, terms = standing(events)
     if not terms:
         return math.inf
+    supplier = (getattr(ctx, "supplier_estimates", None) or {}).get(supplier_id)
     try:
-        return total_cost(ctx.case, terms, standard_terms(events))
-    except (KeyError, TypeError, ValueError):
+        return total_cost(ctx.case, terms, standard_terms(events), supplier)
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
         return math.inf
 
 
@@ -94,7 +97,7 @@ def negotiable_levers(ctx: CaseContext, levers) -> tuple[str, ...]:
 def accept_ready(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
     """The deterministic accept policy, used by the rule and as a floor under the model."""
     status = latest(events).get("status")
-    c = standing_c(ctx, events)
+    c = standing_c(ctx, events, sid)
     band = ctx.bands.get(sid)
     alt = ctx.c_alternative if ctx.c_alternative is not None else math.inf
     if status == "agreed" or moves_left(ctx.case, events) <= 0:
@@ -132,12 +135,12 @@ def still_moving(ctx: CaseContext, sid: str) -> bool:
     return fit.last_step_pct >= MOVING_STEP_PCT and not fit.shrinking
 
 
-def walk_allowed(ctx: CaseContext, events: list[dict]) -> bool:
+def walk_allowed(ctx: CaseContext, sid: str, events: list[dict]) -> bool:
     """Only when our alternative is cheaper than the supplier's standing offer and it is not moving any more."""
     if ctx.c_alternative is None:
         return False
     stuck = latest(events).get("status") == "final_offer" or moves_left(ctx.case, events) <= 1
-    return standing_c(ctx, events) > ctx.c_alternative and stuck
+    return standing_c(ctx, events, sid) > ctx.c_alternative and stuck
 
 
 # ---- the rule-based strategist (fallback) ------------------------------------------------------
@@ -153,7 +156,7 @@ class RuleStrategist:
         if accept_ready(ctx, sid, events):
             status, left = latest(events).get("status"), moves_left(ctx.case, events)
             return Tactic(sid, "accept", rationale=f"rule: accept ({status}, {left} messages left)")
-        if walk_allowed(ctx, events):
+        if walk_allowed(ctx, sid, events):
             return Tactic(sid, "walk_away", rationale="rule: our alternative beats its standing offer")
         first = our_messages(events) == 0
         read = reads.get(sid)
@@ -181,7 +184,7 @@ def _clip(x, default: float) -> float:
 def _thread_view(ctx: CaseContext, sid: str, events: list[dict], read: BehaviourRead, used: set[str]) -> dict:
     dossier, band = ctx.dossiers.get(sid), ctx.bands.get(sid)
     sheet_id, terms = standing(events)
-    c = standing_c(ctx, events)
+    c = standing_c(ctx, events, sid)
     theirs = [m for m in events if m.get("from") != "buyer"][-3:]
     ours = [m for m in events if m.get("from") == "buyer"]
     return {
@@ -281,7 +284,7 @@ def safe(ctx: CaseContext, threads: dict[str, list[dict]], raw: dict, rule: Tact
         elif not accept_ready(ctx, sid, events) and latest(events).get("status") == "open" and still_moving(ctx, sid):
             action, rationale = "send", f"safe: it is still moving, keep trading ({rationale})"
     elif action == "walk_away":
-        if not walk_allowed(ctx, events):
+        if not walk_allowed(ctx, sid, events):
             action, rationale = "send", f"safe: walk refused, no cheaper alternative ({rationale})"
     elif action != "send":
         return rule

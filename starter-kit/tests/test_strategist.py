@@ -312,3 +312,21 @@ def test_llm_strategist_prompt_embeds_analyst_guide():
     assert "{analyst}" not in system
     assert "READING THE SUPPLIER" in system and "p_room" in system and "walk_risk" in system
     assert '"tactic"' in system  # the JSON braces of the reply format survive the substitution
+
+
+def test_standing_c_when_supplier_estimate_known_includes_relationship_charge():
+    import copy
+    from types import SimpleNamespace
+
+    from arena_kit.agents.buyer.roles.strategist import standing_c
+    from arena_kit.cost import closing_terms, total_cost
+
+    case = copy.deepcopy(CASE)
+    case["buyer"].update(category_goal="stabilise", relationship_eur_per_point=1000, sustainable_margin_pct=8)
+    events = [supplier(), buyer(), supplier(price=16.5, n=1)]
+    terms = events[-1]["term_sheets"][0]["terms"]
+    estimate = {"full_cost": 18, "interest_rate": 0.08, "standard": closing_terms(case, terms)}
+    with_estimate = SimpleNamespace(case=case, supplier_estimates={SID: estimate})
+    without = SimpleNamespace(case=case)  # before Jeddou's contracts field lands: no charge, no crash
+    assert standing_c(with_estimate, events, SID) == total_cost(case, terms, supplier=estimate)
+    assert standing_c(with_estimate, events, SID) > standing_c(without, events, SID)
