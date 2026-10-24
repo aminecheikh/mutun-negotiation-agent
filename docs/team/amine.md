@@ -4,7 +4,7 @@ Branch `feat/tools` · owns `starter-kit/arena_kit/agents/buyer/tools/` · skill
 
 ## Now
 
-- Not started: A1 next.
+- A1 done (v1); next: A2 `offers.py` - anchor from `band.target_terms`, Boulware beta ~0.5 + reciprocity, equal-C sheets.
 
 ## Tasks
 
@@ -20,9 +20,14 @@ Branch `feat/tools` · owns `starter-kit/arena_kit/agents/buyer/tools/` · skill
 
 ## Asks to others
 
+- @jeddou (18:40): `PriceBand.target_terms` (the whole target package) is new in contracts.py - the accept policy can compare a standing sheet's C against `band.c_target`.
+
 ## Log
 
 - 16:30 - scaffold in place (placeholders in every tools module, tests in `tests/test_buyer.py`) - commit on `feat/negotiation-agent`
+- 18:00 - A1 estimates.py: full cost (own plant / scaled / price fallback), cost of money (skonto, credit, equity), fair price, index change; 11 tests on real data - b281662
+- 18:40 - A1 bands.py v1: target = cheapest package in C (relationship incl.) the supplier can accept, searched over all options; ceiling from opening/alternative; `python -m arena_kit.agents.buyer.tools.calibrate` compares with arena C_best - target/best 1.01-1.02 where should-cost models the supplier's plant (P01-P03), 0.75-0.97 on price-fallback estimates (P04, P08, P11, P18: still too aggressive)
+- 18:00 - research + plan for the hidden quantities: docs/team/amine-estimation-plan.md
 
 ## Runs
 

@@ -1,19 +1,27 @@
 """Price bands per supplier: floor, fair, target, ceiling (owner: Amine).
 
-PLACEHOLDER: target = 92 % of the opening price, ceiling = the opening price capped at the fallback
-price. To build: floor from should_cost (country factor), fair from index pass-through, ceiling from the
-alternative / rival quotes / C_open, target minimising C incl. the relationship term
-(`cost.relationship_cost`) in stabilise and secure_supply cases. See skill `data-package`.
+floor   the supplier's estimated full cost (estimates.full_cost), lowered for suppliers known to go below it
+fair    today's price moved by the part's cost drivers (estimates.fair_price)
+target  the cheapest package in C - relationship charge included - that the supplier can still accept
+        (what it is worth to it in cash >= its floor), searched over every allowed option of the case
+ceiling the most we accept: the opening, or less if our alternative is cheaper
+Without a data package or a cost estimate (bundles): target falls back to fair or a share of the opening.
 """
 
+import itertools
 import math
 
-from ....cost import total_cost
+from ....cost import closing_terms, complete_offer, must_haves_ok, supplier_value, total_cost
 from ....docs import standard_terms
 from ....play import standing
 from ..contracts import PriceBand
+from . import estimates
 
 PLACEHOLDER_TARGET_SHARE = 0.92
+BELOW_COST_TOLERANCE = 0.05  # how far under full cost a supplier with a below-cost history may go
+MAX_AIM_BELOW_FLOOR_PCT = 5  # the target may sit this far under the floor estimate, never more
+PRICE_STEPS = 40  # price grid per package between its feasible minimum and the ceiling
+MAX_PACKAGES = 300  # option combinations searched per supplier
 
 
 def alternative_cost(case: dict) -> float | None:
@@ -24,25 +32,103 @@ def alternative_cost(case: dict) -> float | None:
     return total_cost(case, alt["terms"])
 
 
+def supplier_estimate(case: dict, package, supplier_id: str, terms: dict, std: dict) -> dict | None:
+    """Our estimate of the supplier for `cost.supplier_value` / `relationship_cost`, or None."""
+    if package is None or len(case["parts"]) != 1:
+        return None
+    cost = estimates.full_cost(package, case["parts"][0], supplier_id)
+    if cost is None:
+        return None
+    standard = {k: v for k, v in closing_terms(case, terms, std).items() if k != "unit_price"}
+    rate = estimates.cost_of_money(package, supplier_id).value
+    return {"full_cost": cost.value, "interest_rate": rate, "standard": standard}
+
+
 def price_bands(case: dict, threads: dict[str, list[dict]], package) -> dict[str, PriceBand]:
     out = {}
     for sid, events in threads.items():
         _, terms = standing(events)
-        opening = terms.get("unit_price")
-        if opening is None:  # no bid: no band
-            continue
-        std = standard_terms(events)
-        fallback = case["buyer"].get("fallback_unit_price") or math.inf
-        ceiling = min(opening, fallback)
-        target = round(opening * PLACEHOLDER_TARGET_SHARE, 2)
-        out[sid] = PriceBand(
-            supplier_id=sid,
-            floor=None,
-            fair=None,
-            target=target,
-            ceiling=ceiling,
-            c_target=total_cost(case, {**terms, "unit_price": target}, std),
-            c_ceiling=total_cost(case, {**terms, "unit_price": ceiling}, std),
-            derivation=("placeholder: target 92 % of opening, ceiling = opening capped at fallback",),
-        )
+        if terms.get("unit_price") is not None:  # no bid: no band
+            out[sid] = supplier_band(case, package, sid, terms, standard_terms(events))
     return out
+
+
+def supplier_band(case: dict, package, sid: str, terms: dict, std: dict) -> PriceBand:
+    supplier = supplier_estimate(case, package, sid, terms, std)
+    opening = complete_offer(case, terms)
+    current = case["buyer"].get("current_unit_price") or terms["unit_price"]
+    fair = estimates.fair_price(package, case["parts"][0], current) if package else None
+    ceiling, c_ceiling = _ceiling(case, opening, std, supplier)
+    floor, lowest_plausible, why = _floor(case, package, sid, supplier)
+    best = _best_package(case, opening, std, supplier, lowest_plausible, ceiling) if floor else None
+    if best is None:
+        share = round(terms["unit_price"] * PLACEHOLDER_TARGET_SHARE, 2)
+        price = fair.value if fair and fair.value < ceiling else share
+        best = complete_offer(case, {**opening, "unit_price": min(price, ceiling)})
+        why.append(f"target without a cost estimate: {'fair price' if fair else 'share of opening'}")
+    fair_why = f"fair: {fair.source}" if fair else "fair: no cost drivers"
+    return PriceBand(
+        supplier_id=sid,
+        floor=floor,
+        fair=fair.value if fair else None,
+        target=best["unit_price"],
+        ceiling=ceiling,
+        c_target=total_cost(case, best, std, supplier),
+        c_ceiling=c_ceiling,
+        derivation=(*why, fair_why, f"ceiling: {ceiling}"),
+        target_terms=best,
+    )
+
+
+def _floor(case: dict, package, sid: str, supplier: dict | None) -> tuple[float | None, float | None, list[str]]:
+    """(floor, lowest plausible floor, why): the estimate, and its low end given the estimate's uncertainty -
+    the target may aim there, never below."""
+    if supplier is None:
+        return None, None, ["floor: no cost estimate"]
+    cost = estimates.full_cost(package, case["parts"][0], sid)
+    rate = estimates.cost_of_money(package, sid)
+    why = [f"full cost {cost.value} +-{cost.uncertainty_pct}%: {cost.source}", f"cost of money: {rate.source}"]
+    floor = cost.value
+    if estimates.accepts_below_cost(package, sid):
+        why.append(f"history: accepted below full cost - floor {BELOW_COST_TOLERANCE:.0%} under it")
+        floor = cost.value * (1 - BELOW_COST_TOLERANCE)
+    # a wide uncertainty means a weak estimate, not a supplier that goes lower: aim at most 5 % under it
+    return floor, floor * (1 - min(cost.uncertainty_pct, MAX_AIM_BELOW_FLOOR_PCT) / 100), why
+
+
+def _ceiling(case: dict, opening: dict, std: dict, supplier: dict | None) -> tuple[float, float]:
+    """(price, C): the opening, or the price on the opening's terms that costs what our alternative does."""
+    c_open = total_cost(case, opening, std, supplier)
+    c_alt = alternative_cost(case)
+    if c_alt is None or c_alt >= c_open:
+        return opening["unit_price"], c_open
+    # C without the relationship term is linear in price: solve it from two points
+    c1, c2 = (total_cost(case, {**opening, "unit_price": p}, std) for p in (1.0, 2.0))
+    price = 1.0 + (c_alt - c1) / (c2 - c1)
+    return round(max(price, 0.01), 2), c_alt
+
+
+def _packages(case: dict, opening: dict):
+    """Every combination of the case's allowed options for the negotiable fields (price set later)."""
+    fields = [f for f in case["negotiable"] if f != "unit_price" and case.get("term_options", {}).get(f)]
+    combos = itertools.product(*(case["term_options"][f] for f in fields))
+    for combo in itertools.islice(combos, MAX_PACKAGES):
+        yield complete_offer(case, {**opening, **dict(zip(fields, combo, strict=True))})
+
+
+def _best_package(case: dict, opening: dict, std: dict, supplier: dict, floor: float, ceiling: float) -> dict | None:
+    """The package with the lowest C (incl. relationship) whose cash value to the supplier covers its floor."""
+    best, best_c = None, math.inf
+    for package in _packages(case, opening):
+        if not must_haves_ok(case, package, std):
+            continue
+        v1, v2 = (supplier_value(case, {**package, "unit_price": p}, supplier) for p in (1.0, 2.0))
+        lowest = 1.0 + (floor - v1) / (v2 - v1) if v2 != v1 else ceiling
+        lowest = min(lowest, ceiling)  # even a squeezed supplier gets an offer at the ceiling
+        step = (ceiling - lowest) / PRICE_STEPS
+        for i in range(PRICE_STEPS + 1):
+            candidate = complete_offer(case, {**package, "unit_price": math.ceil((lowest + i * step) * 100) / 100})
+            c = total_cost(case, candidate, std, supplier)
+            if c < best_c:
+                best, best_c = candidate, c
+    return best

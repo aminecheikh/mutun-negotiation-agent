@@ -62,6 +62,7 @@ class PriceBand:
     c_target: float
     c_ceiling: float
     derivation: tuple[str, ...] = ()  # how each number was found, in words
+    target_terms: dict = field(default_factory=dict)  # the whole target package (every negotiable field)
 
 
 @dataclass(frozen=True)

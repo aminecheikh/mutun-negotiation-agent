@@ -14,3 +14,5 @@ decision - why`. Changing `contracts.py` always needs an entry here.
   measured latency (S6 / J4).
 - 2026-10-24 16:30 - team - `Tools.prepare(case, threads)` gets the opening threads: bands need the opening
   quotes and the quote PDFs' standard terms.
+- 2026-10-24 18:40 - Amine - `PriceBand` gains `target_terms: dict` (default empty): the whole target package, not
+  only its price - the offer engine and the accept policy need payment days, dates and clauses, not just a number.
