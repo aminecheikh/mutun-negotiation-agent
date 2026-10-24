@@ -119,6 +119,10 @@ uv run arena me                                 # quota left
 - Practice sweep (main 4c30c05, 50.2 vs 54.4): **a supplier's alternative sheets are offers.** P18 accepted the
   main sheet (C 294k, 0.01) next to an alternative at C 274k (~0.30). And **our band target is an estimate**:
   closing at it after one message capped P01/P03 at ~0.8 where the baseline got 0.91.
+- P05 (fix branch a5b8eae, 0): **an agreement is a supplier's best, and the arena's 422 text is an instruction.**
+  We kept a supplier that agreed above our target 'unsettled' and sent it the same sheet 8 times; the cheapest
+  supplier waited at its final offer and walked; '422 round limit reached: accept the standing term sheet or
+  walk away' was re-sent 3x instead of obeyed. Several suppliers: compare best offers, then accept one, fast.
 
 ## Conventions
 
