@@ -5,8 +5,8 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 
 ## Now
 
-- Fixed the D02 replay (offer engine + keep-alive) and every open ask across lanes, user-approved (see Log 18:55).
-  Next: A6 Sunday release; one hosted sweep (10 sessions) on the merged fixes, then fix what the replays show.
+- Sweep 885eec2 on main: 55.1 (baseline 54.4). Next: no offer below the C minimum in stabilise cases (P02/P03),
+  then P05 RFQ holding, P11 stall, P10 firm-evidence opening; then A6 Sunday release.
 
 ## Tasks
 
@@ -100,6 +100,20 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
   first half of the rounds unless p_room says no room (f28e992). Still open: suppliers go final after 1-2
   rounds (P10, P18, P04) and walk-prone personas get no counter; our first offers sit 25-28 % under them.
 
+- 20:40 - since 19:15, all user-approved and test-first: accept only the supplier's standing sheet and never retry a
+  refused accept (4408cf5, after P18 scored 0 on a 422 loop); no inter-supplier comparison per the organisers -
+  claims, bands, policy, guard, prompts (a983fa3, 36018fe, 70a872d); audit fixes - a refused accept still sends a
+  full offer, the rule fallback respects the target prior, prompt accept rules match the policy (70a872d);
+  tools/credibility.py - lowest credible price from our evidence and the supplier's current offer, enforced in
+  offers and shown to the strategist (3ce57d4, 8903772); keep-alives carry our standing offer (e787f86); merged
+  Jeddou's PR #3 (strategist tool loop), conflicts resolved keeping one-on-one (885eec2). 517 tests.
+  Sweep 885eec2: mean 55.1 (baseline 54.4, last 50.2). Next, from the live rounds: (1) stabilise cases send no
+  offer - P02 (0, walked after 3 empty messages) and P03: our price sits below where C stops falling, so the squeeze
+  charge makes every sheet dearer than its own; never price below the C minimum (band target) - my lane;
+  (2) P05: two suppliers agreed (35.15, 35.39) while we held them for a cheaper third that went final (0.33), and
+  one accept named a stale offer ID (422); (3) P11 repeated the same offer 3 rounds, went final (0.54);
+  (4) P10 still opens 28 % under on a firm should-cost and gets an instant final offer.
+
 ## Runs
 
 | When | Commit | Cases | Sessions | Mean | Notes |
@@ -109,3 +123,5 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 | Sat 18:56 | 0b8b6fd | sandbox D02 | 0 (free) | 0.36 | keep-alive fixed; J1 parked on a stale band, walked after our unmoved counter to its final |
 | Sat 19:12 | 082049f | sandbox D01, D02 | 0 (free) | 0.69 | D01 0.86 (best), D02 0.52, no walk-away |
 | Sat 19:13 | 4c30c05 | practice (10) | 10 | 50.2 | baseline 54.4; alternatives ignored (P18 0.01), closed at target after 1 msg (P01, P03) |
+| Sat 19:26 | 26b72a8 | practice P18 | 1 | 0.00 | accepted the supplier's alternative by ID: 422 "not a standing offer", retried until timeout (fixed 4408cf5) |
+| Sat 20:30 | 885eec2 | practice (10) | 10 | 55.1 | baseline 54.4, last 50.2; P18 0.36, P07 0.68, P08 0.61 up; P02 0 and P03 offer-less (squeeze); P05 0.33 held two agreed suppliers |
