@@ -28,7 +28,7 @@ contact person, news topic `noise`). Ignore them.
 | # | Archetype | Exact trigger text (notes / quote remarks / news) | What it means | Lever: what to offer or ask | Don't |
 |---|---|---|---|---|---|
 | A | **Cash-starved** | "asked twice whether we could pay earlier … bank is watching" · "I cannot sign anything that lowers our margin now" · "Could you pay our invoices within 10 days? … cash discount" · quote: "Payment within 10 days requested." · news `restructuring`, `credit_watch`, `credit_downgrade`, `short_time_work` | Money now is worth far more to them than to us (our rate is 8%). | **Trade short payment days for price.** Offer 2-3 sheets: e.g. 60d at price X, 14d at X−a, 10d at X−b. Code checks each in C: we lose 8%/yr on early pay, they value it much more. | Don't squeeze margin - stabilise/secure_supply cases charge for that. |
-| B | **Idle capacity** | "could take additional parts at short notice; second shift on hold" · news `free_capacity` ("looks for new customers") · "half the shop floor was idle" | Hungry for volume. | **Volume and contract length for price.** Commit to the full need over the full horizon. Push price hard. RFQ: cite rival quotes. | Don't reveal we need them. |
+| B | **Idle capacity** | "could take additional parts at short notice; second shift on hold" · news `free_capacity` ("looks for new customers") · "half the shop floor was idle" | Hungry for volume. | **Volume and contract length for price.** Commit to the full need over the full horizon. Push price hard. | Don't reveal we need them. |
 | C | **Uninformed owner** | "works from his own spreadsheet, last updated two years ago" · "had not followed his material and energy prices closely since the 2022 peak; his office manager does the costing" | Data **disarms** them ("we didn't know that"). | **Cite index facts** that undercut the increase, one per sentence with ID and %. Ask for a cost breakdown. | Don't cite indices that went *up* more than the ask. |
 | D | **Open book** | "offered to walk us through their calculation (hourly rates and material)" | They will show costs. | **Ask for the cost breakdown XLSX** in round 1, then argue line by line against should-cost (`cost:<part>`). | - |
 | E | **Partnership / memory** | "reminded us that in 2022 they kept supplying at the old price for a quarter and expects partnership in return" · negotiation_history note "accepted below full cost to keep the volume" · "important reference customer" | Relationship matters; often already priced **below** should-cost. Usually `stabilise`. | **Appreciation, security (longer contract, volume), non-price terms.** Settle near should-cost + a sustainable margin, not below. | Aggressive tone, threats, lowballing - backfire, and C adds a relationship charge. |
@@ -36,10 +36,10 @@ contact person, news topic `noise`). Ignore them.
 | G | **Committee / ladder** | "price changes above 2 % need the approval of their pricing committee, which meets every two weeks" | The sales rep can move **≤ 2 %** alone. Bigger = boss approval, slower and harder. | Ask for moves just under 2% per round. Bundle non-price terms. | Don't demand 8% in one step. |
 | H | **Price freeze** | "head office has frozen all price reductions until December 2027. He was open on payment terms and call-off flexibility" · "price list applies to all customers without exception … happy to discuss logistics and payment" · quote: "discounts not possible this year (head-office directive)" | Unit price will not move. | **Win on other fields:** payment_days (longer = cheaper for us), Incoterm DAP, lead time, chargeback, ppm. | Don't burn rounds on price. |
 | I | **Volume-only discounts** | "standard items are not discounted; only multi-year volume agreements change prices" | Price moves only for commitment. | Offer **max contract_months + full volume** in exchange for price. | - |
-| J | **Not strategic / refocus** | "volumes are 'not strategic' … replies have become slower" · "reviewing small accounts … focus on customers with volume" · news `refocus` · quote: "List conditions; supply from stock only." · "individual agreements will not be extended" | Low interest in us, low flexibility. May walk. | Small asks. If there's an alternative or a rival quote, lean on it - or walk away if the alternative is cheaper in C. | Long pushing. Watch for `final_offer`. |
+| J | **Not strategic / refocus** | "volumes are 'not strategic' … replies have become slower" · "reviewing small accounts … focus on customers with volume" · news `refocus` · quote: "List conditions; supply from stock only." · "individual agreements will not be extended" | Low interest in us, low flexibility. May walk. | Small asks. If the alternative is cheaper in C and it stops moving, walk away. | Long pushing. Watch for `final_offer`. |
 | K | **Fully booked** | news `full_order_book` · "cannot confirm your full forecast … will prioritise customers with firm, long-term commitments" · "confirm additional volumes only against a binding 12-month commitment" · news `big_order` | Seller's market. Capacity is the scarce thing. | Secure **coverage and lead time** first (uncovered need is very expensive in C). Offer firm commitment. | Don't lowball. They walk easily. |
 | L | **Allocation / bottleneck** | news `allocation` ("deliveries … allocated in line with last year's call-offs") · chip_shortage | Supply risk dominates. Usually `secure_supply`. | Coverage, lead time, long contract. Price is secondary. | Don't squeeze margin (relationship charge). |
-| M | **New owner / investor** | news `new_owner` ("plans to review prices and terms with all customers") | Expect pressure for increases. Professional and numbers-driven. | Data-driven arguments plus a rival quote. | - |
+| M | **New owner / investor** | news `new_owner` ("plans to review prices and terms with all customers") | Expect pressure for increases. Professional and numbers-driven. | Data-driven arguments (index and cost data). | - |
 | N | **Succession / for sale** | news `succession` | Owner wants stable revenue to sell. | Long contract plus volume for price. | - |
 
 A supplier often has **several** archetypes (e.g. Tarsevi: idle capacity, cash-starved, open book,
@@ -114,7 +114,7 @@ argue with the falling/flat drivers. If asked ≤ justified, don't argue indices
 | `stabilise` (castings, electrical) | Fair, long-term. Settle near should-cost + sustainable margin. | Relationship charge if margin < sustainable. Estimate `full_cost` from `cost:<part>`. |
 | `secure_supply` (seals, capacity cases) | Coverage and lead time first, price second. | Uncovered need × fallback × (1+risk), late_cost_per_day, relationship charge. |
 | `quality_first` (red scorecards) | ppm commitment + chargeback ≥ cost_per_defect. | Quality term dominates. |
-| `leverage` (machining, sheet, raw material) | Push hard. Use competition and rival quotes. | Price. |
+| `leverage` (machining, sheet, raw material) | Push hard on price with cost and index data. | Price. |
 | `routine` (C-parts, kits) | Bundle, one supplier, low effort, payment/logistics. | Price + process. |
 
 ---
@@ -147,7 +147,6 @@ Following our rule (code decides numbers and term sheets, the LLM writes):
 3. Group suppliers accept ≤ 2% steps quickly; bigger asks stall.
 4. Partnership suppliers react badly to threats and well to appreciation (compare two replays).
 5. Price-freeze suppliers concede payment_days / Incoterm.
-6. In RFQs, citing a rival's `quote:`/`offer:` moves idle-capacity bidders most.
 
 Log each practice run as: case, archetypes detected, levers used, score, what the replay's
 "reasons" said.

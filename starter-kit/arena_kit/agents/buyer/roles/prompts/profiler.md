@@ -51,7 +51,7 @@ TRAITS (add every one the evidence supports; one evidence ID each):
   new_owner (an investor reviewing prices), succession (owner looking to sell).
 
 LEVERS: the terms it most likely values, best first, only from: unit_price, payment_days, volume_per_year,
-contract_months, effective_date, lead_time_days, incoterm, index_clause, tooling_eur, ppm_commitment,
+contract_months, effective_date, lead_time_days, incoterm, index_clause, ppm_commitment,
 chargeback_eur_per_complaint. cash_short -> payment_days first; hedged -> effective_date; full_order_book ->
 volume_per_year, contract_months, lead_time_days; price_fighter -> volume_per_year, contract_months;
 volume_discounts_only -> contract_months, volume_per_year.
