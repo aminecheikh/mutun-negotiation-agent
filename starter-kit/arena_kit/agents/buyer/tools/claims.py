@@ -18,6 +18,7 @@ from ....play import latest, live_threads
 from ..contracts import Claim
 from . import message
 
+OTD_TARGET_PCT = 95  # company.md: quality agreement, on-time delivery target 95 %
 PRIORITY = ("notice", "rival", "quality", "index", "volume", "cost", "delivery", "history", "news")
 WEAK_SELLER_NEWS = {
     "free_capacity",
@@ -114,9 +115,10 @@ def _scorecard(case: dict, facts: _Facts, sid: str) -> list[Claim]:
     if not cards:
         return []
     ref, card = max(cards, key=lambda rf: rf[1].get("quarter", ""))
-    if case["buyer"].get("category_goal") == "quality_first" and card.get("ppm") is not None:
+    if case["buyer"].get("category_goal") == "quality_first" and (card.get("ppm") or 0) > 0:
         return [_claim(f"Recorded quality was {float(card['ppm']):g} ppm ({ref}).", (ref,), "quality", card["ppm"])]
-    if card.get("otd_pct") is not None:
+    # only a record below our 95 % on-time target (company.md) argues for us - above it, it praises the supplier
+    if card.get("otd_pct") is not None and float(card["otd_pct"]) < OTD_TARGET_PCT:
         return [
             _claim(f"On-time delivery was {float(card['otd_pct']):g}% ({ref}).", (ref,), "delivery", card["otd_pct"])
         ]
@@ -273,9 +275,16 @@ def _asking(events: list[dict]) -> float:
     return min(prices, default=float("inf"))
 
 
+def _our_last(events: list[dict]) -> float:
+    ours = [m for m in events if m.get("from") == "buyer" and m.get("term_sheets")]
+    prices = [(s.get("terms") or s).get("unit_price") for s in ours[-1]["term_sheets"]] if ours else []
+    return max((p for p in prices if p is not None), default=float("inf"))
+
+
 def _relevant(found: list[Claim], events: list[dict], context: str) -> list[Claim]:
     """Drop what argues for the seller or what it already ruled out."""
     asking = _asking(events)
+    bid = _our_last(events)
     replies = [m for m in events if m.get("from") != "buyer"]
     reply = str(replies[-1].get("body") or "") if replies else ""
     sentences = re.split(r"[.!?\n]", f"{context}\n{reply}")
@@ -289,6 +298,8 @@ def _relevant(found: list[Claim], events: list[dict], context: str) -> list[Clai
             continue  # a driver that rose argues for the seller
         if c.kind in ("rival", "cost") and c.figure is not None and c.figure >= asking:
             continue
+        if c.kind == "cost" and c.figure is not None and c.figure > bid:
+            continue  # its full cost above our own bid says we ask it to sell at a loss (P01: 132.64 vs 132.09)
         if c.kind == "history" and (c.figure is None or c.figure >= asking):
             continue
         if c.kind == "index":
