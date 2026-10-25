@@ -148,7 +148,24 @@ def build_message(session: CaseSession, th: ThreadState, sheets, email: Email | 
     refs = [r for r in dict.fromkeys(email.refs or ()) if r in cited][:MAX_REFS]
     subject = str(email.subject or "").strip()[:MAX_SUBJECT] or f"Re: {session.case.get('title', '')}"[:MAX_SUBJECT]
     message = {"subject": subject, "body": body, "term_sheets": [{"terms": s} for s in kept], "refs": refs}
+    if repeats_last(th, message):
+        return None
     return Checked(message, tuple(problems))
+
+
+def repeats_last(th: ThreadState, message: dict) -> bool:
+    """The same body and the same sheets as our last message to this supplier (sandbox D02, 18:22: the same keep-alive
+    went out 3x and the supplier wrote 'your email system is stuck'): never send it again."""
+    last = next((m for m in reversed(th.events) if m.get("from") == "buyer"), None)
+    if last is None:
+        return False
+
+    def sheets(m: dict) -> list:
+        return [ts.get("terms", ts) for ts in m.get("term_sheets") or []]
+
+    return str(last.get("body") or "").strip() == str(message.get("body") or "").strip() and sheets(last) == sheets(
+        message
+    )
 
 
 def reserve(session: CaseSession, th: ThreadState, message: dict) -> dict:

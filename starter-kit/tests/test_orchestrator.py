@@ -624,3 +624,177 @@ def test_trim_is_off_by_default(monkeypatch):
     s = session_for(S01, {SID: [quote(SID, 0, 17.4), ours(15.0), quote(SID, 1, 16.9)]})
     s.threads[SID].fit = MOVING
     assert not policy.margin_allowed(s, s.threads[SID], "trim")
+
+
+# ---- review fixes (fix/hybrid-review): alternatives at a last word, 409 round limit, no e-mail twice ----------------
+
+
+def with_alternative_sheet(message: dict, price: float, days: int = 30) -> dict:
+    out = copy.deepcopy(message)
+    tag = out["term_sheets"][0]["term_sheet_id"]
+    out["term_sheets"].append({"term_sheet_id": f"{tag}-a", "terms": {"unit_price": price, "payment_days": days}})
+    return out
+
+
+class SendingTable(FakeTable):
+    """The arena at the system boundary: records every message, the supplier agrees to our first sheet."""
+
+    def __init__(self):
+        super().__init__()
+        self.sent = []
+
+    def send(self, supplier_id, message):
+        self.sent.append(message)
+        sheet = {"term_sheet_id": f"offer:{supplier_id[4:]}-9", "terms": message["term_sheets"][0]["terms"]}
+        return {"from": "sales", "status": "agreed", "term_sheets": [sheet], "attachments": [], "body": "Agreed."}
+
+
+def rule_agent() -> BuyerAgent:
+    from arena_kit.agents.buyer.roles import LLMWriter, PassthroughProfiler, RuleAnalyst, RuleStrategist
+
+    return BuyerAgent(
+        DataTools(), PassthroughProfiler(), RuleAnalyst(), RuleStrategist(), LLMWriter(None), None,
+        OrchestratorConfig(), Telemetry("off"),
+    )  # fmt: skip
+
+
+def test_verdict_when_a_final_offer_has_a_cheaper_alternative_sends_that_alternative_back():
+    # P18 (sweep 4c30c05): the main sheet was accepted at C 294k next to its own alternative at C 274k
+    final = with_alternative_sheet(quote(SID, 1, 9.0, "final_offer"), 8.7)
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0), ours(8.5), final]})
+    v = policy.verdict(s, s.threads[SID])
+    assert v.kind == "counter" and v.send_back == {"unit_price": 8.7, "payment_days": 30}
+
+
+def test_verdict_when_its_cheaper_alternative_was_already_sent_back_accepts_the_standing_sheet():
+    final = with_alternative_sheet(quote(SID, 1, 9.0, "final_offer"), 8.7)
+    again = with_alternative_sheet(quote(SID, 2, 9.0, "final_offer"), 8.7)
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0), ours(8.5), final, ours(8.7), again]})
+    v = policy.verdict(s, s.threads[SID])
+    assert v.send_back is None and v.kind == "accept"
+
+
+def test_worker_when_a_final_offer_has_a_cheaper_alternative_sends_exactly_that_alternative():
+    from arena_kit.agents.buyer.runner import ThreadWorker
+
+    agent = rule_agent()
+    final = with_alternative_sheet(quote(SID, 1, 9.0, "final_offer"), 8.7)
+    s = agent.open_case(S01, {SID: [quote(SID, 0, 10.0), ours(8.5), final]})
+    s.table = SendingTable()
+    ThreadWorker(agent, s, Arbiter(s)).iteration(s.threads[SID])
+    assert [ts["terms"] for ts in s.table.sent[0]["term_sheets"]] == [{"unit_price": 8.7, "payment_days": 30}]
+    assert s.table.closed == []
+
+
+def test_try_accept_when_another_bidder_has_a_cheaper_alternative_to_send_back_waits_for_it():
+    a_final = rfq_quote(A, 1, 16.6, "final_offer")
+    b_final = with_alternative_sheet(rfq_quote(B, 1, 16.9, "final_offer"), 15.9)
+    b_final["term_sheets"][1]["terms"]["lead_time_days"] = 42
+    s = session_for(S02, {A: [rfq_quote(A, 0, 17.2), ours(15.0, extra={"lead_time_days": 42}), a_final],
+                          B: [rfq_quote(B, 0, 17.4), ours(15.0, extra={"lead_time_days": 42}), b_final]})  # fmt: skip
+    s.table = FakeTable()
+    assert policy.verdict(s, s.threads[B]).send_back is not None
+    assert not Arbiter(s).try_accept(s.threads[A], "test") and s.table.closed == []
+
+
+class RoundLimit409Table(RoundLimitTable):
+    def send(self, supplier_id, message):
+        self.sent += 1
+        raise ArenaError(409, "round limit reached: accept the standing term sheet or walk away")
+
+
+def test_send_when_the_round_limit_comes_as_409_stops_sending_and_lets_the_policy_close():
+    # api.md: "409 ... you reached the round limit (you may still accept)"
+    from arena_kit.agents.buyer.runner import ThreadWorker
+
+    agent = BuyerAgent(DataTools(), None, None, None, None, None, OrchestratorConfig(), Telemetry("off"))
+    s = agent.open_case(S01, {SID: [quote(SID, 0, 10.0), ours(8.0), quote(SID, 1, 9.0)]})
+    s.table = RoundLimit409Table()
+    th = s.threads[SID]
+    message = {"subject": "Re", "body": "Our proposal.", "term_sheets": [{"terms": {"unit_price": 8.2}}], "refs": []}
+    ThreadWorker(agent, s, Arbiter(s)).send(th, message, "counter")
+    assert s.table.sent == 1 and th.exhausted and th.moves_left(S01) == 0
+    assert policy.verdict(s, th).kind in ("accept", "dead")
+
+
+def test_build_message_when_identical_to_our_last_message_returns_none():
+    # sandbox D02 (18:22): the same keep-alive went out 3x - "your email system is stuck"
+    body = "Thank you for your offer. We propose the attached package and look forward to your answer soon."
+    last = {"from": "buyer", "subject": "Re", "body": body, "refs": [],
+            "term_sheets": [{"terms": {"unit_price": 8.5, "payment_days": 30}}]}  # fmt: skip
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0), last, quote(SID, 1, 9.6)]})
+    th = s.threads[SID]
+    sheets = [{"unit_price": 8.5, "payment_days": 30}]
+    assert guard.build_message(s, th, sheets, Email("Re", body, ())) is None
+    assert guard.build_message(s, th, sheets, Email("Re", body + " Which terms matter most to you?", ())) is not None
+
+
+def test_worker_when_the_plan_repeats_our_last_e_mail_asks_a_new_question_instead():
+    from arena_kit.agents.buyer.pipeline import RoleOutput
+    from arena_kit.agents.buyer.runner import ThreadWorker
+
+    agent = rule_agent()
+    last = ours(8.5)
+    last["body"] = "Thank you for your offer. We propose the attached package and look forward to your answer soon."
+    s = agent.open_case(S01, {SID: [quote(SID, 0, 10.0), last, quote(SID, 1, 9.6)]})
+    s.table = SendingTable()
+    th = s.threads[SID]
+    same = OfferPlan(SID, ({"unit_price": 8.5, "payment_days": 30},), (1.0,), "step 0")
+    fit = ConcessionFit(SID, (), None, None, False)
+    email = Email("Re", last["body"], ())
+    agent.pipeline.run = lambda *a, **k: RoleOutput(Tactic(SID, "send"), same, email, fit, None)
+    agent.pipeline.rule_email = lambda *a, **k: email  # the deterministic composer writes the same e-mail again
+    ThreadWorker(agent, s, Arbiter(s)).iteration(th)
+    sent = s.table.sent[0]
+    assert sent["body"] != last["body"] and "?" in sent["body"] and s.table.closed == []
+
+
+def test_repeat_message_asks_a_new_question_each_time_and_stops_when_the_supplier_stands_still():
+    from arena_kit.agents.buyer.pipeline import repeat_message
+
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0), ours(8.5), quote(SID, 1, 9.6)]})
+    th = s.threads[SID]
+    first = repeat_message(s, th)
+    assert first is not None and first["body"] != "Our proposal."
+    th.events += [{**first, "from": "buyer"}, quote(SID, 2, 9.5)]  # it still moved: one more, with a new question
+    observe.rebuild(s, th)
+    second = repeat_message(s, th)
+    assert second is not None and second["body"] != first["body"]
+    th.events += [{**second, "from": "buyer"}, quote(SID, 3, 9.5)]  # it stood still after our repeat: stop
+    observe.rebuild(s, th)
+    assert repeat_message(s, th) is None
+
+
+def test_stage_when_the_role_pool_is_shut_down_uses_the_rule_twin(monkeypatch):
+    # sandbox D02: "RuntimeError: cannot schedule new futures after shutdown" from a worker still running at exit
+    from concurrent.futures import ThreadPoolExecutor
+
+    from arena_kit.agents.buyer import pipeline
+
+    dead = ThreadPoolExecutor(max_workers=1)
+    dead.shutdown()
+    monkeypatch.setattr(pipeline, "_POOL", dead)
+    used, timings = {}, {}
+    out = pipeline.RolePipeline(DataTools(), None, None, None)._stage("x", lambda: 1, lambda: 2, 5.0, used, timings)
+    assert out == 2 and used["x"] == "skipped"
+
+
+def test_fetch_all_when_an_attachment_is_slow_returns_within_its_budget():
+    # runner.py: one attachment GET took 76 s (archived v2, run 4) - the opening must not wait for it
+    import time
+
+    from arena_kit.agents.buyer import runner
+
+    class SlowDocs:
+        def attachment(self, attachment_id):
+            time.sleep(1.0)
+            return b"# quote\n"
+
+    msg = quote(SID, 0, 10.0)
+    msg["attachments"] = [{"attachment_id": "att1", "name": "quote.md", "type": "md"}]
+    t0 = time.monotonic()
+    pending = runner._fetch_all(SlowDocs(), {SID: [msg]}, budget_s=0.1)
+    assert time.monotonic() - t0 < 0.5 and pending
+    for future, _ in pending:
+        future.result(timeout=5)
+    assert "text" in msg["attachments"][0]
