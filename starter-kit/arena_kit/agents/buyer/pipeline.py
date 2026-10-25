@@ -273,3 +273,18 @@ def repeat_message(session: CaseSession, th: ThreadState) -> dict | None:
         return None
     sheets = [{"terms": t} for t in sheets]
     return {"subject": message.subject(session.case), "body": REPEAT_BODY, "term_sheets": sheets, "refs": []}
+
+
+ALTERNATIVE_BODY = "\n".join(
+    [message.INTRO, "We take up your alternative package as attached. Please confirm it so we can close.",
+     message.SIGN_OFF]
+)  # fmt: skip
+
+
+def alternative_message(session: CaseSession, th: ThreadState, terms: dict) -> dict | None:
+    """Its own cheaper alternative back as our only sheet (policy.final_alternative), if the guard lets it go out."""
+    sheets, _ = guard.check_sheets(session, th, [terms])
+    if not sheets:
+        return None
+    sheets = [{"terms": t} for t in sheets]
+    return {"subject": message.subject(session.case), "body": ALTERNATIVE_BODY, "term_sheets": sheets, "refs": []}

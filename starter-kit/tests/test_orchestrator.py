@@ -624,3 +624,30 @@ def test_trim_is_off_by_default(monkeypatch):
     s = session_for(S01, {SID: [quote(SID, 0, 17.4), ours(15.0), quote(SID, 1, 16.9)]})
     s.threads[SID].fit = MOVING
     assert not policy.margin_allowed(s, s.threads[SID], "trim")
+
+
+# ---- a final offer with a cheaper alternative: its own proposal goes back once (P18) --------------------------------
+
+
+def final_with_alternative(main: float, alt: float) -> dict:
+    msg = quote(SID, 1, main, "final_offer")
+    msg["term_sheets"].append(
+        {"term_sheet_id": f"offer:{SID[4:]}-1-a", "terms": {"unit_price": alt, "payment_days": 30}}
+    )
+    return msg
+
+
+def test_final_alternative_when_final_offer_carries_a_cheaper_sheet_returns_it_complete():
+    s = session_for(S01, {SID: [quote(SID, 0, 17.4), ours(15.0), final_with_alternative(16.9, 16.5)]})
+    alt = policy.final_alternative(s, s.threads[SID])
+    assert alt is not None and alt["unit_price"] == 16.5
+    assert set(S01["negotiable"]) <= set(alt)  # a complete sheet: the arena refuses missing fields (422)
+
+
+def test_final_alternative_when_dearer_or_already_sent_back_is_none():
+    dearer = session_for(S01, {SID: [quote(SID, 0, 17.4), ours(15.0), final_with_alternative(16.9, 17.2)]})
+    assert policy.final_alternative(dearer, dearer.threads[SID]) is None
+    events = [quote(SID, 0, 17.4), ours(15.0), final_with_alternative(16.9, 16.5), ours(16.5),
+              final_with_alternative(16.9, 16.5)]  # fmt: skip
+    again = session_for(S01, {SID: events})
+    assert policy.final_alternative(again, again.threads[SID]) is None  # it refused its own proposal: no loop

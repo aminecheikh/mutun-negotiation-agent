@@ -20,7 +20,7 @@ from ...client import ArenaError
 from ...play import fetch_documents, quota_used_up
 from . import guard, observe, policy
 from .arbiter import Arbiter
-from .pipeline import repeat_message
+from .pipeline import alternative_message, repeat_message
 from .state import CaseSession, ThreadState
 
 log = logging.getLogger("arena")
@@ -62,6 +62,11 @@ class ThreadWorker:
         with s.lock:  # a consistent view of every thread (others are rebuilt under this lock)
             v = policy.verdict(s, th)
         if v.kind == "accept":
+            with s.lock:
+                alternative = policy.final_alternative(s, th)
+            if alternative is not None and (message := alternative_message(s, th, alternative)) is not None:
+                self.send(th, message, "alternative", verdict=v, problems=("its cheaper alternative sent back",))
+                return
             if self.arbiter.try_accept(th, v.reason):
                 return
             v = policy.Verdict("park", f"accept deferred ({v.reason})")
