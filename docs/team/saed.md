@@ -92,3 +92,4 @@ Branch `feat/roles-saeb` · owns `starter-kit/arena_kit/agents/buyer/roles/` (co
 | 01:50 | 82cd3ae (offers cap + alt at closing + credible floor + release dossiers) | 10 practice | 10 | **62.7** | best single run; P08 .665 new best, P05 .36 (was .09), P02 .22 weakest; best-of 68.8 |
 | 04:10 | 74a6bc2 (repeat rule, alt at closing, keep-alives with offer) | 5 of 10 practice (429: key shared with another run) | 5 | 61.0 (5 cases) | P01 .881, P02 .271, P03 .855, P04 .641 (took our 14-day term), P05 .403; best-of 72.0 |
 | 04:40 | 4904a24 (all night fixes incl. orchestrator stop rule) | P07, P08, P10, P11, P18 single plays | 5+4 | **61.1 overall** (with the 5 from 74a6bc2) | P07 .684, P08 .599, P10 .663, P11 .626, P18 .485; board 75.4 = 10th (passed AEIOU) |
+| 05:10 | dcd8f43 (main + all night fixes) | 10 practice + D01 | 10 | **59.8** | healthy (0 credit, 0 429, 3 LLM fails); D01 0.876 (best D01); P02 .217 weakest; board unchanged 75.4 (10th) |
