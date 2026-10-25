@@ -49,6 +49,12 @@ BREAKDOWN_REFUSED = re.compile(
     r"|(?:breakdown|calculation|cost detail).{0,30}(?:confidential|proprietary|internal)",
     re.I,
 )
+FIGURES_ASKED = re.compile(  # it asks what our figures rest on: answered with the data references, never ignored
+    r"\b(?:which|what)\s+(?:figures?|data|numbers?|evidence|sources?)\b"
+    r"|\b(?:send|share|provide|show|give)\b.{0,30}\b(?:figures?|data|numbers?|evidence)\b"
+    r"|\bbased on\?",
+    re.I,
+)
 STALLED = re.compile(
     r"\b(?:unchanged|no movement|insufficient improvement|same proposal|token concession|marginal reduction)\b", re.I
 )
@@ -71,11 +77,13 @@ def signals(documents: str, events: list[dict]) -> dict[str, bool]:
 
 
 def objections(events: list[dict]) -> dict[str, bool]:
-    """Its latest reply: does it ask which volume we commit, refuse a cost breakdown, call our offer stalled?"""
+    """Its latest reply: does it ask which volume we commit, refuse a cost breakdown, ask what our figures rest on,
+    call our offer stalled?"""
     reply = next(iter(reversed(_replies(events))), "")
     return {
         "volume": bool(VOLUME_ASKED.search(reply)),
         "breakdown_refused": bool(BREAKDOWN_REFUSED.search(reply)),
+        "figures_asked": bool(FIGURES_ASKED.search(reply)),
         "stalled": bool(STALLED.search(reply)),
     }
 
@@ -118,8 +126,13 @@ NARRATIVES = {
         "We can commit to the longer framework in the term sheets. Please price that continuity and the "
         "consolidated business, and confirm the corresponding payment terms."
     ),
+    "figures": (
+        "Every figure we cite names the record it comes from, so you can check it against your own books. Please "
+        "tell us which reference you read differently and we will review it; otherwise please price the attached "
+        "complete packages on that basis."
+    ),
     "default": (
-        "Thank you for your proposal. We value a workable long-term relationship. Please compare these complete "
+        "We value a workable long-term relationship. Please compare these complete "
         "packages and share a cost breakdown so we can resolve the remaining difference."
     ),
 }
@@ -129,6 +142,8 @@ def narrative_key(case: dict, documents: str, events: list[dict]) -> str:
     """Which paragraph the rules choose: its latest objection first, then the case goal, then what it signals."""
     if objections(events)["breakdown_refused"]:
         return "confidential"
+    if objections(events)["figures_asked"]:
+        return "figures"
     goal = case["buyer"].get("category_goal")
     if goal in ("secure_supply", "quality_first"):
         return goal

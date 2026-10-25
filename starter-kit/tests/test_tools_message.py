@@ -74,7 +74,12 @@ def test_narrative_key_when_stalled_before_our_second_message_keeps_the_paragrap
 
 def test_objections_read_only_its_latest_reply():
     events = thread("We do not share our calculation.", "Which volume can you commit to?", ours=1)
-    assert message.objections(events) == {"volume": True, "breakdown_refused": False, "stalled": False}
+    assert message.objections(events) == {
+        "volume": True,
+        "breakdown_refused": False,
+        "figures_asked": False,
+        "stalled": False,
+    }
 
 
 def test_signals_read_documents_and_every_reply():
@@ -117,3 +122,22 @@ def test_unit_of_reads_the_part_and_gives_units_for_a_bundle(package):
     if bundle:
         assert message.unit_of(bundle, package) == "units"
     assert message.unit_of(single, None) == "units"
+
+
+@pytest.mark.parametrize("asked", [
+    "Which figures is that based on?",
+    "Please send us the exact figures for the costs you say our late deliveries caused.",
+    "What data do you base this on?",
+])  # fmt: skip
+def test_narrative_when_the_supplier_asks_for_our_figures_answers_with_the_references(asked):
+    case = {"buyer": {"category_goal": "leverage"}, "negotiable": ["unit_price"]}
+    events = [{"from": "supplier", "body": asked}]
+    assert message.objections(events)["figures_asked"]
+    assert message.narrative_key(case, "", events) == "figures"
+    assert not any(ch.isdigit() for ch in message.NARRATIVES["figures"])
+
+
+def test_compose_thanks_the_supplier_once():
+    for key in message.NARRATIVES:
+        body = message.compose(message.NARRATIVES[key], "", [])
+        assert body.count("Thank you for your proposal") <= 1, key
