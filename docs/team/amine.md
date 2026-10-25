@@ -5,8 +5,8 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 
 ## Now
 
-- Sweep e848872: 58.6 (baseline 54.4). Since then on fix/negotiation-issues: closing rule, Saed's PR #4 and notes,
-  same-offer-twice rule, tapering steps. Next: a hosted sweep on these; then A6 Sunday release.
+- Sun 10:30, branch `fix/hybrid-review` (off Jeddou's `feat/hybrid-deterministic`): review + fixes of the hybrid
+  buyer, tools and orchestrator (user: no lane separation for this). Next: merge to `main` before the 13:00 freeze.
 
 ## Tasks
 
@@ -135,6 +135,14 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
   (8d54375), keep-alives ask for terms (4d75d57). The user: same offer twice = its best (b1ef5b5). Research: steps
   never grow above target (feaf893). 592 tests.
 
+- Sun 10:30 - review of feat/hybrid-deterministic (3 parallel reviewers; 0 critical, 6 high, 7 medium) and fixes on
+  fix/hybrid-review, test-first: full-cost estimate with company.md country factors and capped by the supplier's own
+  offers (8a81730); planner credible floor from the estimate's band in anchors, rival_anchor and keep_margin, no
+  strategic price above its quote, exchanges never dearer in C, null margin crash, volume format (2a88d35); scorecard
+  and should-cost claims never praise the seller (e6d882f); composer answers "which figures?" and thanks once
+  (28ca9d2); orchestrator (fork, 8f439eb): cheaper alternative at a last word sent back, 409 round limit, no e-mail
+  twice, 15 s opening download cap. Rival use kept (user; DECISIONS 2026-10-25 10:30). 764 tests.
+
 ## Runs
 
 | When | Commit | Cases | Sessions | Mean | Notes |
@@ -148,3 +156,5 @@ plan and research: [amine-estimation-plan.md](amine-estimation-plan.md)
 | Sat 20:30 | 885eec2 | practice (10) | 10 | 55.1 | baseline 54.4, last 50.2; P18 0.36, P07 0.68, P08 0.61 up; P02 0 and P03 offer-less (squeeze); P05 0.33 held two agreed suppliers |
 | Sat 21:17 | e848872 | practice (10) | 10 | 58.6 | P02 0.33 (first ever), P11 0.71, P18 0.50; P05 0.07: instant accept signed the dearer supplier |
 | Sat 21:37 | a5b8eae | practice P05 | 1 | 0.00 | waited on an above-target agreement; cheapest supplier walked; round-limit 422 ignored; timeout |
+| Sun 10:40 | 28ca9d2+8f439eb | sandbox D01, D02 | 0 (free) | 0.78 | D01 0.943, D02 0.618: anchor needing an estimate opened D02 at 0.86, J1 agreed 14.70 |
+| Sun 10:55 | 845068a | sandbox D02 | 0 (free) | 0.70 | 0.80 anchor restored: D02 0.702 (deal 14.30, J1 final offer), same as before the fixes |

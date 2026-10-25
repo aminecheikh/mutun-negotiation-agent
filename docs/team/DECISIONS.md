@@ -48,3 +48,8 @@ decision - why`. Changing `contracts.py` always needs an entry here.
 - 2026-10-24 20:10 - team (user, organisers' rule) - No inter-supplier comparison: each supplier is negotiated on its
   own. No rival claims, no rival anchors, no offer IDs in messages, no thread parked for a rival; the close still
   never signs a dearer acceptable sheet over a cheaper one.
+- 2026-10-25 10:30 - team (user) - Supersedes 2026-10-24 20:10. Inter-supplier comparison is allowed: a bidder's
+  live rival offer may be cited by its `offer:` ID, anchor our first offer, and park a thread for a rival's last word.
+  - `brief/api.md` "Data you cite is checked" lists "another supplier's `offer` in this session" as a checkable
+  claim; sandbox D02 rose .555 -> .702 with it (c3fd8c9). Each claim stays a true, arena-checked statement; the close
+  still never signs a dearer acceptable sheet over a cheaper one.

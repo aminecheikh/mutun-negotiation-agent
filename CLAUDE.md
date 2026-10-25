@@ -12,7 +12,8 @@ Read `brief/brief.md` and `brief/api.md` for the rules; `docs/ROADMAP.md` for pl
   it only where needed (e.g. registering `--agent buyer` in `cli.py`); keep their tests passing.
 - `starter-kit/arena_kit/agents/buyer/` - **our agent** (`--agent buyer`). `contracts.py` holds the shared
   types; every module starts as a working placeholder that its owner replaces:
-  - `tools/` - deterministic: `bands`, `offers`, `claims`, `concession`, `dossier` (owner: Amine)
+  - `tools/` - deterministic: `planner` (every term sheet, from the cost function), `estimates` (supplier full
+    cost, money rate, defect rate), `claims`, `message` (rule e-mail), `concession`, `dossier` (owner: Amine)
   - `roles/` - LLM roles + `prompts/`: Profiler (once per case), Analyst -> Strategist -> Writer (each
     round); `llm.py` gives every call a hard timeout and a rule-based fallback (owner: Saed)
   - `agent.py` + `guard.py` - the orchestrator: one round = fit -> read -> choose -> plan -> write ->
@@ -72,7 +73,7 @@ uv run arena me                                 # quota left
   no should-cost, bundles, other price units, other negotiable fields, case-only `facts`, the Sunday release.
 - **Test properties, not practice numbers.** Besides unit tests on known rows, run the code on all 19
   practice case files (9 were never played: a holdout) and on mutated copies (`tests/test_tools_robustness.py`).
-  `tools/calibrate.py` is a sanity check (no absurd targets), not a target to fit.
+  `tests/test_tools_planner.py` checks planner properties (floors, anchors, exchanges never dearer) on every case.
 
 ## Team protocol (every Claude session follows this)
 
@@ -116,6 +117,10 @@ uv run arena me                                 # quota left
   target while the supplier came down, then repeating our last sheets after its `final_offer`, made it walk
   away; we closed on the dearer rival. Every supplier move gets one back (capped at the midpoint), a re-priced
   band must reach the verdict at once, and the one counter to a final offer must offer it more.
+- Review of the hybrid branch (2026-10-25): **a data estimate is a prior, the supplier's own offers correct it.**
+  Generic should-cost rows are a German cost base (company.md country factors); a supplier quoting under our
+  full-cost estimate refutes it. Using the point estimate as exact made the squeeze charge 10-100x the arena's in
+  P01-P03, so strategic deals paid 6-20k too much. A scorecard on target praises the seller: cite it only under target.
 - Practice sweep (main 4c30c05, 50.2 vs 54.4): **a supplier's alternative sheets are offers.** P18 accepted the
   main sheet (C 294k, 0.01) next to an alternative at C 274k (~0.30). And **our band target is an estimate**:
   closing at it after one message capped P01/P03 at ~0.8 where the baseline got 0.91.
