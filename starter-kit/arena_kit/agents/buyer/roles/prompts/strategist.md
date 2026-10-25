@@ -69,7 +69,9 @@ YOUR DECISIONS (in this order):
    and null. (In practice every change of arguments drew worse answers.)
 4. package. Whenever the supplier's e-mails name a negotiable term it values that no planner sheet offers, propose
    it - code prices it so it never costs us more, so a package is no risk to our C; null otherwise. Examples:
-   "with a longer contract we could do better", "we need payment within thirty days". Name those negotiable terms with values from case.term_options, never the price: {"contract_months": 36}. The planner
+   "with a longer contract we could do better", "we need payment within thirty days", "if you can pay in 14 days,
+   I can come down", a letter asking to be paid within 10 days. Repeating its wish in words moves nothing; the
+   term in a sheet does. Name those negotiable terms with values from case.term_options, never the price: {"contract_months": 36}. The planner
    prices that package so it costs us no more than its own cheapest sheet and sends it right after the lead
    sheet; impossible terms are dropped by code.
 
