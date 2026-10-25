@@ -72,6 +72,11 @@ def plan(
     credible = max(credible, anchor_price(band, events) * (1 - MAX_ANCHOR_BELOW_FLOOR_PCT / 100))
     price_range = (credible, theirs["unit_price"])
     variants = equal_cost_variants(case, main, c_main, std, supplier, fields, price_range, levers)
+    if _price_firm(ctx.fits.get(supplier_id)):
+        # it stopped moving on price: it takes a term from our packages but not the price that paid for it (P04:
+        # 14-day payment taken at its own 4.87 = 0.64, 90 days at 4.94 = 0.86) - only terms worth it at its price
+        c_theirs = total_cost(case, complete_offer(case, theirs), std, supplier)
+        variants = [v for v in variants if _worth_at(case, v, theirs, std, supplier) <= c_theirs]
     sheets = (main, *variants)[:MAX_SHEETS]
     costs = tuple(total_cost(case, s, std, supplier) for s in sheets)
     why = f"price {main['unit_price']} (theirs {theirs['unit_price']}, target {band.target}, ceiling {band.ceiling})"
@@ -150,6 +155,23 @@ def _cap(case: dict, band, std: dict, supplier) -> float:
         return band.ceiling
     sheet = reprice(case, complete_offer(case, dict(band.target_terms)), band.c_ceiling, std, supplier)
     return max(band.ceiling, sheet["unit_price"]) if sheet else band.ceiling
+
+
+FIRM_P_ROOM = 0.2  # as config.low_room_probability: under a 1-in-5 chance of another >= 1 % step
+FIRM_STEP_PCT = 0.3  # as roles.strategist.MOVING_STEP_PCT: a last step under this is no real move
+
+
+def _price_firm(fit) -> bool:
+    """It stopped moving on price: its last step was under 0.3 % (or up), or its fit leaves no room. The fit
+    alone is not enough - it extrapolates towards our estimate (P04: p_room 0.99 after two steps of 0.0 %)."""
+    if fit is None or fit.last_step_pct is None:
+        return False
+    return fit.last_step_pct < FIRM_STEP_PCT or (fit.p_room is not None and fit.p_room < FIRM_P_ROOM)
+
+
+def _worth_at(case: dict, sheet: dict, theirs: dict, std: dict, supplier) -> float:
+    """C of a package's terms at the supplier's own price: what we get if it takes the terms, not our price."""
+    return total_cost(case, complete_offer(case, {**sheet, "unit_price": theirs["unit_price"]}), std, supplier)
 
 
 def _closing(case: dict, events: list[dict]) -> bool:

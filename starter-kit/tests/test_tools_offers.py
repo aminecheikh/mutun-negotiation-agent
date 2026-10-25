@@ -368,3 +368,13 @@ def test_next_price_when_band_price_ceiling_reached_still_answers_a_step_within_
     frozen = offers.next_price(case, band, events)
     moved = offers.next_price(case, band, events, cap=p)
     assert frozen <= band.ceiling < moved <= round(p - 1.0, 2)
+
+
+def test_price_firm_when_its_last_step_is_tiny_or_up_even_with_a_hopeful_fit():
+    # P04: two steps of 0.0 % but p_room 0.99 (the fit extrapolates towards our estimate) - it stopped moving
+    from arena_kit.agents.buyer.contracts import ConcessionFit
+
+    assert offers._price_firm(ConcessionFit("s", (4.96, 4.88, 4.88), 4.1, 0.0, True, p_room=0.99))
+    assert offers._price_firm(ConcessionFit("s", (5.4, 5.43), 5.0, -0.55, True, p_room=1.0))  # it went up
+    assert not offers._price_firm(ConcessionFit("s", (138.55, 137.2), 133.0, 0.97, False, p_room=0.93))
+    assert not offers._price_firm(ConcessionFit("s", (6.0,), None, None, False))  # no step yet
