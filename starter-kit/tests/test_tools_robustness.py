@@ -174,7 +174,7 @@ def test_planner_trim_keeps_margin_within_the_minimal_step_and_follow_never_unde
         c_follow, c_trim, c_push = (planner.cost(case, s[0], std, supplier) for s in (follow, trim, push))
         assert c_push - 0.01 <= c_trim <= c_follow + 0.01  # never more than the planner concedes, never less than push
         if supplier and trim[0]["unit_price"] < follow[0]["unit_price"]:
-            assert trim[0]["unit_price"] >= min(moved["unit_price"], supplier["full_cost"]) - 0.01  # credible
+            assert trim[0]["unit_price"] >= planner.credible_floor(supplier, moved["unit_price"]) - 0.01  # credible
 
 
 def test_leverage_anchor_is_deeper_by_default_and_never_under_the_supplier_cost(package, monkeypatch):
@@ -188,5 +188,5 @@ def test_leverage_anchor_is_deeper_by_default_and_never_under_the_supplier_cost(
     deeper = planner.packages(case, events, supplier)
     theirs = events[0]["term_sheets"][0]["terms"]["unit_price"]
     assert planner.cost(case, deeper[0], std, supplier) <= planner.cost(case, default[0], std, supplier) + 0.01
-    if supplier and supplier["full_cost"] >= theirs * planner.ANCHOR_SHARE:
-        assert deeper == default  # its cost floor binds: no deeper opening than the default
+    if not supplier or planner.credible_floor(supplier, theirs) >= theirs * planner.ANCHOR_SHARE:
+        assert deeper == default  # no estimate, or its cost floor binds: no deeper opening than the default

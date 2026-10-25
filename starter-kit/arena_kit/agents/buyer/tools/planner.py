@@ -30,9 +30,11 @@ STRATEGIC = {"stabilise", "secure_supply"}
 ANCHOR_SHARE, STRATEGIC_ANCHOR_SHARE = 0.86, 0.90
 LEVERAGE_ANCHOR_SHARE = 0.80  # leverage cases ("competition and data should bring the price down"): measured in
 # practice 2026-10-25 against 0.86 - P05 .742 -> .820, P18 .532 -> .598 (its first move off .532 in 27 runs), P08
-# .570 -> .538; net +0.11. Floored at the supplier's estimated full cost. BUYER_LEVERAGE_ANCHOR=0 switches it off.
+# .570 -> .538; net +0.11. Only with a full-cost estimate to floor it (credible_floor): without one, nothing says a
+# deeper opening is still credible. BUYER_LEVERAGE_ANCHOR=0 switches it off.
 DEFAULT_SUSTAINABLE_MARGIN_PCT = 5
-CANDIDATE_SHARES = (0.98, 1.0, 1.02)  # strategic cases: prices near its quote where the squeeze charge may be lower
+CANDIDATE_SHARES = (0.98, 1.0)  # strategic cases: prices near its quote where the squeeze charge may be lower; never
+# above its own price - a squeeze saving there rests on a point estimate inside its own error band
 EXHAUSTIVE_LIMIT, BEAM_WIDTH = 4096, 64
 STILL_SHARE = 0.999  # its best C fell by less than 0.1 %: it did not move
 NUDGE_SHARE = 0.08  # it did not move: from our third message on, a small step of the remaining gap
@@ -45,15 +47,28 @@ SURPLUS_SHARE = 0.5  # of what an exchange is worth to the supplier beyond its c
 # ---- valuation -------------------------------------------------------------------------------------------------
 
 
-def anchor_share(case: dict) -> float:
+def anchor_share(case: dict, supplier: dict | None = None) -> float:
     """The first offer's share of the supplier's price: 0.90 in stabilise / secure_supply, 0.80 in leverage cases
-    (unless BUYER_LEVERAGE_ANCHOR=0), 0.86 otherwise."""
+    with a full-cost estimate to floor it (unless BUYER_LEVERAGE_ANCHOR=0), 0.86 otherwise."""
     goal = case["buyer"].get("category_goal")
     if goal in STRATEGIC:
         return STRATEGIC_ANCHOR_SHARE
-    if goal == "leverage" and os.environ.get("BUYER_LEVERAGE_ANCHOR", "1") != "0":
+    if goal == "leverage" and supplier and os.environ.get("BUYER_LEVERAGE_ANCHOR", "1") != "0":
         return LEVERAGE_ANCHOR_SHARE
     return ANCHOR_SHARE
+
+
+def full_cost_low(supplier: dict) -> float:
+    """The low edge of our estimate of the supplier's full cost: the estimate less its own error band."""
+    return supplier["full_cost"] * (1 - (supplier.get("uncertainty_pct") or 0) / 100)
+
+
+def credible_floor(supplier: dict | None, theirs: float) -> float:
+    """The lowest price we put to a supplier: the low edge of our full-cost estimate, or of its own price where that
+    is lower already (its price refutes a higher estimate). 0 without an estimate."""
+    if not supplier:
+        return 0.0
+    return min(theirs, supplier["full_cost"]) * (1 - (supplier.get("uncertainty_pct") or 0) / 100)
 
 
 def standard(case: dict, events: list[dict]) -> dict:
@@ -216,7 +231,7 @@ def value_equivalent(case: dict, first: dict, templates: list[dict], std: dict, 
         priced = at_cost(case, template, budget, std, supplier)
         if priced is None:
             continue
-        priced = supplier_priced(case, first, priced, std, rate, ppm)
+        priced = supplier_priced(case, first, priced, std, rate, ppm, supplier)
         if any(same_exchange(priced, old) and priced["unit_price"] < old["unit_price"] for old in previous):
             continue
         out.append(priced)
@@ -225,13 +240,14 @@ def value_equivalent(case: dict, first: dict, templates: list[dict], std: dict, 
     return out
 
 
-def supplier_priced(case: dict, first: dict, priced: dict, std: dict, rate: float | None, ppm: float | None = None
-                    ) -> dict:  # fmt: skip
+def supplier_priced(case: dict, first: dict, priced: dict, std: dict, rate: float | None, ppm: float | None = None,
+                    supplier=None) -> dict:  # fmt: skip
     """An exchange priced at equal C to the main sheet, moved down by half the gap to the price at which the supplier
     values it as much as the main sheet (cost.supplier_value at its own `rate` for money and its real defect rate
     `ppm`, which prices a chargeback for it): where it values the exchange more than it costs us - paid earlier by a
     supplier whose money is dear, a chargeback from one that delivers better than it commits - it still prefers it
-    and we keep half the difference. Never above equal C: where it values the exchange less, nothing changes."""
+    and we keep half the difference. Never above equal C: where it values the exchange less, nothing changes, and
+    where the lower price would raise our squeeze charge by more than it saves (`supplier`), neither."""
     if rate is None and ppm is None:
         return priced
     chargeback = "chargeback_eur_per_complaint"
@@ -255,7 +271,9 @@ def supplier_priced(case: dict, first: dict, priced: dict, std: dict, rate: floa
         **priced,
         "unit_price": round(priced["unit_price"] - SURPLUS_SHARE * (priced["unit_price"] - indifferent), 2),
     }
-    return out if out["unit_price"] > 0 and must_haves_ok(case, out, std) else priced
+    if out["unit_price"] <= 0 or not must_haves_ok(case, out, std):
+        return priced
+    return out if cost(case, out, std, supplier) <= cost(case, priced, std, supplier) else priced
 
 
 # ---- concession ------------------------------------------------------------------------------------------------
@@ -326,18 +344,19 @@ def packages(
         previous = (equivalent or prior)["unit_price"]
     goal = b.get("category_goal")
     strategic = goal in STRATEGIC
-    anchor = theirs * anchor_share(case)
-    if supplier and goal == "leverage" and anchor_share(case) < ANCHOR_SHARE:  # deeper, but never under its cost
-        anchor = max(anchor, min(theirs * ANCHOR_SHARE, supplier["full_cost"]))
-    if supplier and strategic:  # never under what keeps the supplier at its sustainable margin
-        margin = b.get("sustainable_margin_pct", DEFAULT_SUSTAINABLE_MARGIN_PCT) / 100
-        anchor = max(anchor, min(theirs, supplier["full_cost"] / max(0.5, 1 - margin)))
+    share = anchor_share(case, supplier)
+    anchor = theirs * share
+    if supplier and goal == "leverage" and share < ANCHOR_SHARE:  # deeper, but never under its cost
+        anchor = max(anchor, min(theirs * ANCHOR_SHARE, credible_floor(supplier, theirs)))
+    if supplier and strategic:  # never under what keeps the supplier at its sustainable margin (low-edge estimate)
+        margin = (b.get("sustainable_margin_pct") or DEFAULT_SUSTAINABLE_MARGIN_PCT) / 100
+        anchor = max(anchor, min(theirs, full_cost_low(supplier) / max(0.5, 1 - margin)))
     step = min(1.0, concession_step(case, events, supplier))
     price = previous + max(0.0, theirs - previous) * step if previous is not None else anchor
     prices = [round(max(0.01, price), 2)]
     if strategic and supplier:  # a slightly higher price can lower the squeeze charge more than it costs
         floor = round(price, 2) if previous is not None else 0.01
-        prices += [round(max(floor, theirs * share), 2) for share in CANDIDATE_SHARES]
+        prices += [round(min(theirs, max(floor, theirs * share)), 2) for share in CANDIDATE_SHARES]
     options = [t for t in (optimise(case, p, std, supplier) for p in prices) if t is not None]
     if not options:
         return []
@@ -379,22 +398,23 @@ def keep_margin(case: dict, sheets: list[dict], prior: dict, events: list[dict],
                 theirs: float) -> list[dict]:  # fmt: skip
     """The decision agent concedes less than the planner: every sheet re-priced to the C between our last offer
     and the planner's new lead sheet - `concede` of the way above the minimal (nudge) step, so a trim still moves.
-    In C, so it bites alike where the price is set by the squeeze charge. Credible or not at all: a sheet under
-    the supplier's estimated full cost leaves the planner's sheets unchanged; a price we already offered for the
-    same package is never taken back."""
+    In C, so it bites alike where the price is set by the squeeze charge. Credible: a sheet under the credible
+    floor (credible_floor) is held at the floor, or left at the planner's price where that is lower; a price we
+    already offered for the same package is never taken back."""
     lead_c, prior_c = cost(case, sheets[0], std, supplier), cost(case, prior, std, supplier)
     if not (math.isfinite(lead_c) and math.isfinite(prior_c)) or lead_c <= prior_c:
         return sheets
     budget = prior_c + (lead_c - prior_c) * (NUDGE_SHARE + (1 - NUDGE_SHARE) * max(0.0, min(1.0, concede)))
-    floor = min(theirs, supplier["full_cost"]) if supplier else 0.0
+    floor = credible_floor(supplier, theirs)
     previous = [s["terms"] for m in events if m.get("from") == "buyer" for s in m.get("term_sheets") or []]
     out = []
     for sheet in sheets:
         priced = at_cost(case, sheet, budget, std, supplier)
         if priced is None:
             continue
-        if priced["unit_price"] < floor - 0.005:
-            return sheets  # under its full cost is no credible offer
+        if priced["unit_price"] < floor - 0.005:  # under its full cost is no credible offer: hold at the floor
+            floored = {**priced, "unit_price": math.ceil(floor * 100 - 1e-7) / 100}
+            priced = floored if floored["unit_price"] < sheet["unit_price"] else sheet
         if any(same_exchange(priced, old) and priced["unit_price"] < old["unit_price"] for old in previous):
             continue
         out.append(priced)
@@ -546,9 +566,15 @@ def rival_anchor(case: dict, sid: str, threads: dict[str, list[dict]], sheets: l
     if not rival_costs:
         return sheets
     std, supplier = standard(case, events), estimates.get(sid)
-    share = anchor_share(case)
-    budget = min(min(rival_costs) * share, min(cost(case, t, std, supplier) for t in sheets))
-    competitive = [t for t in (at_cost(case, t, budget, std, supplier) for t in sheets) if t is not None]
+    budget = min(min(rival_costs) * anchor_share(case, supplier), min(cost(case, t, std, supplier) for t in sheets))
+    floor = credible_floor(supplier, own if math.isfinite(own) else math.inf)
+    competitive = []
+    for sheet in sheets:  # the market anchor, but never under what is credible for this supplier
+        priced = at_cost(case, sheet, budget, std, supplier)
+        if priced is not None and priced["unit_price"] < floor:
+            priced = {**sheet, "unit_price": round(floor, 2)} if round(floor, 2) < sheet["unit_price"] else sheet
+        if priced is not None:
+            competitive.append(priced)
     return competitive or sheets
 
 
@@ -576,6 +602,12 @@ def with_agent_package(case: dict, sheets: list[dict], changes: dict, events: li
 
 # ---- the commitment, stated by code ----------------------------------------------------------------------------
 
+
+def _amount(value: float) -> str:
+    """A quantity in full with thousands separators (no scientific notation for a million units)."""
+    return f"{value:,.0f}" if float(value).is_integer() else f"{value:,.2f}"
+
+
 FIRM = " This is the firm quantity available; please price it without assuming additional volume."
 
 
@@ -586,7 +618,7 @@ def commercial_brief(case: dict, sheets: list[dict], events: list[dict], unit: s
         return ""
     first = closing_terms(case, sheets[0], standard_terms(events))
     months = first["contract_months"]
-    text = f"Our lead package commits {first['volume_per_year']:g} {unit} per year"
+    text = f"Our lead package commits {_amount(first['volume_per_year'])} {unit} per year"
     text += f" for {months:g} months" if months else " as the stated order"
     text += "; the alternatives are separate complete offers, not cumulative commitments."
     if message.objections(events)["volume"] and "volume_per_year" not in case["negotiable"]:
