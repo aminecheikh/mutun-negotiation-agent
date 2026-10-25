@@ -9,7 +9,7 @@ keyword read of the same e-mails: start from it, correct it where the words say 
   Low (0.05-0.3) when its steps shrink to almost nothing (shrinking and last_step_pct under about 0.3 %),
   p_room is low, its price sits at concession.reservation_estimate, it repeats "our calculation" / "this
   is our last price" / "letztes Angebot", or the status is final_offer or agreed.
-  No price path yet (round 1): judge by tone and by how far its quote sits above the band's fair price.
+  No price path yet (round 1): judge by tone and by how far its quote sits above the band's fair price (when known).
 - walk_risk: the chance it walks if we push again. Low (about 0.1) in a calm, open exchange. Rises with
   final_offer, irritation ("without any movement on your side", "take it or leave it", "please decide",
   "ohne Bewegung Ihrerseits"), contradicted data ("that costs trust"), repeated or empty e-mails from us,

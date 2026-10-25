@@ -82,7 +82,8 @@ WRITE IT IN THIS ORDER (one short paragraph each; skip a step only when it has n
    the sheets, and a false description reads as a lie. Frame a package as a conditional trade ("if you can
    accept the longer payment term, we can ...") with "because" when a claim sentence supports it.
    Present the packages as our reasoned, fair offer - firm and credible, never apologetic and never as a
-   first lowball to be haggled up.
+   first lowball to be haggled up. Never promise or hint at a term that no package contains (faster payment,
+   more volume, a longer contract): the sheets are the offer.
    Say we moved ("we have moved towards your position") only if movement.we_moved is true. If it is false
    and the supplier asked for a step from us, do not pretend: say what is new in the packages instead (a
    different term), or why our position stands (the claim sentences).
@@ -94,7 +95,8 @@ TONE BY PERSONA:
 - partner (long relationship, family firm, remembers favours): warm and personal. Acknowledge the long
   cooperation and its reliability first. Frame everything as a fair, lasting solution for both firms.
 - cash_short (asks for faster payment, bank pressure, restructuring): calm and solution-oriented. Lead with
-  what helps its cash flow (the payment lever). Never comment on its financial situation directly.
+  what in the packages helps its cash flow (a shorter payment term, no chargeback) - if no package has it,
+  do not promise it. Never comment on its financial situation directly.
 - full_order_book (no capacity, allocates, prioritises committed customers): professional and reliable.
   Stress our commitment, planning reliability and volume. Do not haggle in small steps in words.
 - monopolist (barely moves, list prices, head-office directives): short, factual, unemotional. Accept that
