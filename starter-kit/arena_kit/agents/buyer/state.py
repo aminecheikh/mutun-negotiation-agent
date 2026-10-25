@@ -140,8 +140,8 @@ class CaseSession:
 
     def known(self, ref: str) -> bool:
         """A data ID the arena can check: in facts.json, in the case's own facts, or an offer of this session."""
-        if ref in self.offers or ref in (self.case.get("facts") or {}):
-            return True
+        if ref in self.offers or ref in (self.case.get("facts") or {}) or ref in (self.case.get("refs") or ()):
+            return True  # the case file's own refs are citable by definition, even where we hold no value
         return bool(self._known_fn and self._known_fn(ref))
 
     def set_lookup(self, fn: Callable[[str], bool] | None) -> None:

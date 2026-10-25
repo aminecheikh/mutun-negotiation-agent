@@ -211,3 +211,14 @@ def test_material_cover_drops_the_material_index_only():
     energy = Claim("The PPI-C2431 index changed -2.1% (idx:c, idx:d).", ("idx:c", "idx:d"), "index", -2.1, True, 0.0)
     kept = claims._relevant([material, energy], [], "Quote remark: Material covered until March 2027.", case)
     assert kept == [energy]
+
+
+def test_case_refs_without_values_are_cited_without_a_figure_only_for_safe_kinds():
+    # sandbox D01/D02: the case's refs were not in our data; cited without a figure they came back verified
+    case = {"case_id": "case:X", "suppliers": ["sup:DEMO-F1"], "parts": ["part:PH-100"], "buyer": {},
+            "refs": ["cost:part:PH-100", "sc:DEMO-F1@2026Q3", "sc:OTHER@2026Q3", "po:1", "po:2", "news:N-1",
+                     "doc:L", "quote:ALT"]}  # fmt: skip
+    found = claims._case_refs(case, claims._Facts(case, None), "sup:DEMO-F1")
+    refs = {r for c in found for r in c.refs}
+    assert refs == {"cost:part:PH-100", "sc:DEMO-F1@2026Q3", "po:1", "po:2"}  # no unknown news, notice or quote
+    assert all(not any(ch.isdigit() for ch in c.sentence.split("(")[0]) for c in found)  # no figure asserted

@@ -68,7 +68,11 @@ def quote_terms(text):
         section = next((key for head, key in SECTIONS.items() if line.startswith(head)), section)
         label = next((lab for lab in LABELS if line.startswith(lab + " ")), None)
         if section and label:
-            out.setdefault(section, {})[LABELS[label]] = _value(LABELS[label], line[len(label) :].strip())
+            try:
+                value = _value(LABELS[label], line[len(label) :].strip())
+            except ValueError:  # a value the reader cannot parse ("none", "-"): leave the field out, never crash
+                continue
+            out.setdefault(section, {})[LABELS[label]] = value
     return out
 
 

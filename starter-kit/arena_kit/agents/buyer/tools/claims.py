@@ -229,6 +229,36 @@ def _reserve(case: dict, facts: _Facts, sid: str) -> list[Claim]:
     return out
 
 
+def _case_refs(case: dict, facts: _Facts, sid: str) -> list[Claim]:
+    """The case's own `refs` whose values we do not hold (the arena knows them): cited without a figure, so the
+    arena takes its own value. Only kinds that cannot argue for the seller by the way we state them: the part's
+    should-cost, this supplier's scorecard and order lines, the part's forecast. Unknown news, notices and quotes
+    stay out - their direction is unknown."""
+    own = sid.split(":", 1)[-1]
+    unresolved = [r for r in case.get("refs") or [] if isinstance(r, str) and not facts.get(r)]
+    out = []
+    orders = tuple(r for r in unresolved if r.startswith("po:"))
+    for ref in unresolved:
+        if ref.startswith("cost:"):
+            out.append(_claim(f"Please reconcile your price with our should-cost estimate for this part ({ref}).",
+                              (ref,), "cost", None))  # fmt: skip
+        elif ref.startswith("sc:") and own in ref:
+            out.append(_claim(f"Please take your recent delivery and quality record into account ({ref}).", (ref,),
+                              "delivery", None))  # fmt: skip
+        elif ref.startswith("fc:"):
+            out.append(_claim(f"Our demand forecast for this part has changed ({ref}).", (ref,), "volume", None))
+    if 2 <= len(orders) <= 8:
+        out.append(
+            _claim(
+                f"Please compare our recent orders with you for this part ({', '.join(orders)}).",
+                orders,
+                "history",
+                0.0,
+            )
+        )  # fmt: skip  (no figure asserted: the arena takes the order prices)
+    return out
+
+
 def _news(facts: _Facts, sid: str) -> list[Claim]:
     """Press reports that weaken the seller's position (idle capacity, cash or credit pressure, easing supply)."""
     return [
@@ -308,6 +338,7 @@ def candidates(case: dict, package, supplier_id: str, threads: dict | None = Non
         *_forecast(case, facts),
         *_history(case, facts, supplier_id),
         *_news(facts, supplier_id),
+        *_case_refs(case, facts, supplier_id),
     ]
     if len(case.get("suppliers", [])) > 1:
         found = [*_live_rival(case, supplier_id, threads, estimates), *found]

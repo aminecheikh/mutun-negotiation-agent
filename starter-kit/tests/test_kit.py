@@ -327,3 +327,13 @@ def test_practice_plays_the_hosted_cases():
     out = play_all(Used, ["case:P01", "case:P02", "case:P03"], NaiveAgent, parallel=1)
     assert all(isinstance(e, ArenaError) and e.status == 429 for e in out.values())
     assert "not started" in out["case:P03"].detail
+
+
+def test_quote_terms_skips_a_value_it_cannot_read():
+    # a quote line such as "Payment days none" must not crash the reader (it would drop the supplier)
+    from arena_kit.docs import LABELS, SECTIONS, quote_terms
+
+    section = next(iter(SECTIONS))
+    first, second = list(LABELS)[:2]
+    parsed = quote_terms(f"{section}\n{first} none\n{second} 30\n")
+    assert LABELS[first] not in parsed.get(SECTIONS[section], {})
