@@ -112,7 +112,11 @@ class RolePipeline:
             if timeout <= 0:
                 used[name] = "skipped"
                 return fallback()
-            future = _POOL.submit(main)
+            try:
+                future = _POOL.submit(main)
+            except RuntimeError:  # the process is exiting (its case already ended): the rule twin, no traceback
+                used[name] = "skipped"
+                return fallback()
             try:
                 out = future.result(timeout=timeout)
                 used[name] = "main"
