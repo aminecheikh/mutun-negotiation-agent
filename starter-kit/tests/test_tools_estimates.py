@@ -60,3 +60,11 @@ def test_supplier_estimate_when_should_cost_exists_values_it_at_our_rate_on_its_
 
 def test_supplier_estimate_without_a_package_is_none():
     assert estimates.supplier_estimate(None, CASE, "sup:70110", {}) is None
+
+
+def test_real_ppm_reads_the_latest_scorecard_and_none_without_one(package):
+    # sup:70140 (P11) really delivers about 2,376 ppm - worse than any commitment on offer
+    assert estimates.real_ppm(package, {}, "sup:70140") == 2376.0
+    assert estimates.real_ppm(package, {}, "sup:99999") is None
+    own = {"facts": {"sc:1@2030Q1": {"supplier": "sup:99999", "quarter": "2030Q1", "ppm": 120}}}
+    assert estimates.real_ppm(None, own, "sup:99999") == 120.0  # the case's own facts count too

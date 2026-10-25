@@ -67,9 +67,9 @@ YOUR DECISIONS (in this order):
    messages are left: there, the planner's step is what closes the deal.
 3. claims and question: the rules choose the arguments and code writes the e-mail - return rule_suggestion.claims
    and null. (In practice every change of arguments drew worse answers.)
-4. package. Usually null. When the supplier said in words which terms it values and no planner sheet offers
-   them (e.g. "with a longer contract we could do better", "we need payment within thirty days"), name those
-   negotiable terms with values from case.term_options, never the price: {"contract_months": 36}. The planner
+4. package. Whenever the supplier's e-mails name a negotiable term it values that no planner sheet offers, propose
+   it - code prices it so it never costs us more, so a package is no risk to our C; null otherwise. Examples:
+   "with a longer contract we could do better", "we need payment within thirty days". Name those negotiable terms with values from case.term_options, never the price: {"contract_months": 36}. The planner
    prices that package so it costs us no more than its own cheapest sheet and sends it right after the lead
    sheet; impossible terms are dropped by code.
 

@@ -26,12 +26,12 @@ def test_prepare_when_opening_quote_has_no_should_cost_still_builds_a_context():
     assert set(ctx.claims) == {SID} and ctx.c_alternative is None or ctx.c_alternative > 0
 
 
-def test_plan_offers_when_first_round_anchors_at_86_percent_of_its_price():
+def test_plan_offers_when_first_round_anchors_at_the_goal_share_of_its_price():
     tools, threads = DataTools(), opening()
     ctx = tools.prepare(CASE, threads)
     plan = tools.plan_offers(ctx, SID, threads, Tactic(SID, "send"))
     assert all(set(sheet) == set(CASE["negotiable"]) for sheet in plan.term_sheets)
-    anchor = round(17.4 * planner.ANCHOR_SHARE, 2)  # routine / leverage: 86 % of its price
+    anchor = round(17.4 * planner.anchor_share(CASE), 2)  # leverage: 80 % of its price (no should-cost floor here)
     assert anchor in [sheet["unit_price"] for sheet in plan.term_sheets]
     # its own combination of terms may lead; no exchange costs us more than the anchor sheet (prices round down)
     c_anchor = plan.c_values[[s["unit_price"] for s in plan.term_sheets].index(anchor)]

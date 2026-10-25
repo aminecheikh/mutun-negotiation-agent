@@ -65,7 +65,8 @@ class DataTools:
         case, events = ctx.case, threads[supplier_id]
         supplier = self.supplier_from_thread(case, supplier_id, events)
         rate = estimates.money_rate(self.package, supplier_id, events)
-        sheets = planner.packages(case, events, supplier, CONCEDE.get(tactic.price, 1.0), rate)
+        ppm = estimates.real_ppm(self.package, case, supplier_id)
+        sheets = planner.packages(case, events, supplier, CONCEDE.get(tactic.price, 1.0), rate, ppm)
         if len(threads) > 1:
             estimates_ = {sid: self.supplier_from_thread(case, sid, ev) for sid, ev in threads.items()}
             sheets = planner.rival_anchor(case, supplier_id, threads, sheets, estimates_)

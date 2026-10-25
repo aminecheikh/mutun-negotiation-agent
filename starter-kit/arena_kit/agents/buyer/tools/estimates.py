@@ -7,6 +7,8 @@ the pitch) and an uncertainty.
                      should-cost of the part for this supplier (no margin), valued at our own cost of capital
   money_rate         what money is worth to the supplier per year, from what it showed: two of its own sheets that
                      differ only in payment days, else the skonto it offers; None without such evidence
+  real_ppm           the defect rate the supplier really delivers (its latest scorecard), which prices a chargeback
+                     for it; None without a scorecard
   fair_price         a base price moved by the part's cost-driver indices over 12 months
 """
 
@@ -109,6 +111,15 @@ def money_rate(package, supplier_id: str, events=()) -> float | None:
         if net > within and pct > 0:
             return min(MONEY_RATE_BOUNDS[1], pct / 100 / (net - within) * 360)
     return None
+
+
+def real_ppm(package, case: dict, supplier_id: str) -> float | None:
+    """Its latest scorecard's ppm (the case's own facts first, then the package): the brief values a chargeback for
+    the supplier "at the defect rate it really has"."""
+    facts = {**(package.facts if package is not None else {}), **(case.get("facts") or {})}
+    cards = [f for ref, f in facts.items() if ref.startswith("sc:") and f.get("supplier") == supplier_id]
+    latest = max(cards, key=lambda f: f.get("quarter", ""), default={})
+    return float(latest["ppm"]) if latest.get("ppm") is not None else None
 
 
 def index_change(package, series_id: str) -> IndexChange | None:
