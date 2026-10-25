@@ -119,7 +119,7 @@ NARRATIVES = {
         "consolidated business, and confirm the corresponding payment terms."
     ),
     "default": (
-        "Thank you for your proposal. We value a workable long-term relationship. Please compare these complete "
+        "We value a workable long-term relationship. Please compare these complete "
         "packages and share a cost breakdown so we can resolve the remaining difference."
     ),
 }

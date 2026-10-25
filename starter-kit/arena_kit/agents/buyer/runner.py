@@ -14,7 +14,7 @@ import functools
 import logging
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 
 from ...client import ArenaError
 from ...play import fetch_documents, quota_used_up
@@ -131,7 +131,7 @@ class ThreadWorker:
                 with s.gate(asked_at):
                     reply = s.table.send(th.supplier_id, message)
             except ArenaError as e:
-                if e.status == 422 and "round limit" in str(e.detail).lower():
+                if e.status in (409, 422) and "round limit" in str(e.detail).lower():  # api.md: may come as 409
                     # "accept the standing term sheet or walk away": no message can go out - the policy decides
                     log.warning("%s/%s: round limit reached - no more messages", s.case["case_id"], th.supplier_id)
                     th.exhausted = True
@@ -224,12 +224,22 @@ class ThreadWorker:
 # ---- entry points ---------------------------------------------------------------------------------------
 
 
+OPENING_DOCS_S = 10.0  # the 60 s clock runs from the opening: a slow download must not eat it (one took 76 s)
+
+
 def _fetch_all(table, threads: dict[str, list[dict]]) -> None:
+    """The opening documents, within OPENING_DOCS_S: what has not arrived by then is skipped (the term sheets are
+    structured; only the attached text is missing) - a late download keeps running but never delays a move."""
     messages = [m for events in threads.values() for m in events if m.get("attachments")]
     if not messages:
         return
-    with ThreadPoolExecutor(max_workers=min(8, len(messages))) as pool:
-        list(pool.map(lambda m: fetch_documents(table, m), messages))
+    pool = ThreadPoolExecutor(max_workers=min(8, len(messages)), thread_name_prefix="opening-docs")
+    futures = [pool.submit(fetch_documents, table, m) for m in messages]
+    done, late = wait(futures, timeout=OPENING_DOCS_S)
+    if late:
+        log.warning("%d opening document(s) not in after %.0f s - playing without their text", len(late),
+                    OPENING_DOCS_S)  # fmt: skip
+    pool.shutdown(wait=False, cancel_futures=True)
 
 
 def play_case(table, case_id: str, agent, deadline=None) -> dict:

@@ -587,7 +587,9 @@ def commercial_brief(case: dict, sheets: list[dict], events: list[dict], unit: s
         return ""
     first = closing_terms(case, sheets[0], standard_terms(events))
     months = first["contract_months"]
-    text = f"Our lead package commits {first['volume_per_year']:g} {unit} per year"
+    volume = first["volume_per_year"]
+    volume = f"{volume:.0f}" if float(volume).is_integer() else f"{volume:g}"  # never 1.25e+06 for large volumes
+    text = f"Our lead package commits {volume} {unit} per year"
     text += f" for {months:g} months" if months else " as the stated order"
     text += "; the alternatives are separate complete offers, not cumulative commitments."
     if message.objections(events)["volume"] and "volume_per_year" not in case["negotiable"]:
