@@ -64,7 +64,7 @@ class DataTools:
         best compliant rival. `tactic.price`: the decision agent's share of the planner's step (CONCEDE)."""
         case, events = ctx.case, threads[supplier_id]
         supplier = self.supplier_from_thread(case, supplier_id, events)
-        rate = estimates.money_rate(self.package, supplier_id, events)
+        rate = estimates.money_rate(self.package, supplier_id, events, ctx.documents.get(supplier_id, ""))
         ppm = estimates.real_ppm(self.package, case, supplier_id)
         sheets = planner.packages(case, events, supplier, CONCEDE.get(tactic.price, 1.0), rate, ppm)
         if len(threads) > 1:
