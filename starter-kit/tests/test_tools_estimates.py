@@ -68,3 +68,42 @@ def test_real_ppm_reads_the_latest_scorecard_and_none_without_one(package):
     assert estimates.real_ppm(package, {}, "sup:99999") is None
     own = {"facts": {"sc:1@2030Q1": {"supplier": "sup:99999", "quarter": "2030Q1", "ppm": 120}}}
     assert estimates.real_ppm(None, own, "sup:99999") == 120.0  # the case's own facts count too
+
+
+def test_should_cost_when_the_row_is_generic_and_the_supplier_is_turkish_applies_the_country_factor(package):
+    # company.md: generic rows use a German cost base; TR full cost is about 0.75 of it
+    est = estimates.should_cost(package, {**CASE, "parts": ["part:310070"]}, "sup:70150")
+    assert est.value == pytest.approx(194.18 * 0.75, abs=0.01)
+    assert est.uncertainty_pct > 5 and "TR" in est.source
+
+
+def test_should_cost_when_the_row_is_generic_and_the_supplier_is_german_keeps_the_row(package):
+    est = estimates.should_cost(package, {**CASE, "parts": ["part:310070"]}, "sup:70190")
+    assert est.value == 194.18 and est.uncertainty_pct == 5
+
+
+def test_should_cost_when_the_supplier_is_unknown_keeps_the_german_base_with_a_wide_band(package):
+    est = estimates.should_cost(package, {**CASE, "parts": ["part:310070"]}, "sup:99999")
+    assert est.value == 194.18 and est.uncertainty_pct == estimates.DEFAULT_UNCERTAINTY_PCT
+
+
+def test_should_cost_when_the_row_is_this_suppliers_own_model_applies_no_country_factor(package):
+    est = estimates.should_cost(package, {**CASE, "parts": ["part:310012"]}, "sup:70110")
+    assert est.value == 347.27 and est.uncertainty_pct == 5
+
+
+def test_supplier_estimate_when_the_supplier_offers_under_our_full_cost_caps_it_at_its_offer(package):
+    """Corrections from the live negotiation: a supplier's own offer refutes a higher full-cost estimate; its opening
+    ask keeps at least the sustainable margin."""
+    import json
+
+    case = next(c for c in json.loads((Path(__file__).parent / "fixtures/practice_cases.json").read_text())
+                if c["case_id"] == "case:P01")  # fmt: skip
+    std = {"payment_days": 60}
+    low = [{"from": "supplier", "term_sheets": [{"terms": {"unit_price": 120.0}}]}]
+    est = estimates.supplier_estimate(package, case, "sup:70110", std, low)
+    keep = 1 - case["buyer"]["sustainable_margin_pct"] / 100
+    assert est["full_cost"] < 120.0 * keep + 0.5 and "capped" in est["source"]
+    high = [{"from": "supplier", "term_sheets": [{"terms": {"unit_price": 200.0}}]}]
+    assert estimates.supplier_estimate(package, case, "sup:70110", std, high)["full_cost"] == 132.64
+    assert estimates.supplier_estimate(package, case, "sup:70110", std)["full_cost"] == 132.64

@@ -12,10 +12,17 @@ the pitch) and an uncertainty.
   fair_price         a base price moved by the part's cost-driver indices over 12 months
 """
 
+import math
 import statistics
 from dataclasses import dataclass
 
-DEFAULT_UNCERTAINTY_PCT = 15  # a should-cost row without a stated confidence
+from ....cost import supplier_value
+
+DEFAULT_UNCERTAINTY_PCT = 15  # a should-cost row without a stated confidence (company.md: generic rows 5-15 %)
+# company.md "Should-cost": other countries' full cost relative to the German base of the generic rows (midpoints)
+COUNTRY_COST_FACTOR = {"DE": 1.0, "AT": 1.05, "CH": 1.05, "CZ": 0.825, "PL": 0.825, "HU": 0.825, "TR": 0.75,
+                       "CN": 0.7}  # fmt: skip
+COUNTRY_FACTOR_SPREAD_PCT = 5  # the rule of thumb is itself a range: its error adds to the row's
 # Creditreform-style credit index: above these a supplier's credit is weak (dossier evidence lines)
 CREDIT_PREMIA = ((300, 0.08), (250, 0.04))
 THIN_EQUITY_PCT = 25.0
@@ -43,39 +50,85 @@ class IndexChange:
 
 def should_cost(package, case: dict, supplier_id: str) -> Estimate | None:
     """The latest should-cost row of the case's one part for this supplier (or for any supplier), in the part's own
-    price unit. A bundle of several parts has no single unit cost: None."""
+    price unit. A bundle of several parts has no single unit cost: None. The supplier's own plant model comes first;
+    a generic row is a German cost base (company.md), moved to the supplier's country by its rule of thumb."""
     parts = case.get("parts") or []
     if package is None or len(parts) != 1:
         return None
     rows = package.query(
-        "SELECT s.id, s.unit_cost, s.price_unit, s.confidence_pct, s.estimate_date, p.price_unit AS part_unit "
+        "SELECT s.id, s.unit_cost, s.price_unit, s.confidence_pct, s.estimate_date, s.supplier_id, "
+        "p.price_unit AS part_unit "
         "FROM should_cost s LEFT JOIN parts p ON p.id = s.part_id "
         "WHERE s.part_id = ? AND (s.supplier_id = ? OR s.supplier_id IS NULL OR s.supplier_id = '') "
-        "ORDER BY s.estimate_date DESC",
-        (parts[0], supplier_id),
+        "ORDER BY (s.supplier_id = ?) DESC, s.estimate_date DESC",
+        (parts[0], supplier_id, supplier_id),
     )
     row = rows[0] if rows else None
     if row is None or row["unit_cost"] is None:
         return None
     if row["part_unit"] is not None and float(row["price_unit"]) != float(row["part_unit"]):
         return None
-    pct = float(row["confidence_pct"] or DEFAULT_UNCERTAINTY_PCT)
-    return Estimate(float(row["unit_cost"]), f"should-cost {row['id']} ({row['estimate_date']})", pct)
+    value, pct = float(row["unit_cost"]), float(row["confidence_pct"] or DEFAULT_UNCERTAINTY_PCT)
+    source = f"should-cost {row['id']} ({row['estimate_date']})"
+    if row["supplier_id"] != supplier_id:  # a generic row: German cost base
+        country = _country(package, supplier_id)
+        if country is None:
+            return Estimate(value, f"{source}, German cost base, supplier country unknown", DEFAULT_UNCERTAINTY_PCT)
+        factor = COUNTRY_COST_FACTOR.get(country)
+        if factor is None:
+            return Estimate(value, f"{source}, German cost base ({country})", DEFAULT_UNCERTAINTY_PCT)
+        if factor != 1.0:
+            value, pct = value * factor, pct + COUNTRY_FACTOR_SPREAD_PCT
+            source += f" x {factor:g} for {country} (company.md rule of thumb)"
+    return Estimate(value, source, pct)
 
 
-def supplier_estimate(package, case: dict, supplier_id: str, std: dict) -> dict | None:
+def _country(package, supplier_id: str) -> str | None:
+    rows = package.query("SELECT country FROM suppliers WHERE id = ?", (supplier_id,))
+    return (rows[0]["country"] or None) if rows else None
+
+
+def supplier_estimate(package, case: dict, supplier_id: str, std: dict, events=()) -> dict | None:
     """`supplier` for cost.supplier_value / relationship_cost: its full cost from the should-cost, our interest rate,
-    its standard terms. None without a should-cost (C then leaves the squeeze charge out)."""
+    its standard terms. None without a should-cost (C then leaves the squeeze charge out). A supplier's own offer
+    worth less to it than our estimate refutes the estimate: the full cost is capped at that worth (CLAUDE.md
+    "priors from data, corrections from the live negotiation")."""
     estimate = should_cost(package, case, supplier_id)
     if estimate is None:
         return None
-    return {
+    out = {
         "full_cost": estimate.value,
         "interest_rate": case["buyer"]["interest_rate"],
         "standard": std,
         "source": estimate.source,
         "uncertainty_pct": estimate.uncertainty_pct,
     }
+    keep = 1 - (case["buyer"].get("sustainable_margin_pct") or 0) / 100
+    caps = [_worth(case, terms, out) * (keep if opening else 1.0) for opening, terms in _offered(events)]
+    lowest = min(caps, default=math.inf)
+    if lowest < out["full_cost"]:
+        out = {**out, "full_cost": lowest, "source": f"{estimate.source}, capped by its own offer ({lowest:.2f})"}
+    return out
+
+
+def _offered(events) -> list[tuple[bool, dict]]:
+    """(is its opening quote, terms) of every priced supplier sheet: its opening ask keeps at least the sustainable
+    margin (it is its ask, not a concession); no later offer is under its full cost."""
+    out, opening = [], True
+    for m in events:
+        sheets = [s.get("terms") or {} for s in m.get("term_sheets") or []] if m.get("from") != "buyer" else []
+        priced = [t for t in sheets if t.get("unit_price")]
+        out += [(opening, t) for t in priced]
+        opening = opening and not priced
+    return out
+
+
+def _worth(case: dict, terms: dict, supplier: dict) -> float:
+    try:
+        worth = supplier_value(case, terms, supplier)
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return math.inf
+    return worth if worth > 0 else math.inf
 
 
 def money_rate(package, supplier_id: str, events=()) -> float | None:

@@ -50,7 +50,7 @@ class DataTools:
 
     def supplier_from_thread(self, case: dict, supplier_id: str, events: list[dict]) -> dict | None:
         """Our estimate of the supplier for the squeeze charge, on its standard terms in the thread."""
-        return estimates.supplier_estimate(self.package, case, supplier_id, planner.standard(case, events))
+        return estimates.supplier_estimate(self.package, case, supplier_id, planner.standard(case, events), events)
 
     def fit_concessions(self, ctx: CaseContext, supplier_id: str, events: list[dict]) -> ConcessionFit:
         estimate = estimates.should_cost(self.package, ctx.case, supplier_id)
