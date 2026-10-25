@@ -69,10 +69,11 @@ def test_safe_when_accept_before_our_first_message_sends_a_counter_offer_without
     assert tactic.action == "send" and tactic.question is None
 
 
-def test_safe_when_walk_without_alternative_sends_instead():
+def test_safe_when_walk_from_final_offer_without_alternative_accepts_instead():
+    # walking scores 0 without an alternative, and countering a final offer risks the same (P10) - take it
     ctx, threads = setup([supplier(), buyer(), supplier(status="final_offer", n=1)])
     tactic = safe(ctx, threads, {"action": "walk_away"}, rule_tactic(ctx, threads))
-    assert tactic.action == "send"
+    assert tactic.action == "accept"
 
 
 def test_safe_when_alternative_cheaper_and_supplier_final_allows_walk():
@@ -469,3 +470,12 @@ def test_lever_floor_when_alternative_cheaper_in_final_offer_rebuilds_it():
     ctx = replace(wider(ctx), trades={})
     assert closing(ctx, events)
     assert "contract_months" in lever_floor(ctx, SID, events, ("payment_days",))
+
+
+def test_safe_when_final_offer_and_no_alternative_accepts_instead_of_countering():
+    # P10 52999806: its round-1 final offer (0.66) was countered, it walked, no alternative -> 0
+    ctx, threads = setup([supplier(), buyer(), supplier(price=17.0, status="final_offer", n=1)], alt_c=None)
+    tactic = safe(ctx, threads, {"action": "send", "levers": ["unit_price"]}, rule_tactic(ctx, threads))
+    assert tactic.action == "accept"
+    with_alt, threads = setup([supplier(), buyer(), supplier(price=17.0, status="final_offer", n=1)], alt_c=1e12)
+    assert safe(with_alt, threads, {"action": "send", "levers": ["unit_price"]}, rule_tactic(with_alt, threads))

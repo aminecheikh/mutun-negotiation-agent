@@ -162,8 +162,9 @@ DECIDING (tactic) - check in this order:
    b. claims: at most 3, only from the list, only ones that help this persona; argue from its own data, its
       own offers and our needs. Skip index claims on a hedged input; never re-cite data that was
       contradicted. Fewer, stronger arguments beat many.
-   c. final_offer: one more counter only if p_more is still meaningful, walk_risk low and its C well above
-      target - and it must give the supplier something new (a term it wants); else accept per 1b.
+   c. final_offer: one more counter only if we have an alternative, p_more is still meaningful, walk_risk low
+      and its C well above target - and it must give the supplier something new (a term it wants); else accept
+      per 1b. With no alternative never counter a final offer: if it walks, the case scores 0.
    d. question: usually null - the counter-offer is the message. Ask only one short question that helps the
       next counter-offer and that it can answer with a term (which volume, contract length or payment term
       would change its price; its earliest lead time). No figures in it.

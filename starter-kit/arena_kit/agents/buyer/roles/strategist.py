@@ -415,6 +415,13 @@ def safe(ctx: CaseContext, threads: dict[str, list[dict]], raw: dict, rule: Tact
         return Tactic(sid, "accept", rationale="safe: no messages left - accept or the guard walks")
     if action == "send" and accept_ready(ctx, sid, events) and latest(events).get("status") == "agreed":
         return Tactic(sid, "accept", rationale="safe: supplier agreed to our terms")
+    if (
+        action == "send"
+        and latest(events).get("status") == "final_offer"
+        and ctx.c_alternative is None
+        and accept_ready(ctx, sid, events)
+    ):  # no alternative: a walk after our counter scores 0 (P10 52999806: 0.66 final countered -> walked -> 0)
+        return Tactic(sid, "accept", rule.levers, rule.claims, None, "safe: final offer and no alternative - accept")
     # an accept or walk the policy refuses becomes a send: it keeps the model's (else the rule's) levers, claims
     # and question, never a bare price-only message
     if not claims and rule.supplier_id == sid:
