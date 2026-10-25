@@ -184,3 +184,32 @@ def test_live_rival_cites_a_lower_quote_even_with_other_terms_but_not_an_implaus
     assert found and f"offer:{first[4:]}-0" in found[0].refs and found[0].figure == other["unit_price"]
     threads[first][0]["term_sheets"][0]["terms"] = {**other, "unit_price": round(terms["unit_price"] * 0.5, 2)}
     assert claims._live_rival(case, second, threads, {}) == []
+
+
+@pytest.mark.parametrize("goal", ["leverage", "quality_first"])
+def test_scorecard_when_the_supplier_meets_our_target_cites_no_scorecard(goal, package):
+    """A scorecard on target praises the seller: never cited (company.md: on-time delivery target 95 %)."""
+    case = copy.deepcopy(CASES["case:P05"])
+    case["buyer"]["category_goal"] = goal
+    sid = case["suppliers"][0]
+    case["facts"] = {**case.get("facts", {}), f"sc:{sid[4:]}@2099Q4": {"supplier": sid, "quarter": "2099Q4",
+                                                                        "otd_pct": 97.0, "ppm": 0}}  # fmt: skip
+    cited = [c for c in claims.candidates(case, package, sid, threads_for(case)) if c.kind in ("delivery", "quality")]
+    assert not cited, [c.sentence for c in cited]
+
+
+def test_scorecard_when_delivery_is_under_target_cites_it(package):
+    case = copy.deepcopy(CASES["case:P05"])
+    sid = case["suppliers"][0]
+    case["facts"] = {**case.get("facts", {}), f"sc:{sid[4:]}@2099Q4": {"supplier": sid, "quarter": "2099Q4",
+                                                                        "otd_pct": 88.0, "ppm": 900}}  # fmt: skip
+    found = claims.candidates(case, package, sid, threads_for(case))
+    assert any(c.kind == "delivery" and c.figure == 88.0 for c in found)
+
+
+def test_should_cost_when_the_estimate_is_above_todays_price_is_not_cited(package):
+    case = copy.deepcopy(CASES["case:P01"])  # cost:310010 = 132.64
+    case["buyer"]["current_unit_price"] = 126.53
+    sid = case["suppliers"][0]
+    found = claims.candidates(case, package, sid, threads_for(case, markup=1.10))
+    assert not [c for c in found if c.kind == "cost"]

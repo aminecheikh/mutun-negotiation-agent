@@ -14,6 +14,7 @@ import re
 from dataclasses import replace
 
 from ....cost import must_haves_ok
+from ....docs import standard_terms
 from ....play import latest, live_threads
 from ..contracts import Claim
 from . import message
@@ -28,6 +29,7 @@ WEAK_SELLER_NEWS = {
     "supply_normalises",
     "customer_loss",
 }  # fmt: skip  (customer_loss: Sunday release, idle capacity)
+OTD_TARGET_PCT = 95.0  # company.md: quality agreement, on-time delivery target 95 %
 RIVAL_PLAUSIBLE_SHARE = 0.8  # a rival quote under 80 % of this supplier's price is cheap for a reason (planner too)
 HISTORY_LINES = 4  # recent order lines cited (the arena checks 2-8 po lines of one part)
 FIRST_MESSAGE_CLAIMS, LATER_CLAIMS = 2, 3
@@ -109,18 +111,28 @@ def _index(case: dict, package, facts: _Facts) -> list[Claim]:
     return sorted(found, key=lambda c: c.figure)
 
 
-def _scorecard(case: dict, facts: _Facts, sid: str) -> list[Claim]:
+def _scorecard(case: dict, facts: _Facts, sid: str, threads: dict) -> list[Claim]:
+    """Its latest scorecard, only where it argues for us: on-time delivery under our target, or (quality_first) a
+    defect rate above the ppm it commits to. A scorecard on target praises the seller."""
     cards = [(ref, f) for ref, f in facts.items("sc:") if f.get("supplier") == sid]
     if not cards:
         return []
     ref, card = max(cards, key=lambda rf: rf[1].get("quarter", ""))
     if case["buyer"].get("category_goal") == "quality_first" and card.get("ppm") is not None:
-        return [_claim(f"Recorded quality was {float(card['ppm']):g} ppm ({ref}).", (ref,), "quality", card["ppm"])]
-    if card.get("otd_pct") is not None:
+        committed = _committed_ppm(case, threads.get(sid) or [])
+        if committed is not None and float(card["ppm"]) > committed:
+            return [_claim(f"Recorded quality was {float(card['ppm']):g} ppm ({ref}).", (ref,), "quality", card["ppm"])]
+    if card.get("otd_pct") is not None and float(card["otd_pct"]) < OTD_TARGET_PCT:
         return [
             _claim(f"On-time delivery was {float(card['otd_pct']):g}% ({ref}).", (ref,), "delivery", card["otd_pct"])
         ]
     return []
+
+
+def _committed_ppm(case: dict, events: list[dict]) -> float | None:
+    """The defect rate the supplier commits to: its quote's standard terms, else the case's fixed terms."""
+    value = {**(case.get("fixed_terms") or {}), **standard_terms(events)}.get("ppm_commitment")
+    return float(value) if value is not None else None
 
 
 def _should_cost(case: dict, facts: _Facts) -> list[Claim]:
@@ -128,6 +140,9 @@ def _should_cost(case: dict, facts: _Facts) -> list[Claim]:
     for part in case.get("parts", []):
         ref = f"cost:{part.split(':', 1)[-1]}"
         unit_cost = facts.get(ref).get("unit_cost")
+        today = case["buyer"].get("current_unit_price")
+        if today is not None and unit_cost is not None and float(unit_cost) >= today:
+            continue  # a full cost above what we pay today argues for the seller's increase
         if unit_cost is not None and facts.get(ref).get("part", part) == part:
             sentence = (f"Our should-cost estimate is EUR {float(unit_cost):.2f} per price unit ({ref}); please help "
                         "us reconcile this estimate with your cost breakdown.")  # fmt: skip
@@ -253,7 +268,7 @@ def candidates(case: dict, package, supplier_id: str, threads: dict | None = Non
         *_notice(case, facts, supplier_id),
         *_alternative_quote(case, facts, supplier_id),
         *_index(case, package, facts),
-        *_scorecard(case, facts, supplier_id),
+        *_scorecard(case, facts, supplier_id, threads),
         *_should_cost(case, facts),
         *_forecast(case, facts),
         *_history(case, facts, supplier_id),
