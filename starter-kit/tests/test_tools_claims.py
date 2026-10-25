@@ -169,3 +169,18 @@ def test_default_choice_when_supplier_argues_with_costs_leads_with_a_falling_ind
 def test_candidates_when_no_data_package_and_no_threads_returns_only_case_facts():
     found = claims.candidates(CASES["case:P01"], None, "sup:70110")
     assert all(c.refs for c in found)
+
+
+def test_live_rival_cites_a_lower_quote_even_with_other_terms_but_not_an_implausible_one(package):
+    # sandbox D02: the rival's lower quote (its standard lead time broke our must-have) moved the bidder from our
+    # first message on (.555 -> .702); a quote far below its price is cheap because of a term it breaks
+    case = next(c for c in CASES.values() if len(c["suppliers"]) > 1)
+    threads = threads_for(case)
+    first, second = case["suppliers"][0], case["suppliers"][1]
+    terms = threads[second][0]["term_sheets"][0]["terms"]
+    other = {**terms, "unit_price": round(terms["unit_price"] * 0.93, 2), "lead_time_days": 999}
+    threads[first][0]["term_sheets"][0]["terms"] = other
+    found = claims._live_rival(case, second, threads, {})
+    assert found and f"offer:{first[4:]}-0" in found[0].refs and found[0].figure == other["unit_price"]
+    threads[first][0]["term_sheets"][0]["terms"] = {**other, "unit_price": round(terms["unit_price"] * 0.5, 2)}
+    assert claims._live_rival(case, second, threads, {}) == []

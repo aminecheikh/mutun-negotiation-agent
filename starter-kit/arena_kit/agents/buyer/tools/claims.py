@@ -13,8 +13,7 @@ first when the supplier argues with costs, a live cheaper rival first when sever
 import re
 from dataclasses import replace
 
-from ....cost import closing_terms, must_haves_ok, total_cost
-from ....docs import standard_terms
+from ....cost import must_haves_ok
 from ....play import latest, live_threads
 from ..contracts import Claim
 from . import message
@@ -29,6 +28,7 @@ WEAK_SELLER_NEWS = {
     "supply_normalises",
     "customer_loss",
 }  # fmt: skip  (customer_loss: Sunday release, idle capacity)
+RIVAL_PLAUSIBLE_SHARE = 0.8  # a rival quote under 80 % of this supplier's price is cheap for a reason (planner too)
 HISTORY_LINES = 4  # recent order lines cited (the arena checks 2-8 po lines of one part)
 FIRST_MESSAGE_CLAIMS, LATER_CLAIMS = 2, 3
 COST_OBJECTION = re.compile(r"\b(?:costs?|prices?|material|energy|wages|index|inflation)\b", re.I)
@@ -210,11 +210,13 @@ def _notice(case: dict, facts: _Facts, sid: str) -> list[Claim]:
 
 
 def _live_rival(case: dict, sid: str, threads: dict[str, list[dict]], estimates: dict) -> list[Claim]:
-    """The cheapest live, compliant sheet of another bidder that undercuts this supplier in price and in C."""
+    """The lowest live price another bidder quotes under this supplier's price - what the supplier engine reads ("the
+    buyer shows a much lower rival quote: I give half the step now"). Freight, payment or a broken must-have of the
+    rival do not matter for that true statement, only plausibility: a quote under RIVAL_PLAUSIBLE_SHARE of this
+    supplier's price is cheap because of a term it breaks and is not cited. Sandbox D02 (2026-10-25): citing the
+    rival's lower quote from our first message on raised the score from .555 to .702."""
     events = threads.get(sid) or []
     own_sheets = (latest(events).get("term_sheets") or []) if events else []
-    std = closing_terms(case, {}, standard_terms(events))
-    own_c = min((total_cost(case, s["terms"], std, estimates.get(sid)) for s in own_sheets), default=float("inf"))
     own_price = min((s["terms"]["unit_price"] for s in own_sheets if s["terms"].get("unit_price") is not None),
                     default=float("inf"))  # fmt: skip
     told = " ".join(str(m.get("body") or "") for m in events if m.get("from") == "buyer")
@@ -222,20 +224,17 @@ def _live_rival(case: dict, sid: str, threads: dict[str, list[dict]], estimates:
     for rival in live_threads(threads):
         if rival == sid:
             continue
-        rival_std = closing_terms(case, {}, standard_terms(threads[rival]))
         for sheet in latest(threads[rival]).get("term_sheets") or []:
             ref, terms = sheet.get("term_sheet_id"), sheet.get("terms") or {}
             price = terms.get("unit_price")
             if not ref or price is None or price >= own_price or ref in told:
                 continue
-            if not must_haves_ok(case, terms, rival_std):
+            if price < RIVAL_PLAUSIBLE_SHARE * own_price:
                 continue
-            c = total_cost(case, terms, rival_std, estimates.get(rival))
-            if c < own_c:
-                rivals.append((c, price, ref))
+            rivals.append((price, ref))
     if not rivals:
         return []
-    _, price, ref = min(rivals)
+    price, ref = min(rivals)
     return [
         _claim(f"Another supplier currently quotes EUR {price:.2f} per price unit ({ref}).", (ref,), "rival", price)
     ]
