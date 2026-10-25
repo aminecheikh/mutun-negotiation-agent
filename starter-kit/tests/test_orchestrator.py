@@ -689,18 +689,31 @@ def test_close_when_the_arena_says_the_thread_ended_marks_it_dead():
 # ---- the same offer twice is its best -----------------------------------------------------------------------------
 
 
-def test_verdict_when_one_supplier_repeats_its_offer_accepts_it_within_our_margin():
-    # the user: when the supplier gives the same offer twice, do not negotiate any more
-    s = session_for(S01, {SID: [quote(SID, 0, 10.0), ours(8.0), quote(SID, 1, 9.6), ours(8.3), quote(SID, 2, 9.6)]})
+def test_verdict_when_one_supplier_repeats_its_offer_three_times_accepts_it_within_our_margin():
+    # the user: when the supplier keeps giving the same offer, do not negotiate any more
+    events = [quote(SID, 0, 10.0), ours(8.0), quote(SID, 1, 9.6), ours(8.3), quote(SID, 2, 9.6), ours(8.5),
+              quote(SID, 3, 9.6)]  # fmt: skip
+    s = session_for(S01, {SID: events})
     th = s.threads[SID]
     assert policy.acceptable(s, th)
     v = policy.verdict(s, th)
     assert v.kind == "accept" and "same offer" in v.reason
 
 
+def test_repeated_offer_when_it_repeats_once_with_room_left_keeps_negotiating():
+    # 34 of 85 recorded suppliers that repeated once came down again later (P18 0.443 vs 0.509)
+    s = session_for(S01, {SID: [quote(SID, 0, 10.0), ours(8.0), quote(SID, 1, 9.6), ours(8.3), quote(SID, 2, 9.6)]})
+    th = s.threads[SID]
+    th.fit = ConcessionFit(SID, (10.0, 9.6, 9.6), 9.4, 0.0, True, p_room=0.5)
+    assert not policy.repeated_offer(th)
+    th.fit = ConcessionFit(SID, (10.0, 9.6, 9.6), 9.6, 0.0, True, p_room=0.1)  # its own path: no room left
+    assert policy.repeated_offer(th)
+
+
 def test_others_settled_when_a_supplier_repeated_its_offer_counts_it_as_its_best():
     b_events = [rfq_quote(B, 0, 17.5), ours(15.0, extra={"lead_time_days": 42}), rfq_quote(B, 1, 17.0),
-                ours(15.2, extra={"lead_time_days": 42}), rfq_quote(B, 2, 17.0)]  # fmt: skip
+                ours(15.2, extra={"lead_time_days": 42}), rfq_quote(B, 2, 17.0),
+                ours(15.4, extra={"lead_time_days": 42}), rfq_quote(B, 3, 17.0)]  # fmt: skip
     s = session_for(S02, {A: A_COUNTERED, B: b_events})
     assert policy.others_settled(s, s.threads[A])
 
@@ -738,3 +751,10 @@ def test_keepalive_questions_never_ask_for_a_cost_breakdown():
     for language in QUESTIONS.values():
         for question in language.values():
             assert "breakdown" not in question.lower() and "aufschlüssel" not in question.lower()
+
+
+def test_verdict_when_a_cheaper_alternative_comes_mid_negotiation_negotiates_on():
+    # sweep 92d9283: sent back in round 2, P08/P18 closed at its own proposal - only at closing time
+    s, th = with_cheaper_alternative("open")
+    v = policy.verdict(s, th)
+    assert "alternative" not in v.reason

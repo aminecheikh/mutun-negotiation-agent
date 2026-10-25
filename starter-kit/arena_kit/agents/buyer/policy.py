@@ -167,8 +167,11 @@ def verdict(session: CaseSession, th: ThreadState) -> Verdict:
     left = th.moves_left(case)
     if th.our_rounds == 0 and th.status != "agreed":
         return Verdict("counter", "first answer: never take the opening quote")
-    if left > 0 and th.status in ("open", "final_offer") and cheaper_alternative(session, th) is not None:
-        # only the standing (first) sheet can be accepted: send its cheaper proposal back, it will agree (Saed, P18)
+    closing = th.status == "final_offer" or repeated_offer(th) or left <= 2
+    if left > 0 and closing and cheaper_alternative(session, th) is not None:
+        # only the standing (first) sheet can be accepted: send its cheaper proposal back, it will agree (Saed, P18).
+        # Only where we would close anyway - mid-negotiation it closed P08/P18 in round 2 at its own proposal
+        # (tools.offers._closing, the same rule)
         return Verdict("counter", "its alternative sheet is cheaper for us: send exactly that alternative back",
                        note="send its own alternative back unchanged - it proposed it")  # fmt: skip
     band = session.band(th.supplier_id)
@@ -243,11 +246,21 @@ def cheaper_alternative(session: CaseSession, th: ThreadState) -> dict | None:
     return best
 
 
+LOW_ROOM = 0.2  # as config.low_room_probability: under a 1-in-5 chance of another >= 1 % step it is at its limit
+
+
 def repeated_offer(th: ThreadState) -> bool:
-    """The supplier sent the same terms in its last two replies to our offers: its best (the user: then stop)."""
+    """Its best (the user: then stop): the same terms in its last three replies, or in its last two when its own
+    price path shows no room left. One repeat alone is not enough: 34 of 85 recorded suppliers that repeated
+    (or raised) once came down again later (P18: stopped at 5.50 = 0.443; kept going, it agreed at 5.40 = 0.509)."""
     sheets = observe.supplier_sheets(th.events)
     ours = sum(1 for m in th.events if m.get("from") == "buyer" and m.get("term_sheets"))
-    return ours >= 2 and len(sheets) >= 3 and sheets[-1] == sheets[-2]
+    if ours < 2 or len(sheets) < 3 or sheets[-1] != sheets[-2]:
+        return False
+    if len(sheets) >= 4 and sheets[-2] == sheets[-3]:
+        return True
+    fit = getattr(th, "fit", None)
+    return fit is not None and fit.p_room is not None and fit.p_room < LOW_ROOM
 
 
 def others_settled(session: CaseSession, th: ThreadState) -> bool:

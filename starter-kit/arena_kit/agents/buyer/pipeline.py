@@ -60,10 +60,11 @@ QUESTIONS = {
     },
 }
 KEEPALIVE = {
-    "en": "Dear Sir or Madam,\n\nthank you for your message. We are reviewing your offer internally and "
-    "will come back to you with our position. {question}\n\nKind regards\nHollerau Pumpenwerke, Purchasing",
-    "de": "Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihre Nachricht. Wir prüfen Ihr Angebot intern und "
-    "melden uns mit unserer Position bei Ihnen. {question}\n\nMit freundlichen Grüßen\n"
+    # never "we are reviewing / will come back" (Saeb: every e-mail answers with an offer or stands by one)
+    "en": "Dear Sir or Madam,\n\nthank you for your message. The proposal in our last e-mail stands. "
+    "{question}\n\nKind regards\nHollerau Pumpenwerke, Purchasing",
+    "de": "Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihre Nachricht. Der Vorschlag aus unserer letzten "
+    "E-Mail gilt weiterhin. {question}\n\nMit freundlichen Grüßen\n"
     "Hollerau Pumpenwerke, Einkauf",
 }
 
@@ -113,8 +114,9 @@ def keepalive_message(session: CaseSession, th: ThreadState, question: str | Non
     ours = [m for m in th.events if m.get("from") == "buyer" and m.get("term_sheets")]
     if th.status in ("open", "agreed") and ours:
         sheets, _ = guard.check_sheets(session, th, [ts.get("terms", ts) for ts in ours[-1]["term_sheets"]])
-    if not sheets and th.status == "agreed" and policy.standing_ok(session, th):
-        # it agreed to our sheet: every supplier gets an offer (organisers), so that sheet stands, unchanged
+    if not sheets and th.status in ("open", "agreed") and policy.standing_ok(session, th):
+        # it agreed to our sheet - or our last sheets no longer go out but its own offer is acceptable to us: every
+        # supplier gets an offer (organisers), so its own standing terms go back; it agrees and is held
         sheets = [complete_offer(session.case, th.standing_terms)]
     email = keepalive_email(session, th, question, with_offer=bool(sheets))
     return {"subject": email.subject, "body": email.body, "term_sheets": [{"terms": t} for t in sheets], "refs": []}
