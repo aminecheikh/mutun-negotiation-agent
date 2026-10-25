@@ -12,7 +12,6 @@ the pitch) and an uncertainty.
   fair_price         a base price moved by the part's cost-driver indices over 12 months
 """
 
-import re
 import statistics
 from dataclasses import dataclass
 
@@ -79,15 +78,11 @@ def supplier_estimate(package, case: dict, supplier_id: str, std: dict) -> dict 
     }
 
 
-FAST_PAYMENT = re.compile(r"\bpay(?:ment)?(?: (?:our|the) invoices)? within (?:[1-9]|1[0-5]) days\b", re.I)
-FAST_PAYMENT_RATE = 0.25  # a supplier that asks to be paid within days: job shops price money at about 0.17-0.35
-
-
-def money_rate(package, supplier_id: str, events=(), documents: str = "") -> float | None:
+def money_rate(package, supplier_id: str, events=()) -> float | None:
     """What money is worth to the supplier per year (the brief: payment timing counts "at what money is worth to
     it"). Its own sheets in this thread that differ only in payment days price the days directly; else a skonto
-    in the data (x % within d days, net n: x / (n - d) * 360); else, where it asks in writing to be paid within
-    days (`documents`: its letters and quote remarks, or its replies), FAST_PAYMENT_RATE."""
+    in the data (x % within d days, net n: x / (n - d) * 360). A written request to be paid within days is no
+    rate: that sentence is a template note many suppliers share (practice: an assumed 25 % lost P01 0.055)."""
     revealed = []
     for m in events:
         if m.get("from") == "buyer":
@@ -107,7 +102,7 @@ def money_rate(package, supplier_id: str, events=(), documents: str = "") -> flo
     if revealed:
         return statistics.median(revealed)
     if package is None:
-        return FAST_PAYMENT_RATE if FAST_PAYMENT.search(documents) else None
+        return None
     rows = package.query("SELECT skonto_pct, skonto_days, payment_days FROM suppliers WHERE id = ?", (supplier_id,))
     for r in rows:
         try:
@@ -116,8 +111,7 @@ def money_rate(package, supplier_id: str, events=(), documents: str = "") -> flo
             continue
         if net > within and pct > 0:
             return min(MONEY_RATE_BOUNDS[1], pct / 100 / (net - within) * 360)
-    replies = " ".join(str(m.get("body") or "") for m in events if m.get("from") != "buyer")
-    return FAST_PAYMENT_RATE if FAST_PAYMENT.search(f"{documents}\n{replies}") else None
+    return None
 
 
 def real_ppm(package, case: dict, supplier_id: str) -> float | None:
