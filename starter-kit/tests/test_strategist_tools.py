@@ -46,8 +46,8 @@ def tool_use(name, args, id_="t1"):
 ANSWER = json.dumps(
     {
         "read": {"p_more": 0.7, "walk_risk": 0.1, "wants": ["payment_days"], "signals": []},
-        "tactic": {"supplier_id": SID, "action": "send", "levers": ["unit_price", "payment_days"], "claims": [],
-                   "question": None, "rationale": "price_terms: 14 days is worth it"},
+        "tactic": {"supplier_id": SID, "action": "send", "price": "push", "claims": [],
+                   "question": None, "rationale": "price_terms: it still has room"},
     }
 )  # fmt: skip
 
@@ -72,7 +72,7 @@ class FakeConverse:
 
 def test_loop_runs_the_tool_and_returns_the_final_json():
     tools, ctx, threads, reads = setup([supplier(), buyer(), supplier(17.0, n=1)])
-    box = StrategistToolbox(ctx, threads, reads, tools.plan_offers, tools.supplier_from_thread)
+    box = StrategistToolbox(ctx, threads)
     fake = FakeConverse([tool_use("price_terms", {"supplier_id": SID, "changes": {"payment_days": 14}})])
     reply = call_json_with_tools(fake, "sys", "user", box, timeout_s=30.0)
     assert reply["tactic"]["supplier_id"] == SID
@@ -86,13 +86,13 @@ def test_loop_runs_the_tool_and_returns_the_final_json():
 def test_loop_without_tool_calls_is_one_model_call():
     tools, ctx, threads, reads = setup([supplier()])
     fake = FakeConverse([])
-    reply = call_json_with_tools(fake, "sys", "user", StrategistToolbox(ctx, threads, reads), timeout_s=5.0)
+    reply = call_json_with_tools(fake, "sys", "user", StrategistToolbox(ctx, threads), timeout_s=5.0)
     assert reply["tactic"]["action"] == "send" and len(fake.seen) == 1
 
 
 def test_loop_turns_a_bad_argument_into_an_error_result():
     tools, ctx, threads, reads = setup([supplier()])
-    box = StrategistToolbox(ctx, threads, reads)
+    box = StrategistToolbox(ctx, threads)
     fake = FakeConverse([tool_use("price_terms", {"supplier_id": SID, "changes": {"colour": "red"}})])
     assert call_json_with_tools(fake, "sys", "user", box, timeout_s=30.0) is not None
     result = fake.seen[1]["messages"][-1]["content"][0]
@@ -103,13 +103,13 @@ def test_loop_returns_none_when_the_deadline_passes():
     tools, ctx, threads, reads = setup([supplier()])
     fake = FakeConverse([tool_use("read_thread", {"supplier_id": SID})], delay_s=0.6)
     t0 = time.monotonic()
-    assert call_json_with_tools(fake, "sys", "user", StrategistToolbox(ctx, threads, reads), timeout_s=0.5) is None
+    assert call_json_with_tools(fake, "sys", "user", StrategistToolbox(ctx, threads), timeout_s=0.5) is None
     assert time.monotonic() - t0 < 0.9
 
 
 def test_no_transport_means_no_call():
     tools, ctx, threads, reads = setup([supplier()])
-    assert call_json_with_tools(None, "sys", "user", StrategistToolbox(ctx, threads, reads), 5.0) is None
+    assert call_json_with_tools(None, "sys", "user", StrategistToolbox(ctx, threads), 5.0) is None
 
 
 def test_converse_from_env_only_for_anthropic_and_not_when_switched_off(monkeypatch):
@@ -126,47 +126,36 @@ def test_converse_from_env_only_for_anthropic_and_not_when_switched_off(monkeypa
 
 def test_price_terms_prices_the_standing_sheet_with_the_change():
     tools, ctx, threads, reads = setup([supplier()])
-    box = StrategistToolbox(ctx, threads, reads, supplier_of=tools.supplier_from_thread)
+    box = StrategistToolbox(ctx, threads)
     out = box.price_terms(SID, {"payment_days": 14})
     assert out["terms"]["unit_price"] == 17.4 and out["terms"]["payment_days"] == 14
     same = box.price_terms(SID, {})
     assert same["c"] == same["c_standing"] and same["saves_vs_standing_eur"] == 0
-    std_supplier = tools.supplier_from_thread(CASE, SID, threads[SID])
-    assert out["c"] == round(total_cost(CASE, out["terms"], {}, std_supplier))
-    assert out["c_target"] == round(ctx.bands[SID].c_target)
+    assert out["c"] == round(total_cost(CASE, out["terms"], {}))
 
 
 def test_price_terms_snaps_to_the_allowed_options():
     tools, ctx, threads, reads = setup([supplier()])
-    out = StrategistToolbox(ctx, threads, reads).price_terms(SID, {"payment_days": 50})
+    out = StrategistToolbox(ctx, threads).price_terms(SID, {"payment_days": 50})
     assert out["terms"]["payment_days"] in CASE["term_options"]["payment_days"]
-
-
-def test_preview_offer_is_what_the_offer_engine_sends():
-    tools, ctx, threads, reads = setup([supplier()])
-    box = StrategistToolbox(ctx, threads, reads, tools.plan_offers, tools.supplier_from_thread)
-    out = box.preview_offer(SID, ["payment_days", "colour"])
-    assert out["levers"] == ["payment_days"]
-    assert 1 <= len(out["sheets"]) <= 3 and all(s["terms"]["unit_price"] < 17.4 for s in out["sheets"])
 
 
 def test_read_thread_returns_every_message_in_order():
     tools, ctx, threads, reads = setup([supplier(), buyer(), supplier(17.0, body="Final.", n=1)])
-    msgs = StrategistToolbox(ctx, threads, reads).read_thread(SID)["messages"]
+    msgs = StrategistToolbox(ctx, threads).read_thread(SID)["messages"]
     assert [m["from"] for m in msgs] == ["supplier", "us", "supplier"] and msgs[-1]["body"] == "Final."
 
 
 def test_tools_without_their_dependency_are_not_offered():
     tools, ctx, threads, reads = setup([supplier()])
-    names = [s["name"] for s in StrategistToolbox(ctx, threads, reads).schemas]
-    assert names == ["price_terms", "read_thread"]
-    full = StrategistToolbox(ctx, threads, reads, tools.plan_offers, tools.supplier_from_thread, package=object())
-    assert [s["name"] for s in full.schemas] == ["price_terms", "preview_offer", "read_thread", "look_up_data"]
+    assert [s["name"] for s in StrategistToolbox(ctx, threads).schemas] == ["price_terms", "read_thread"]
+    full = StrategistToolbox(ctx, threads, package=object())
+    assert [s["name"] for s in full.schemas] == ["price_terms", "read_thread", "look_up_data"]
 
 
 def test_unknown_thread_is_an_error():
     tools, ctx, threads, reads = setup([supplier()])
-    box = StrategistToolbox(ctx, threads, reads)
+    box = StrategistToolbox(ctx, threads)
     try:
         box.run("price_terms", {"supplier_id": "sup:1", "changes": {}})
     except ValueError as e:
@@ -180,11 +169,11 @@ def test_unknown_thread_is_an_error():
 
 def test_strategist_with_tools_uses_the_tool_loop_and_its_answer():
     tools, ctx, threads, reads = setup([supplier(), buyer(), supplier(17.0, n=1)])
-    fake = FakeConverse([tool_use("preview_offer", {"supplier_id": SID, "levers": ["payment_days"]})])
+    fake = FakeConverse([tool_use("price_terms", {"supplier_id": SID, "changes": {"unit_price": 16.5}})])
     strategist = LLMStrategist(converse=fake, tools=tools)
     tactic = strategist.choose(ctx, threads, reads)
-    assert tactic.levers == ("unit_price", "payment_days") and "price_terms" in tactic.rationale
-    assert "preview_offer" in fake.seen[0]["tools"]
+    assert tactic.price == "push" and "price_terms" in tactic.rationale
+    assert "price_terms" in fake.seen[0]["tools"]
     assert "TOOLS YOU CAN CALL" in strategist.system and reads[SID].p_more == 0.7
 
 
@@ -202,7 +191,7 @@ def test_strategist_falls_back_to_the_rule_when_the_tool_loop_is_late():
 
 def test_strategist_answer_still_goes_through_safe():
     tools, ctx, threads, reads = setup([supplier()])
-    accept = json.dumps({"tactic": {"supplier_id": SID, "action": "accept", "levers": [], "claims": []}})
+    accept = json.dumps({"tactic": {"supplier_id": SID, "action": "accept", "claims": []}})
     tactic = LLMStrategist(converse=FakeConverse([], answer=accept), tools=tools).choose(ctx, threads, reads)
     assert tactic.action == "send"  # never accept the opening quote, tools or not
 
@@ -220,7 +209,7 @@ def test_tools_timeout_is_longer_than_the_single_call():
 
 def test_loop_when_the_answer_turn_comes_asks_for_the_json_only():
     tools, ctx, threads, reads = setup([supplier(), buyer(), supplier(17.0, n=1)])
-    box = StrategistToolbox(ctx, threads, reads, tools.plan_offers, tools.supplier_from_thread)
+    box = StrategistToolbox(ctx, threads)
     fake = FakeConverse([tool_use("price_terms", {"supplier_id": SID, "changes": {"payment_days": 14}})])
     call_json_with_tools(fake, "sys", "user", box, timeout_s=30.0)
     last = fake.seen[1]["messages"][-1]["content"]
@@ -230,7 +219,7 @@ def test_loop_when_the_answer_turn_comes_asks_for_the_json_only():
 def test_loop_when_the_clock_is_short_skips_the_tools():
     tools, ctx, threads, reads = setup([supplier()])
     fake = FakeConverse([tool_use("price_terms", {"supplier_id": SID, "changes": {"payment_days": 14}})])
-    call_json_with_tools(fake, "sys", "user", StrategistToolbox(ctx, threads, reads), timeout_s=8.0)
+    call_json_with_tools(fake, "sys", "user", StrategistToolbox(ctx, threads), timeout_s=8.0)
     assert [s["final"] for s in fake.seen] == [True]  # no time for a tool turn and an answer: answer at once
 
 

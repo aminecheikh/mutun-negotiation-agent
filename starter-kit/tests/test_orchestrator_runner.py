@@ -15,6 +15,7 @@ import arena_kit.sim as sim_module
 from arena_kit import ArenaClient
 from arena_kit.agents.buyer.agent import BuyerAgent
 from arena_kit.agents.buyer.config import OrchestratorConfig
+from arena_kit.agents.buyer.contracts import Tactic
 from arena_kit.agents.buyer.roles import LLMWriter, PassthroughProfiler, RuleAnalyst, RuleStrategist
 from arena_kit.agents.buyer.runner import play_case, play_final
 from arena_kit.agents.buyer.telemetry import Telemetry
@@ -101,6 +102,64 @@ def test_rfq_when_strategist_takes_a_second_every_bidder_is_answered_in_time(liv
         assert sum(m.get("from") == "buyer" for m in th["messages"]) >= 1
 
 
+def test_case_when_the_rules_decide_every_e_mail_is_the_deterministic_one(live_sim, tmp_path):
+    from arena_kit.agents.buyer.tools import message
+
+    client, state = live_sim()
+    table = RemoteTable(client)
+    for case_id in ("case:S01", "case:S02"):
+        assert play_case(table, case_id, make_agent(tmp_path))["ended"]
+        for th in sim_threads(state, table).values():
+            sent = [m for m in th["messages"] if m.get("from") == "buyer" and m.get("term_sheets")]
+            assert sent
+            for m in sent:  # the guard and the citation reserve kept every line as composed
+                lines = m["body"].split("\n")
+                assert lines[0] == message.INTRO and lines[-1] == message.SIGN_OFF, m["body"]
+                assert lines[1] in message.NARRATIVES.values() and lines[2].startswith("Our lead package commits")
+
+
+class PushingStrategist(RuleStrategist):
+    def choose(self, ctx, threads, reads):
+        tactic = super().choose(ctx, threads, reads)
+        return Tactic(tactic.supplier_id, "send", tactic.claims, None, "always push", "push")
+
+
+def test_case_when_the_agent_always_pushes_code_keeps_it_to_real_steps_never_twice_in_a_row(
+    live_sim, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("BUYER_PUSH", "1")
+    from arena_kit.agents.buyer.roles.writer import PUSH_LINE
+
+    client, state = live_sim()
+    table = RemoteTable(client)
+    assert play_case(table, "case:S01", make_agent(tmp_path, PushingStrategist()))["ended"]
+    sent = [r for r in rounds(tmp_path) if r.get("kind") == "counter" and r.get("tactic")]
+    prices = [r["tactic"]["price"] for r in sent]
+    assert prices[0] == "follow"  # never in our first message
+    assert all(not (a == b == "push") for a, b in zip(prices, prices[1:], strict=False))  # never twice in a row
+    assert 0 < prices.count("push") <= 2  # the simulated supplier moves in real steps: the agent may press
+    for r in sent:
+        assert (PUSH_LINE in r["body"]) == (r["tactic"]["price"] == "push")
+
+
+class PackageStrategist(RuleStrategist):
+    def choose(self, ctx, threads, reads):
+        tactic = super().choose(ctx, threads, reads)
+        return Tactic(tactic.supplier_id, "send", tactic.claims, None, "it asked for fast payment", "follow",
+                      {"payment_days": 14})  # fmt: skip
+
+
+def test_case_when_the_agent_proposes_a_package_it_goes_second_never_dearer_than_the_plan(live_sim, tmp_path):
+    client, state = live_sim()
+    table = RemoteTable(client)
+    assert play_case(table, "case:S01", make_agent(tmp_path, PackageStrategist()))["ended"]
+    sent = [r for r in rounds(tmp_path) if r.get("kind") == "counter" and r.get("sheets")]
+    assert any(r["sheets"][1]["terms"]["payment_days"] == 14 for r in sent if len(r["sheets"]) > 1)
+    for r in sent:
+        lead = r["sheets"][0]["c"]
+        assert all(s["c"] <= lead + 1 for s in r["sheets"][1:])  # rounded to whole euros in the log
+
+
 def test_case_when_strategist_hangs_the_rule_twin_answers_within_the_limit(live_sim, tmp_path):
     client, state = live_sim(move_s=4)
     table = RemoteTable(client)
@@ -139,7 +198,7 @@ def test_final_case_when_runner_restarts_resumes_the_same_session(live_sim, tmp_
 
 def test_final_rehearsal_when_two_waves_run_every_case_ends_before_its_cap(live_sim, tmp_path):
     client, state = live_sim(rehearsal=(1, 10, 1))
-    config = dict(close_margin_s=4.0, freeze_s=5.0, last_call_s=1.5, round_margin_s=0.5, keepalive_after_s=60.0)
+    config = dict(close_margin_s=4.0, last_call_s=1.5, round_margin_s=0.5)
     out = play_final(client, lambda: make_agent(tmp_path, **config), waves=2, parallel=10, poll=0.3)
     assert len(out) == 6  # three demo cases per wave
     assert all(isinstance(r, dict) and r.get("ended") for r in out.values()), out

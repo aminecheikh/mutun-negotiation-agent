@@ -6,10 +6,10 @@ from pathlib import Path
 
 from arena_kit import ArenaClient, RemoteTable, play
 from arena_kit.agents.buyer import BuyerAgent, buyer_factory
-from arena_kit.agents.buyer.contracts import BehaviourRead, Tactic
+from arena_kit.agents.buyer.contracts import Tactic
 from arena_kit.agents.buyer.guard import scrub_ids
 from arena_kit.agents.buyer.roles import PassthroughProfiler, RuleAnalyst
-from arena_kit.agents.buyer.tools import DataTools
+from arena_kit.agents.buyer.tools import DataTools, planner
 from arena_kit.agents.buyer.tools.concession import fit
 
 CASE = json.loads((Path(__file__).parents[1] / "arena_kit/sim_cases/S01.json").read_text())
@@ -21,21 +21,21 @@ def opening(price: float = 17.4) -> dict[str, list[dict]]:
     return {SID: [{"from": "sales@70270", "status": "open", "term_sheets": [sheet], "attachments": []}]}
 
 
-def test_prepare_when_opening_quote_sets_target_below_opening_price():
+def test_prepare_when_opening_quote_has_no_should_cost_still_builds_a_context():
     ctx = DataTools().prepare(CASE, opening())
-    band = ctx.bands[SID]
-    assert band.target < 17.4 and band.ceiling <= 17.4 and band.c_target < band.c_ceiling
+    assert set(ctx.claims) == {SID} and ctx.c_alternative is None or ctx.c_alternative > 0
 
 
-def test_plan_offers_when_first_round_returns_complete_sheet_at_anchor():
+def test_plan_offers_when_first_round_anchors_at_86_percent_of_its_price():
     tools, threads = DataTools(), opening()
     ctx = tools.prepare(CASE, threads)
-    read = BehaviourRead(SID, 0.6, 0.1, (), ())
-    plan = tools.plan_offers(ctx, SID, threads[SID], Tactic(SID, "send"), read)
-    sheet = plan.term_sheets[0]
-    anchor = round(min(2 * ctx.bands[SID].target - 17.4, ctx.bands[SID].target), 2)  # midpoint lands on target
-    credible = ctx.credibility[SID].lowest_price  # without cost evidence: within 8 % of its offer (tools.credibility)
-    assert set(sheet) == set(CASE["negotiable"]) and sheet["unit_price"] == max(anchor, credible)
+    plan = tools.plan_offers(ctx, SID, threads, Tactic(SID, "send"))
+    assert all(set(sheet) == set(CASE["negotiable"]) for sheet in plan.term_sheets)
+    anchor = round(17.4 * planner.ANCHOR_SHARE, 2)  # routine / leverage: 86 % of its price
+    assert anchor in [sheet["unit_price"] for sheet in plan.term_sheets]
+    # its own combination of terms may lead; no exchange costs us more than the anchor sheet (prices round down)
+    c_anchor = plan.c_values[[s["unit_price"] for s in plan.term_sheets].index(anchor)]
+    assert max(plan.c_values) <= c_anchor + 0.01
 
 
 def test_concession_fit_when_steps_shrink_reports_shrinking():

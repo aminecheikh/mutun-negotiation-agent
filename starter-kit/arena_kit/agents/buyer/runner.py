@@ -15,16 +15,16 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
 
 from ...client import ArenaError
 from ...play import fetch_documents, quota_used_up
 from . import guard, observe, policy
 from .arbiter import Arbiter
-from .pipeline import keepalive_message
+from .pipeline import repeat_message
 from .state import CaseSession, ThreadState
 
 log = logging.getLogger("arena")
+_DOCS = ThreadPoolExecutor(max_workers=8, thread_name_prefix="buyer-docs")  # attachment downloads, never on a move
 
 
 class ThreadWorker:
@@ -59,7 +59,6 @@ class ThreadWorker:
     def iteration(self, th: ThreadState) -> None:
         s, cfg = self.s, self.s.config
         deadline = th.received_at + cfg.move_budget_s
-        self.agent.pipeline.sync(s, th)  # a cost breakdown in its reply re-prices the band the verdict uses
         with s.lock:  # a consistent view of every thread (others are rebuilt under this lock)
             v = policy.verdict(s, th)
         if v.kind == "accept":
@@ -72,65 +71,50 @@ class ThreadWorker:
         rule_only = th.rule_only_once or th.errors >= cfg.errors_before_rule_only
         th.rule_only_once = False
         out = self.agent.pipeline.run(s, th, v, deadline, rule_only=rule_only)
-        if th.walk_hint:
-            s.notify()
         if out.tactic.action == "accept":
-            if self.arbiter.try_accept(th, f"strategist: {out.tactic.rationale}"):
+            if self.arbiter.try_accept(th, f"decision agent: {out.tactic.rationale}"):
                 return
-            self.park(th, policy.Verdict("park", "strategist accept deferred: a cheaper sheet is on the table"))
+            self.park(th, policy.Verdict("park", "decision agent's accept deferred: a cheaper sheet is on the table"))
             return
         checked = None
-        if th.status == "final_offer" and out.plan is not None and not policy.offers_more(s, th, out.plan.term_sheets):
-            out = replace(out, plan=None, email=None)  # nothing more to offer: take its final offer, or wait
         if out.plan is not None and out.email is not None:
             checked = guard.build_message(s, th, out.plan.term_sheets, out.email)
             if checked is None:  # the guard cut the writer's e-mail too short: the template, same sheets
                 email = self.agent.pipeline.rule_email(s, th, out.tactic, out.plan)
                 checked = guard.build_message(s, th, out.plan.term_sheets, email)
-        if checked is None:
-            # nothing we would be content to offer this round: their standing sheet beats our next step
-            if v.accept_permitted and self.arbiter.try_accept(th, "no better counter than its standing sheet"):
+        if checked is None or not checked.message.get("term_sheets"):
+            # nothing new we would be content to offer: its standing sheet beats any step of ours - take it; else our
+            # last offer again; else this thread cannot give a deal we accept - stop working it (the arbiter closes)
+            if policy.acceptable(s, th) and self.arbiter.try_accept(th, "no counter beats its standing sheet"):
                 return
-            if th.status == "final_offer":  # a question after its last word reads as pushing: hold the sheet
-                self.park(th, policy.Verdict("park", "final offer and no counter that offers more"))
+            if (message := repeat_message(s, th)) is not None:
+                self.send(th, message, "repeat", verdict=v, out=out, problems=("no new sheet: our last offer again",))
                 return
-            if th.moves_left(s.case) <= 0:
-                self.park(th, policy.Verdict("park", "no sendable counter and no messages left"))
-                return
-            message = self._keepalive_message(th, out.tactic.question)
-            checked = guard.Checked(message, ("no new sheet: our last offer again, or a question",))
+            with s.lock:
+                th.alive = False
+            log.warning("%s/%s: no sheet we could send or accept - thread given up", s.case["case_id"], th.supplier_id)
+            s.notify()
+            return
+        with s.lock:
+            if v.challenge is not None:
+                s.challenged.add(v.challenge)
+            if out.tactic.price == "push":  # a trim still moves: only a push counts against the push limits
+                th.pushed = (*th.pushed, th.our_rounds + 1)
         self.send(th, checked.message, "counter", verdict=v, out=out, problems=checked.problems)
 
     def park(self, th: ThreadState, v: policy.Verdict) -> None:
-        """Wait without conceding. Returns when the verdict changes, the thread or case ends, or after sending one
-        keep-alive question when the supplier's clock would otherwise run out on a thread worth keeping."""
+        """Wait without conceding. Returns when the verdict changes or the thread or case ends; the arbiter closes
+        the case when every thread waits."""
         s, cfg = self.s, self.s.config
         self._log_round(th, "park", verdict=v)
         while not s.ended and th.alive and th.awaiting_us:
             with s.lock:
                 current = policy.verdict(s, th)
-            if current.kind in ("accept", "counter"):
+            if current.kind == "accept" and self.arbiter.try_accept(th, current.reason):
                 return
-            waited = time.monotonic() - th.received_at
-            if (
-                current.kind == "park"
-                and waited >= cfg.keepalive_after_s
-                and th.keepalives < cfg.keepalive_max
-                and th.moves_left(s.case) >= 1
-                and self._worth_keeping(th)
-            ):
-                self.send(th, self._keepalive_message(th), "keepalive", verdict=current)
+            if current.kind == "counter":
                 return
             s.wait_change(cfg.worker_poll_s)
-
-    def _worth_keeping(self, th: ThreadState) -> bool:
-        if policy.acceptable(self.s, th):
-            return True
-        ranked = sorted((t for t in self.s.alive() if t.c != float("inf")), key=lambda t: t.c)
-        return th in ranked[:2]
-
-    def _keepalive_message(self, th: ThreadState, question: str | None = None) -> dict:
-        return keepalive_message(self.s, th, question)
 
     # ---- the wire ----------------------------------------------------------------------------------
 
@@ -173,7 +157,10 @@ class ThreadWorker:
             self._log_round(th, kind, verdict=verdict, out=out, message=message, problems=problems, ended=True)
             return
         received = time.monotonic()
-        reply = fetch_documents(s.table, reply)
+        if any(a.get("attachment_id") and "text" not in a for a in reply.get("attachments") or []):
+            # one attachment GET can block for over a minute (archived v2, run 4: 76 s, past the 60 s rule) and a
+            # deadline cannot interrupt a call in flight: documents arrive on their own thread, read from then on
+            _DOCS.submit(self._fetch_later, th, reply)
         with s.lock:
             if delivered:
                 th.events.append({**message, "from": "buyer"})
@@ -186,6 +173,17 @@ class ThreadWorker:
         self._log_round(th, kind, verdict=verdict, out=out, message=message, problems=problems, reply=reply,
                         delivered=delivered, claims=claims, round_s=round(received - asked_at, 1))  # fmt: skip
         s.notify()
+
+    def _fetch_later(self, th: ThreadState, reply: dict) -> None:
+        """The reply's documents, downloaded off the move's path; the thread is re-observed once they are in."""
+        try:
+            fetch_documents(self.s.table, reply)
+        except Exception as e:  # a document we cannot read must never cost a round
+            log.warning("%s/%s: attachment read failed: %s", self.s.case.get("case_id"), th.supplier_id, e)
+            return
+        with self.s.lock:
+            observe.rebuild(self.s, th)
+        self.s.notify()
 
     def _log_round(self, th: ThreadState, kind: str, verdict=None, out=None, message=None, reply=None, **extra):
         s = self.s
@@ -202,10 +200,12 @@ class ThreadWorker:
             tactic=(
                 {
                     "action": out.tactic.action,
-                    "levers": out.tactic.levers,
                     "claims": out.tactic.claims,
                     "question": out.tactic.question,
                     "rationale": out.tactic.rationale,
+                    "price": out.tactic.price,  # the decision agent: follow the planner or push for price
+                    "package": out.tactic.package,  # its own package, priced by the planner within the plan's C
+                    "plan": out.plan.rationale if out.plan else None,  # the planner's step and why
                 }
                 if out
                 else None

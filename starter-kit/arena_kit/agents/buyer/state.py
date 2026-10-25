@@ -31,14 +31,12 @@ class ThreadState:
     c: float = math.inf  # C of its standing sheet on closing terms (our evaluator, relationship-aware)
     c_history: tuple[float, ...] = ()  # C of each of its sheets, oldest first
     alive: bool = True
-    final_countered: bool = False  # we already answered one final_offer with a counter
-    keepalives: int = 0  # our messages without a term sheet
     cited_offers: set[str] = field(default_factory=set)  # rival offer IDs already cited to this supplier
+    pushed: tuple[int, ...] = ()  # our message numbers (1 = first) in which the decision agent pushed for price
     # live only
     in_flight: bool = False  # our message is out, the supplier's reply has not come back yet
     errors: int = 0
     rule_only_once: bool = False  # after a resume: the first answer uses rule twins only (the clock may be short)
-    walk_hint: bool = False  # the strategist asked to walk away (the arbiter decides at case level)
     refused: set[str] = field(default_factory=set)  # sheet IDs the arena refused to let us accept: never again
     exhausted: bool = False  # the arena said this thread's round limit is reached: no more messages, accept or not
     slowest_round_s: float = 0.0  # longest decision + reply so far on this thread
@@ -107,8 +105,10 @@ class CaseSession:
     c_open: float = math.inf  # the cheapest opening sheet that keeps the must-haves, in our C
     deadline: Callable[[], float | None] | None = None  # the wave's cap as time.time(), or None (practice)
     burned: set[str] = field(default_factory=set)  # data IDs already cited in this case (each counts once)
+    reserved: dict[str, str] = field(default_factory=dict)  # data ID -> the supplier whose message chose it
+    choosing: dict[str, tuple] = field(default_factory=dict)  # threads deciding a message -> their claiming order
+    challenged: set[tuple[str, str]] = field(default_factory=set)  # (last word's sheet ID, bidder): its one challenge
     offers: set[str] = field(default_factory=set)  # every supplier term sheet ID seen (citable as offer:)
-    freeze: bool = False
     result: dict | None = None
     end_reason: str | None = None
     lock: threading.RLock = field(default_factory=threading.RLock)
@@ -133,9 +133,6 @@ class CaseSession:
             return total_cost(self.case, terms, th.std, self.estimates.get(supplier_id))
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             return math.inf
-
-    def band(self, supplier_id: str):
-        return self.ctx.bands.get(supplier_id)
 
     def persona(self, supplier_id: str) -> str:
         dossier = self.ctx.dossiers.get(supplier_id)
@@ -173,6 +170,17 @@ class CaseSession:
     def notify(self) -> None:
         with self._cv:
             self._cv.notify_all()
+
+    def wait_turn(self, supplier_id: str, timeout: float) -> None:
+        """Until no thread ahead of this one in the claiming order is still deciding its message (at most
+        `timeout` s): parallel threads then claim arguments in one fixed order, as a sequential buyer would."""
+        with self._cv:
+            mine = self.choosing.get(supplier_id)
+            if mine is not None:
+                self._cv.wait_for(
+                    lambda: self.ended or not any(k < mine for s, k in self.choosing.items() if s != supplier_id),
+                    timeout=timeout,
+                )
 
     def wait_change(self, timeout: float) -> None:
         with self._cv:

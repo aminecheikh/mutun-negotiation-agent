@@ -2,7 +2,7 @@
 
 Thread workers negotiate in parallel; every irreversible act - accept, walk away - goes through here, under the
 case lock, after the acceptability invariant is checked once more. The arbiter's own loop watches the case as a
-whole: the wave's cap (freeze, close, last call), threads that all ended, and the walk-away condition.
+whole: the wave's cap (close, last call), threads that all ended, and the walk-away condition.
 """
 
 import logging
@@ -113,7 +113,6 @@ class Arbiter:
             if left is not None:
                 margin = s.close_margin()
                 on_table = policy.best_acceptable(s, idle_only=False)
-                s.freeze = on_table is not None and left <= max(cfg.freeze_s, margin)
                 if left <= margin:
                     best = policy.best_acceptable(s, idle_only=True)
                     pending = best is not None and any(

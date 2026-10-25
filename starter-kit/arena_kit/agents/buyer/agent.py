@@ -22,7 +22,7 @@ from ..llm import llm_from_env
 from . import guard, observe, policy
 from .config import OrchestratorConfig
 from .contracts import CaseContext
-from .pipeline import RolePipeline, keepalive_email
+from .pipeline import RolePipeline, repeat_message
 from .roles import LLMProfiler, LLMStrategist, LLMWriter, PassthroughProfiler, RuleAnalyst, RuleStrategist
 from .roles.llm import converse_from_env
 from .state import CaseSession, NoGate, SendGate, ThreadState
@@ -48,8 +48,8 @@ class BuyerAgent:
         try:
             ctx = self.tools.prepare(case, threads)
         except Exception:
-            log.exception("%s: tools.prepare failed - negotiating without bands, claims or dossiers", case["case_id"])
-            ctx = CaseContext(case, {}, {}, {}, policy.alternative_cost(case))
+            log.exception("%s: tools.prepare failed - negotiating without arguments or dossiers", case["case_id"])
+            ctx = CaseContext(case, {}, {}, policy.alternative_cost(case))
         return replace(ctx, dossiers=self._refine(case, ctx.dossiers))
 
     def _refine(self, case: dict, dossiers: dict) -> dict:
@@ -153,38 +153,33 @@ class BuyerAgent:
         if policy.walk_reason(s):
             return _walk(waiting or s.alive() or list(s.threads.values()))
         best = policy.best_acceptable(s)
-        if best is not None:
+        if best is not None and best.our_rounds > 0:
             return _accept(best)
-        parked = [t for t in waiting if t.moves_left(case) >= 1]
-        if parked:
-            return _ask(parked[0].supplier_id, keepalive_email(s, parked[0]))
+        for th in waiting:  # nothing new to offer: our last sheets again, never a message without one
+            message = repeat_message(s, th)
+            if message is not None:
+                return {"supplier_id": th.supplier_id, "message": message}
         return _walk(s.alive() or list(s.threads.values()))
 
     def _safe_fallback(self, case: dict, threads: dict[str, list[dict]]) -> dict:
-        """After a bug: accept the cheapest acceptable sheet, else answer the first live thread with a question,
-        else walk. Never a price we did not compute."""
+        """After a bug: accept the cheapest acceptable sheet, else our last sheets again, else walk. Never a price
+        we did not compute."""
         live = live_threads(threads) or list(threads)
         try:
             s = self.open_case(case, threads)
             best = policy.best_acceptable(s)
             if best is not None and best.our_rounds > 0:
                 return _accept(best)
-            th = s.threads[live[0]]
-            email = keepalive_email(s, th)
+            message = repeat_message(s, s.threads[live[0]])
+            if message is not None:
+                return {"supplier_id": live[0], "message": message}
         except Exception:
             log.exception("%s: fallback failed too - walking away", case["case_id"])
-            return {"supplier_id": live[0], "message": {"action": {"type": "walk_away"}}}
-        return _ask(live[0], email)
+        return {"supplier_id": live[0], "message": {"action": {"type": "walk_away"}}}
 
 
 def _accept(th: ThreadState) -> dict:
     return {"supplier_id": th.supplier_id, "message": {"action": {"type": "accept", "term_sheet_id": th.standing_id}}}
-
-
-def _ask(supplier_id: str, email) -> dict:
-    """A question without a term sheet: an answer within 60 s that concedes nothing."""
-    return {"supplier_id": supplier_id,
-            "message": {"subject": email.subject, "body": email.body, "term_sheets": [], "refs": []}}  # fmt: skip
 
 
 def _walk(threads: list[ThreadState]) -> dict:

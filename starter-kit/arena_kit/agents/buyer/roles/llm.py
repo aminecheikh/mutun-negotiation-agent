@@ -22,9 +22,28 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from datetime import datetime
 from pathlib import Path
 
-from ...llm import parse
+from ...llm import parse as greedy_parse
+from ...llm import retry_connect
 
 log = logging.getLogger("arena")
+
+
+def parse(text: str) -> dict:
+    """The first complete JSON object in the reply. The model sometimes adds prose after it, and the kit's greedy
+    match then ran to the last brace of that prose ("Extra data": 3 strategist answers lost in one sweep)."""
+    decoder = json.JSONDecoder()
+    start = text.find("{") if isinstance(text, str) else -1
+    while start >= 0:
+        try:
+            out, _ = decoder.raw_decode(text, start)
+            if isinstance(out, dict):
+                return out
+        except ValueError:
+            pass
+        start = text.find("{", start + 1)
+    return greedy_parse(text)
+
+
 PROMPTS = Path(__file__).parent / "prompts"
 # Shared across agents: 10 parallel cases x a few roles. A timed-out call keeps its worker until the
 # provider answers, so keep this above the number of calls that can be in flight at once.
@@ -115,14 +134,16 @@ def converse_from_env(timeout_s: float):
 
     def converse(system: str, messages: list, tools: list[dict], final: bool, timeout_s: float):
         # final: tools stay declared (the history holds tool_use blocks) but the model must answer now
-        r = client.with_options(timeout=max(timeout_s, 1.0)).messages.create(
-            model=model,
-            max_tokens=16000,
-            system=system,
-            messages=messages,
-            tools=tools,
-            tool_choice={"type": "none" if final else "auto"},
-            **extra,
+        r = retry_connect(
+            lambda: client.with_options(timeout=max(timeout_s, 1.0)).messages.create(
+                model=model,
+                max_tokens=16000,
+                system=system,
+                messages=messages,
+                tools=tools,
+                tool_choice={"type": "none" if final else "auto"},
+                **extra,
+            )
         )
         return r.content, r.stop_reason
 

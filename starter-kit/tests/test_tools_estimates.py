@@ -36,50 +36,27 @@ def test_fair_price_when_part_has_no_cost_drivers_returns_none(package):
     assert estimates.fair_price(package, "part:999999", 10.0) is None
 
 
-def test_full_cost_when_should_cost_models_this_supplier_uses_it_with_five_percent(package):
-    cost = estimates.full_cost(package, "part:310010", "sup:70110")
-    assert cost.value == 132.64 and cost.uncertainty_pct == 5 and "sup:70110" in cost.source
+CASE = {"case_id": "case:T", "parts": ["part:310010"], "buyer": {"interest_rate": 0.08}}
 
 
-def test_full_cost_when_only_a_german_base_exists_scales_by_supplier_country(package):
-    # part:310070 has a generic DE row (194.18); sup:70150 is Turkish (factor 0.75)
-    cost = estimates.full_cost(package, "part:310070", "sup:70150")
-    assert cost.value == pytest.approx(194.18 * 0.75, abs=0.01) and cost.uncertainty_pct == 15
+def test_should_cost_when_the_part_has_a_row_for_this_supplier_uses_it_with_its_confidence(package):
+    est = estimates.should_cost(package, CASE, "sup:70110")
+    assert est.value == 132.64 and est.uncertainty_pct == 5 and "cost:310010" in est.source
 
 
-def test_full_cost_when_no_should_cost_row_uses_its_own_lowest_recent_price_minus_margin(package):
-    cost = estimates.full_cost(package, "part:360020", "sup:70620")
-    assert cost is not None and cost.uncertainty_pct >= 15 and "its own" in cost.source
-    sql = "SELECT price FROM price_conditions WHERE part_id = 'part:360020' AND supplier_id = 'sup:70620'"
-    assert cost.value < min(r["price"] for r in package.query(sql))
+def test_should_cost_when_the_case_bundles_several_parts_has_no_single_unit_cost(package):
+    assert estimates.should_cost(package, {**CASE, "parts": ["part:310010", "part:310011"]}, "sup:70110") is None
 
 
-def test_cost_of_money_when_supplier_offers_skonto_uses_its_implied_rate(package):
-    # sup:70210: 2 % skonto within 10 days, net 30 -> 2/98 x 360/20 = 36.7 %
-    rate = estimates.cost_of_money(package, "sup:70210")
-    assert rate.value == pytest.approx(0.367, abs=0.001) and "skonto" in rate.source
+def test_should_cost_when_the_part_is_unknown_returns_none(package):
+    assert estimates.should_cost(package, {**CASE, "parts": ["part:999999"]}, "sup:70110") is None
 
 
-def test_cost_of_money_when_skonto_rate_is_extreme_caps_it(package):
-    assert estimates.cost_of_money(package, "sup:70280").value == estimates.MAX_RATE
+def test_supplier_estimate_when_should_cost_exists_values_it_at_our_rate_on_its_standard_terms(package):
+    std = {"payment_days": 30, "volume_per_year": 1000}
+    est = estimates.supplier_estimate(package, CASE, "sup:70110", std)
+    assert est["full_cost"] == 132.64 and est["interest_rate"] == 0.08 and est["standard"] is std
 
 
-def test_cost_of_money_when_no_skonto_adds_premia_to_our_rate(package):
-    # sup:70110: credit index 222 (no premium), equity 24.7 % (thin: +2 pt)
-    rate = estimates.cost_of_money(package, "sup:70110")
-    assert rate.value == pytest.approx(0.10) and "equity" in rate.source
-
-
-def test_accepts_below_cost_when_history_note_says_so_is_true(package):
-    assert estimates.accepts_below_cost(package, "sup:70110") is True
-    assert estimates.accepts_below_cost(package, "sup:70210") is False
-
-
-def test_full_cost_when_supplier_is_unknown_says_the_country_was_assumed(package):
-    cost = estimates.full_cost(package, "part:310010", "sup:99999")
-    assert cost is not None and "country unknown" in cost.source
-
-
-def test_cost_of_money_when_supplier_is_unknown_says_it_is_a_default_not_a_finding(package):
-    rate = estimates.cost_of_money(package, "sup:99999")
-    assert rate.value == estimates.OUR_RATE and "unknown supplier" in rate.source
+def test_supplier_estimate_without_a_package_is_none():
+    assert estimates.supplier_estimate(None, CASE, "sup:70110", {}) is None

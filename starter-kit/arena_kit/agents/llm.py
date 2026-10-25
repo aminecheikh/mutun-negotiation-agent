@@ -15,6 +15,7 @@ import logging
 import math
 import os
 import re
+import time
 
 import httpx
 
@@ -51,6 +52,30 @@ Reply with ONE JSON object and nothing else:
   120 words, no placeholders."""
 
 
+CONNECT_BACKOFF_S = (0.5, 1.5)  # a connection that failed before the request left: tried again after these waits
+
+
+def retry_connect(call):
+    """`call()`, tried again when the connection failed before the request was sent (practice run: a one-minute
+    network blip turned every model call into the rule fallback). A timeout is never retried: the request may be
+    running, and a retried call outlives the caller's deadline."""
+    for wait in (*CONNECT_BACKOFF_S, None):
+        try:
+            return call()
+        except Exception as e:
+            if wait is None or not connect_failure(e):
+                raise
+            log.warning("LLM connection failed (%s) - retrying in %.1fs", type(e).__name__, wait)
+            time.sleep(wait)
+
+
+def connect_failure(e: Exception) -> bool:
+    """The request never left: no connection (httpx.ConnectError, anthropic.APIConnectionError), not a timeout."""
+    if isinstance(e, httpx.TimeoutException) or type(e).__name__ == "APITimeoutError":
+        return False
+    return isinstance(e, httpx.ConnectError) or type(e).__name__ == "APIConnectionError"
+
+
 def llm_from_env(timeout_s=45.0):
     """LLM_PROVIDER=anthropic (Anthropic SDK) or openai (any OpenAI-compatible endpoint). No SDK retries: a
     retried timeout keeps the call (and a pool worker) busy long after the caller fell back."""
@@ -62,12 +87,14 @@ def llm_from_env(timeout_s=45.0):
         extra = {"output_config": {"effort": e}} if (e := os.environ.get("LLM_EFFORT")) else {}
 
         def complete(system, user):
-            r = client.messages.create(
-                model=model,
-                max_tokens=16000,
-                system=system,
-                messages=[{"role": "user", "content": user}],
-                **extra,
+            r = retry_connect(
+                lambda: client.messages.create(
+                    model=model,
+                    max_tokens=16000,
+                    system=system,
+                    messages=[{"role": "user", "content": user}],
+                    **extra,
+                )
             )
             return "".join(b.text for b in r.content if b.type == "text")
 
@@ -80,7 +107,7 @@ def llm_from_env(timeout_s=45.0):
             "model": model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }
-        r = httpx.post(f"{base}/chat/completions", json=body, headers=headers, timeout=timeout_s)
+        r = retry_connect(lambda: httpx.post(f"{base}/chat/completions", json=body, headers=headers, timeout=timeout_s))
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
 

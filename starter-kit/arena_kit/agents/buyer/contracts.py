@@ -1,15 +1,13 @@
 """The shared types between the three layers of the buyer agent. Change them only by team agreement.
 
-  tools (deterministic)  ->  roles (LLM)       ->  orchestrator (decide)
-  CaseContext, PriceBand,    Dossier (refined),     picks the roles per round, applies the guard,
-  Claim, Dossier,            BehaviourRead,         turns OfferPlan + Email into an arena message
-  ConcessionFit, OfferPlan   Tactic, Email
+  tools (deterministic)        ->  roles (LLM)                  ->  orchestrator (decide)
+  CaseContext, Claim, Dossier,     Dossier (refined),               the policy's verdict, the guard, the arena
+  ConcessionFit, OfferPlan         BehaviourRead, Tactic, Email     message from OfferPlan + Email
 
-Roles: Profiler (once per case), Analyst -> Strategist -> Writer (each round). Analyst and Strategist
-are separate types so they can be one LLM call or two; the orchestrator decides by measured latency.
-
-Numbers come from tools only. Roles read them and choose and write; they never compute prices.
-All types are frozen: build a new one instead of mutating.
+The deterministic planner (tools.planner) builds every term sheet and tools.message the e-mail around it; the
+strategist is the decision agent on top of it (accept, push for more price or follow the planner, which arguments,
+one question); the writer words a pushed message's paragraph.
+Numbers come from tools only. All types are frozen: build a new one instead of mutating.
 """
 
 from dataclasses import dataclass, field
@@ -17,22 +15,23 @@ from typing import Literal, Protocol
 
 Persona = Literal["cash_short", "full_order_book", "monopolist", "partner", "price_fighter", "unknown"]
 Action = Literal["send", "accept", "walk_away"]
+PriceDecision = Literal["follow", "trim", "push"]
 
 
-# ---- tools layer (deterministic, owner: tools) -------------------------------------------------
+# ---- tools layer (deterministic) -------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class Claim:
-    """One data argument, ready to paste: the figure and its IDs in one sentence. Pre-checked against
-    facts.json with the arena's own rule, so it can only come back `verified` (or `irrelevant`)."""
+    """One data argument, ready to paste: the figure and its IDs in one sentence, computed from the facts the
+    arena checks against (tools.claims)."""
 
     sentence: str
     refs: tuple[str, ...]
-    kind: str  # index_change | scorecard | quality | po_history | should_cost | forecast | notice
+    kind: str  # notice | rival | quality | index | volume | cost | delivery | history | news
     figure: float | None
     favours_buyer: bool
-    strength: float  # 0..1, how much it should hurt the supplier's position
+    strength: float  # rank for the decision agent, 1 = best
 
 
 @dataclass(frozen=True)
@@ -50,22 +49,6 @@ class Dossier:
 
 
 @dataclass(frozen=True)
-class PriceBand:
-    """Per supplier: where the price can land. Prices per the part's price_unit; c_* in EUR total cost C
-    including the relationship charge and index-clause cost where the case has them."""
-
-    supplier_id: str
-    floor: float | None  # estimated supplier full cost: it never sells below this
-    fair: float | None  # last price moved by its cost drivers' index changes
-    target: float  # where we aim to close
-    ceiling: float  # the most we accept
-    c_target: float
-    c_ceiling: float
-    derivation: tuple[str, ...] = ()  # how each number was found, in words
-    target_terms: dict = field(default_factory=dict)  # the whole target package (every negotiable field)
-
-
-@dataclass(frozen=True)
 class ConcessionFit:
     """The supplier's own price path inside this negotiation, fitted."""
 
@@ -79,7 +62,7 @@ class ConcessionFit:
 
 @dataclass(frozen=True)
 class OfferPlan:
-    """1-3 complete term sheets for one supplier and their C, best for us first."""
+    """1-3 complete term sheets for one supplier and their C, the main sheet first."""
 
     supplier_id: str
     term_sheets: tuple[dict, ...]
@@ -88,46 +71,26 @@ class OfferPlan:
 
 
 @dataclass(frozen=True)
-class Trade:
-    """One term change against the supplier's terms and what it saves us: what to ask for in a trade."""
-
-    field: str
-    theirs: object  # its current value
-    ours: object  # the value we would ask for
-    eur: float  # C saved over the horizon (> 0)
-    per_unit: float  # the same saving as a price per unit: what the change is worth in a price trade
-
-
-@dataclass(frozen=True)
-class Credibility:
-    """How low an offer to this supplier may go and still be taken seriously (tools.credibility)."""
-
-    supplier_id: str
-    lowest_price: float  # no main sheet below this unit price
-    evidence_pct: float | None  # the uncertainty of our cost evidence; None: no cost evidence
-    reason: str
-
-
-@dataclass(frozen=True)
 class CaseContext:
-    """Everything prepared before the first move (no clock running yet)."""
+    """Everything prepared before the first move (no clock running yet), refreshed as the threads grow."""
 
     case: dict
     dossiers: dict[str, Dossier]
-    bands: dict[str, PriceBand]
-    claims: dict[str, tuple[Claim, ...]]  # per supplier
+    claims: dict[str, tuple[Claim, ...]]  # per supplier, best first
     c_alternative: float | None
-    trades: dict[str, tuple[Trade, ...]] = field(default_factory=dict)  # per supplier, biggest saving first
+    fair: dict[str, float] = field(default_factory=dict)  # per supplier: today's price moved by its cost drivers
     fits: dict[str, ConcessionFit] = field(default_factory=dict)  # per supplier, this round's fit of its prices
-    credibility: dict[str, Credibility] = field(default_factory=dict)  # per supplier, from its latest price
+    documents: dict[str, str] = field(default_factory=dict)  # per supplier: its letters and contracts (the rules read)
+    unit: str = "units"  # the part's unit of measure, for the commitment sentence
+    offers: dict[str, dict[str, OfferPlan]] = field(default_factory=dict)  # this round: {sid: {follow|push: plan}}
 
 
-# ---- roles layer (LLM, owner: roles) -----------------------------------------------------------
+# ---- roles layer (LLM) -----------------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class BehaviourRead:
-    """The analyst's reading of the supplier's last e-mail, combined with the ConcessionFit."""
+    """The reading of the supplier's last e-mail, combined with the ConcessionFit."""
 
     supplier_id: str
     p_more: float  # chance another round improves its offer
@@ -138,14 +101,15 @@ class BehaviourRead:
 
 @dataclass(frozen=True)
 class Tactic:
-    """The strategist's decision for this round."""
+    """The decision agent's choice for this round, on top of the planner."""
 
     supplier_id: str
     action: Action
-    levers: tuple[str, ...] = ()  # terms to trade this round
     claims: tuple[int, ...] = ()  # indices into CaseContext.claims[supplier_id], at most 3
-    question: str | None = None  # e.g. ask for a cost breakdown
+    question: str | None = None  # one question about a term, no figures
     rationale: str = ""
+    price: PriceDecision = "follow"  # the planner's whole step, trim: half of it, push: only its minimal step
+    package: dict | None = None  # non-price terms of one more package; the planner prices it within its own C
 
 
 @dataclass(frozen=True)
@@ -155,20 +119,23 @@ class Email:
     refs: tuple[str, ...] = field(default_factory=tuple)
 
 
-# ---- interfaces each owner implements ----------------------------------------------------------
+# ---- interfaces each owner implements --------------------------------------------------------------------------
 
 
 class Tools(Protocol):
     def prepare(self, case: dict, threads: dict[str, list[dict]]) -> CaseContext: ...
     def fit_concessions(self, ctx: CaseContext, supplier_id: str, events: list[dict]) -> ConcessionFit: ...
     def plan_offers(
-        self, ctx: CaseContext, supplier_id: str, events: list[dict], tactic: Tactic, read: BehaviourRead
+        self, ctx: CaseContext, supplier_id: str, threads: dict[str, list[dict]], tactic: Tactic
+    ) -> OfferPlan: ...
+    def add_package(
+        self, ctx: CaseContext, supplier_id: str, threads: dict[str, list[dict]], plan: OfferPlan, package: dict
     ) -> OfferPlan: ...
 
 
 class Profiler(Protocol):
-    """Once per case, before round 1: reads a dossier's evidence (notes, letters, news) and sets its
-    persona and levers. Cache per supplier: the clock is already running when it is called."""
+    """Once per case, before round 1: reads a dossier's evidence (notes, letters, news) and sets its persona and
+    levers. Cache per supplier: the clock is already running when it is called."""
 
     def refine(self, case: dict, dossier: Dossier) -> Dossier: ...
 

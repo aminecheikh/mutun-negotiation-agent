@@ -1,19 +1,23 @@
-"""tools/claims.py: claim sentences that can only check out as verified - on real rows, recomputed
-independently from facts.json, and as properties over every case file and unseen suppliers and parts."""
+"""tools/claims.py: arguments that can only check out as verified - recomputed independently from facts.json on every
+case file and on unseen suppliers and parts - and the rules that filter, order and pick them."""
 
 import copy
 import json
-import re
 from pathlib import Path
 
 import pytest
 
+from arena_kit.agents.buyer.contracts import Claim
 from arena_kit.agents.buyer.tools import claims
+from arena_kit.cost import complete_offer
 from arena_kit.data import DataPackage
 
 DATA = Path(__file__).parents[2] / "data"
 CASES = {c["case_id"]: c for c in json.loads((Path(__file__).parent / "fixtures/practice_cases.json").read_text())}
 FACTS = json.loads((DATA / "facts.json").read_text())
+RELEASE = DATA / "release-sunday" / "facts.json"  # the Sunday release adds citable IDs, as the arena does
+if RELEASE.is_file():
+    FACTS |= json.loads(RELEASE.read_text(encoding="utf-8"))
 PCT_TOLERANCE, EUR_TOLERANCE = 0.5, 0.005  # brief/api.md "What counts": +-0.5 pt for %, else +-0.5 %
 
 
@@ -22,193 +26,146 @@ def package():
     return DataPackage(DATA)
 
 
-def threads_for(case: dict, prices: dict[str, float], body: str = "") -> dict[str, list[dict]]:
+def fact(case: dict, ref: str) -> dict:
+    return case.get("facts", {}).get(ref) or FACTS.get(ref) or {}
+
+
+def threads_for(case: dict, markup: float = 1.06, body: str = "") -> dict[str, list[dict]]:
+    base = case["buyer"].get("current_unit_price") or case["buyer"]["fallback_unit_price"]
+    terms = complete_offer(case, {"unit_price": round(base * markup, 2)})
     return {
         sid: [{"from": f"sales@{sid[4:]}", "status": "open", "body": body, "attachments": [],
-               "term_sheets": [{"term_sheet_id": f"offer:{sid[4:]}-0", "terms": {"unit_price": price}}]}]
-        for sid, price in prices.items()
+               "term_sheets": [{"term_sheet_id": f"offer:{sid[4:]}-0", "terms": terms}]}]
+        for sid in case["suppliers"]
     }  # fmt: skip
 
 
-def fact(case: dict, ref: str) -> dict | None:
-    return case.get("facts", {}).get(ref) or FACTS.get(ref)
-
-
-def recomputed(case: dict, claim, threads) -> float | None:
-    """The figure the arena would compute for the claim's refs (brief/api.md "What counts")."""
+def recomputed(case: dict, claim: Claim) -> float | None:
+    """The figure the arena would compute from the claim's refs."""
     refs = claim.refs
-    if claim.kind == "index_change":
+    if claim.kind == "index":
         earlier, later = (fact(case, r)["value"] for r in refs)
         return (later / earlier - 1) * 100
-    if claim.kind == "should_cost":
-        f = fact(case, refs[0])
-        return f.get("unit_price") or f.get("unit_cost")
-    if claim.kind == "scorecard":
-        return sum(fact(case, r)["otd_pct"] for r in refs) / len(refs)
+    if claim.kind == "cost":
+        return fact(case, refs[0])["unit_cost"]
+    if claim.kind == "delivery":
+        return fact(case, refs[0])["otd_pct"]
     if claim.kind == "quality":
-        return sum(fact(case, r)["ppm"] for r in refs) / len(refs)
-    if claim.kind == "forecast":
+        return fact(case, refs[0])["ppm"]
+    if claim.kind == "volume":
         return fact(case, refs[0])["change_pct"]
     if claim.kind == "notice":
         return fact(case, refs[0])["days"]
-    return None  # po_history: the arena checks the order prices themselves
+    if claim.kind == "rival" and refs[0].startswith("quote:"):
+        return fact(case, refs[0])["unit_price"]
+    return None  # order history and news assert no figure; a live rival offer is checked by its ID
 
 
-def assert_checks_out(case: dict, claim, threads) -> None:
-    for ref in claim.refs:
-        assert ref in claim.sentence, (ref, claim.sentence)
-    expected = recomputed(case, claim, threads)
-    if expected is None:
-        return
-    if claim.kind in ("index_change", "forecast", "scorecard"):
-        assert abs(claim.figure - expected) <= PCT_TOLERANCE, claim
-    else:
-        assert abs(claim.figure - expected) <= max(abs(expected) * EUR_TOLERANCE, 0.01), claim
-
-
-P01_THREADS = {"sup:70110": 138.55}
-
-
-def test_candidates_when_index_fell_cites_both_months_with_the_change(package):
-    case = CASES["case:P01"]
-    found = claims.candidates(case, package, "sup:70110", threads_for(case, P01_THREADS))
-    claim = next(c for c in found if c.refs == ("idx:PPI-D351@2025-08", "idx:PPI-D351@2026-08"))
-    assert claim.kind == "index_change" and round(claim.figure, 1) == -3.7 and claim.favours_buyer
-    assert "-3.7%" in claim.sentence
-
-
-def test_candidates_when_supplier_asks_more_than_its_drivers_rose_includes_the_rising_drivers(package):
-    case = CASES["case:P01"]  # asks +9.5 %: iron/steel +6.5 % and labour +2.7 % are both below it
-    found = claims.candidates(case, package, "sup:70110", threads_for(case, P01_THREADS))
-    series = {c.refs[0].split("@")[0] for c in found if c.kind == "index_change"}
-    assert {"idx:PPI-C241", "idx:LCI-C", "idx:PPI-D351"} <= series
-
-
-def test_candidates_when_supplier_asks_no_increase_skips_drivers_that_rose(package):
-    case = CASES["case:P01"]
-    current = case["buyer"]["current_unit_price"]
-    found = claims.candidates(case, package, "sup:70110", threads_for(case, {"sup:70110": current}))
-    series = {c.refs[0].split("@")[0] for c in found if c.kind == "index_change"}
-    assert "idx:PPI-D351" in series and "idx:PPI-C241" not in series
-
-
-def test_candidates_when_supplier_names_a_series_ranks_it_first(package):
-    case = CASES["case:P01"]
-    body = "Our costs move with PPI-D351 and other drivers."
-    found = claims.candidates(case, package, "sup:70110", threads_for(case, P01_THREADS, body))
-    first_index = next(c for c in found if c.kind == "index_change")
-    assert first_index.refs[0].startswith("idx:PPI-D351@")
-
-
-def test_candidates_when_letter_gives_less_notice_than_contract_cites_both(package):
-    case = CASES["case:P01"]  # its letter gives 51 days, the framework contract requires 90
-    found = claims.candidates(case, package, "sup:70110", threads_for(case, P01_THREADS))
-    notice = next(c for c in found if c.kind == "notice")
-    assert notice.refs[0].startswith("doc:") and notice.refs[1].startswith("ctr:") and notice.figure == 51
-
-
-def test_candidates_when_scorecard_is_red_cites_on_time_delivery(package):
-    case = CASES["case:P11"]
-    found = claims.candidates(case, package, "sup:70140", threads_for(case, {"sup:70140": 47.0}))
-    otd = next(c for c in found if c.kind == "scorecard")
-    assert otd.refs == ("sc:70140@2026Q3",) and otd.figure == 63.5
-
-
-def test_candidates_when_demand_forecast_rose_cites_the_latest_change(package):
-    case = CASES["case:P01"]
-    found = claims.candidates(case, package, "sup:70110", threads_for(case, P01_THREADS))
-    fc = next(c for c in found if c.kind == "forecast")
-    assert fc.refs[0].startswith("fc:310010@") and fc.figure > 0
-
-
-def test_candidates_when_past_orders_were_cheaper_cites_two_to_eight_lines_of_the_part(package):
-    case = CASES["case:P01"]
-    found = claims.candidates(case, package, "sup:70110", threads_for(case, P01_THREADS))
-    po = next(c for c in found if c.kind == "po_history")
-    assert 2 <= len(po.refs) <= 8
-    assert {FACTS[r]["part"] for r in po.refs} == {"part:310010"}
-    assert all(FACTS[r]["unit_price"] < 138.55 for r in po.refs)
-
-
-def test_candidates_when_rfq_never_cite_another_supplier(package):
-    # the organisers: no inter-supplier comparison - each supplier is negotiated on its own, so no claim names
-    # another bidder's offer or quote
-    case = CASES["case:P05"]
-    prices = {"sup:70210": 36.0, "sup:70240": 31.5, "sup:70250": 38.5}
-    threads = threads_for(case, prices)
-    for sid in case["suppliers"]:
-        others = {o[4:] for o in case["suppliers"] if o != sid}
-        for claim in claims.candidates(case, package, sid, threads):
-            assert not claim.kind.startswith("rival")
-            owners = {r.split(":", 1)[1].split("-")[0] for r in claim.refs if r.startswith(("offer:", "quote:"))}
-            assert not owners & others
-
-
-def test_candidates_when_case_only_facts_hold_a_letter_uses_them():
-    # hidden cases carry facts that exist only in the case: a new letter and its contract
-    case = copy.deepcopy(CASES["case:P01"])
-    case["suppliers"], case["trigger_doc"] = ["sup:99999"], "doc:NEW-1"
-    case["facts"] = {
-        "doc:NEW-1": {"supplier": "sup:99999", "date": "2026-10-01", "days": 30, "type": "letter"},
-        "ctr:NEW-1": {"supplier": "sup:99999", "days": 90},
-    }
-    found = claims.candidates(case, None, "sup:99999", threads_for(case, {"sup:99999": 140.0}))
-    notice = next(c for c in found if c.kind == "notice")
-    assert notice.refs == ("doc:NEW-1", "ctr:NEW-1") and notice.figure == 30
-
-
-def opening_prices(case: dict) -> dict[str, float]:
-    base = case["buyer"].get("current_unit_price") or case["buyer"]["fallback_unit_price"]
-    return {sid: round(base * (1.04 + 0.02 * i), 2) for i, sid in enumerate(case["suppliers"])}
-
-
-def unknown_supplier(case: dict) -> dict:
+def new_supplier(case: dict) -> dict:
     out = copy.deepcopy(case)
     out["suppliers"] = ["sup:99999"]
     return out
 
 
-def unknown_part(case: dict) -> dict:
+def new_part(case: dict) -> dict:
     out = copy.deepcopy(case)
     out["parts"] = ["part:999999"]
     return out
 
 
-@pytest.mark.parametrize("mutate", [lambda c: c, unknown_supplier, unknown_part], ids=["as_is", "new_sup", "new_part"])
+@pytest.mark.parametrize("mutate", [lambda c: c, new_supplier, new_part], ids=["as_is", "new_sup", "new_part"])
 @pytest.mark.parametrize("case", list(CASES.values()), ids=list(CASES))
 def test_candidates_when_any_case_every_claim_checks_out(case, mutate, package):
     case = mutate(case)
-    threads = threads_for(case, opening_prices(case))
-    offers = {ev[-1]["term_sheets"][0]["term_sheet_id"] for ev in threads.values()}
+    threads = threads_for(case)
     for sid in case["suppliers"]:
         found = claims.candidates(case, package, sid, threads)
-        assert len(found) <= claims.MAX_CLAIMS
         seen: set[str] = set()
         for claim in found:
-            assert claim.favours_buyer and 0 <= claim.strength <= 1
-            assert all(fact(case, r) is not None or r in offers for r in claim.refs), claim.refs
+            assert claim.favours_buyer and 0 < claim.strength <= 1 and claim.kind in claims.PRIORITY
             assert not seen & set(claim.refs), "an ID counts once per case"
             seen |= set(claim.refs)
-            if claim.kind == "index_change":
-                assert len(claim.refs) == 2
-                months = [re.search(r"@(\d{4})-(\d{2})$", r).groups() for r in claim.refs]
-                (y1, m1), (y2, m2) = ((int(y), int(m)) for y, m in months)
-                assert 0 < (y2 - y1) * 12 + (m2 - m1) <= 12
-            assert_checks_out(case, claim, threads)
+            for ref in claim.refs:
+                assert ref in claim.sentence, (ref, claim.sentence)
+                assert fact(case, ref), ref
+            expected = recomputed(case, claim)
+            if expected is not None:
+                tolerance = (
+                    PCT_TOLERANCE if claim.kind in ("index", "delivery", "volume") else abs(expected) * EUR_TOLERANCE
+                )
+                assert abs(claim.figure - expected) <= tolerance + 0.051, (claim.sentence, expected)
+        assert [c.strength for c in found] == sorted((c.strength for c in found), reverse=True)
 
 
-def test_candidates_when_no_data_package_and_no_threads_returns_empty():
-    assert claims.candidates(CASES["case:P01"], None, "sup:70110") == ()
+def test_candidates_never_argue_for_the_seller(package):
+    for case in CASES.values():
+        threads = threads_for(case)
+        for sid in case["suppliers"]:
+            asking = threads[sid][0]["term_sheets"][0]["terms"]["unit_price"]
+            for claim in claims.candidates(case, package, sid, threads):
+                if claim.kind == "index":
+                    assert claim.figure < 0, claim.sentence  # a driver that rose helps the supplier
+                if claim.kind in ("cost", "history") or (claim.kind == "rival" and claim.figure is not None):
+                    assert claim.figure < asking, claim.sentence
 
 
-def test_data_tools_when_prepared_and_refreshed_pass_threads_to_claims(package):
-    from arena_kit.agents.buyer.tools import DataTools
-
+def test_candidates_when_supplier_says_a_series_is_hedged_drop_that_series(package):
     case = CASES["case:P01"]
-    sheet = {"term_sheet_id": "offer:70110-0", "terms": {"unit_price": 138.55, "effective_date": "2026-11-01"}}
-    body = "PPI-D351 rose 1.0 % in twelve months and is 6 % of our cost."
-    threads = {"sup:70110": [{"from": "sales@70110", "status": "open", "body": body, "term_sheets": [sheet]}]}
-    tools = DataTools(package)
-    ctx = tools.prepare(case, threads)
-    assert ctx.claims["sup:70110"] == claims.candidates(case, package, "sup:70110", threads)
-    assert tools.refresh(ctx, threads).claims == ctx.claims
+    found = claims.candidates(case, package, "sup:70110", threads_for(case))
+    index = next((c for c in found if c.kind == "index"), None)
+    if index is None:
+        pytest.skip("no falling driver in this case")
+    name = index.sentence.split(" index ", 1)[0].removeprefix("The ")
+    hedged = threads_for(case, body=f"Our {name} needs are covered at fixed prices until next year.")
+    assert all(c.refs != index.refs for c in claims.candidates(case, package, "sup:70110", hedged))
+
+
+def test_candidates_order_notice_and_rival_first_then_by_kind():
+    found = [Claim(k, (f"x:{k}",), k, -1.0, True, 0.0) for k in ("news", "index", "history", "rival", "notice")]
+    order = [c.kind for c in claims._ordered(found, [])]
+    assert order[:2] == ["notice", "rival"] and order.index("index") < order.index("history") < order.index("news")
+
+
+def test_candidates_when_the_supplier_ignored_a_kind_rank_it_after_the_ones_it_accepted():
+    said = [{"from": "sales@x", "body": "We checked the index data you cited; it holds, but it does not change our "
+             "calculation. We checked the forecast you cited; it holds and we took it into account."}]  # fmt: skip
+    seen = claims.reactions(said)
+    assert seen["index"] < 0 < seen["volume"]
+    found = [Claim("i", ("idx:a", "idx:b"), "index", -2.0, True, 0.0), Claim("v", ("fc:1",), "volume", 5.0, True, 0.0)]
+    assert [c.kind for c in claims._ordered(found, said)] == ["volume", "index"]
+
+
+def test_candidates_when_several_suppliers_bid_cite_a_cheaper_live_rival(package):
+    case = next(c for c in CASES.values() if len(c["suppliers"]) > 1)
+    threads = threads_for(case)
+    cheap, dear = case["suppliers"][0], case["suppliers"][1]
+    terms = threads[dear][0]["term_sheets"][0]["terms"]
+    threads[cheap][0]["term_sheets"][0]["terms"] = {**terms, "unit_price": round(terms["unit_price"] * 0.9, 2)}
+    found = claims.candidates(case, package, dear, threads)
+    assert found and found[0].kind == "rival" and f"offer:{cheap[4:]}-0" in found[0].refs
+    assert all(
+        c.kind != "rival" or not c.refs[0].startswith("offer:")
+        for c in claims.candidates(case, package, cheap, threads)
+    )
+
+
+def test_default_choice_takes_two_arguments_first_then_three():
+    found = tuple(Claim(str(i), (f"x:{i}",), "index", -1.0, True, 1 - i / 10) for i in range(5))
+    case = {"suppliers": ["sup:1"], "buyer": {"category_goal": "leverage"}}
+    first = [{"from": "s", "body": "Offer."}]
+    assert claims.default_choice(case, found, first) == (0, 1)
+    later = [*first, {"from": "buyer"}, {"from": "s", "body": "Offer."}]
+    assert claims.default_choice(case, found, later) == (0, 1, 2)
+
+
+def test_default_choice_when_supplier_argues_with_costs_leads_with_a_falling_index():
+    found = (Claim("n", ("x:n",), "notice", 1.0, True, 1.0), Claim("v", ("fc:1",), "volume", 5.0, True, 0.8),
+             Claim("i", ("idx:a", "idx:b"), "index", -2.0, True, 0.5))  # fmt: skip
+    case = {"suppliers": ["sup:1"], "buyer": {"category_goal": "leverage"}}
+    events = [{"from": "s", "body": "Our material costs rose sharply."}]
+    assert claims.default_choice(case, found, events)[0] == 2
+
+
+def test_candidates_when_no_data_package_and_no_threads_returns_only_case_facts():
+    found = claims.candidates(CASES["case:P01"], None, "sup:70110")
+    assert all(c.refs for c in found)

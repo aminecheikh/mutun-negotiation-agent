@@ -6,9 +6,10 @@ than any clever one gains:
 
   term sheets  exactly the negotiable fields, values the arena accepts (an option or the supplier's standard
                value), at most 3, and each one a deal we would be content with if the supplier says 'agreed'
-  body         every data ID known to the arena and cited at most once per case, never an offer ID (no
-               inter-supplier comparison), at most 3 checkable arguments, no leak of urgency, budget or a
-               missing alternative (English and German), bounded lengths
+  body         every data ID known to the arena and cited at most once per case; an offer ID only as another
+               bidder's live quote (never its own offer, never twice to the same supplier); at most 3 checkable
+               arguments, no leak of urgency, budget or a missing alternative (English and German), bounded
+               lengths
 """
 
 import math
@@ -95,8 +96,13 @@ def cite_problem(session: CaseSession, th: ThreadState, ref: str) -> str | None:
     """Why a cited ID may not go out, or None if it may."""
     if not session.known(ref):
         return f"unknown ID {ref}"
-    if ref.startswith("offer:"):  # its own offer says nothing; another bidder's is inter-supplier comparison
-        return f"{ref} is an offer: no inter-supplier comparison, and its own offer proves nothing"
+    if ref.startswith("offer:"):  # a rival's live quote is leverage; the supplier's own offer proves nothing
+        own = any(ref == s.get("term_sheet_id") for m in th.events for s in m.get("term_sheets") or [])
+        if own:
+            return f"{ref} is its own offer: it proves nothing"
+        if ref in th.cited_offers:
+            return f"{ref} already cited to this supplier"
+        return None
     if ref in session.burned:
         return f"{ref} already cited in this case"
     return None

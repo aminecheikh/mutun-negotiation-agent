@@ -1,14 +1,13 @@
-"""The strategist's tools: what it may call while it decides (owner: Saed; wiring: Jeddou).
+"""The decision agent's tools: what it may call while it decides (owner: Saed; wiring: Jeddou).
 
-Every tool is read-only and deterministic: it prices, previews or looks up, it never sends anything and never
-changes the thread. Numbers come from the same code the orchestrator uses afterwards (cost.total_cost with our
-supplier estimate, the offer engine, the data package), so what the model sees is what will happen. A tool that
-gets a bad argument raises; llm.call_json_with_tools turns that into an error result the model can read.
+Every tool is read-only and deterministic: it prices or looks up, it never sends anything and never changes the
+thread. Numbers come from the same code the orchestrator uses (cost.total_cost with our supplier estimate, the
+data package), so what the model sees is what will happen. A tool that gets a bad argument raises;
+llm.call_json_with_tools turns that into an error result the model can read.
 
-  price_terms     C of any package with this supplier: its standing terms with the changes the model names
-  preview_offer   the 1-3 term sheets the offer engine would send for a set of levers, and their C
-  read_thread     the whole thread (the model's input holds only the supplier's last three e-mails)
-  look_up_data    the data row behind a citable ID (dossier evidence, a claim's source)
+  price_terms   C of any package with this supplier: its standing terms with the changes the model names
+  read_thread   the whole thread (the model's input holds only the supplier's last three e-mails)
+  look_up_data  the data row behind a citable ID (dossier evidence, an argument's source)
 """
 
 import json
@@ -17,25 +16,23 @@ import math
 from ....cost import complete_offer, must_haves_ok, total_cost
 from ....docs import standard_terms
 from ....play import standing
-from ..contracts import BehaviourRead, CaseContext, Tactic
+from ..contracts import CaseContext
+from ..tools import estimates
 
 BODY_CHARS = 1500
 ATTACHMENT_CHARS = 3000
 THREAD_CHARS = 15000
 ROW_CHARS = 1500
-
-
 SUPPLIER_ID = {"type": "string", "description": "the supplier_id of the thread"}
-
 
 SCHEMAS = [
     {
         "name": "price_terms",
         "description": (
             "Total cost C in EUR of a package with this supplier: its standing term sheet with the changes you "
-            "name (values are snapped to the case's allowed options). Returns the package, its C, the standing C, "
-            "the difference, whether it keeps every must-have and beats our alternative, and the band's target "
-            "C. Use it to compare packages before you choose levers; C includes the supplier-health charge."
+            "name. Returns the package, its C, the standing C, the difference, and whether it keeps every "
+            "must-have and beats our alternative. C includes the supplier-health charge in stabilise and "
+            "secure_supply cases. Use it to judge an accept or a push - you never set the price yourself."
         ),
         "input_schema": {
             "type": "object",
@@ -43,25 +40,10 @@ SCHEMAS = [
                 "supplier_id": SUPPLIER_ID,
                 "changes": {
                     "type": "object",
-                    "description": 'negotiable fields and values, e.g. {"payment_days": 14, "contract_months": 24}',
+                    "description": 'negotiable fields and values, e.g. {"unit_price": 4.9, "payment_days": 60}',
                 },
             },
             "required": ["supplier_id", "changes"],
-        },
-    },
-    {
-        "name": "preview_offer",
-        "description": (
-            "The 1-3 term sheets the offer engine would send this round if you chose these levers, each with "
-            "its C. You do not set the price; this shows what your lever choice turns into."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "supplier_id": SUPPLIER_ID,
-                "levers": {"type": "array", "items": {"type": "string"}, "description": "negotiable fields"},
-            },
-            "required": ["supplier_id", "levers"],
         },
     },
     {
@@ -75,7 +57,7 @@ SCHEMAS = [
     {
         "name": "look_up_data",
         "description": (
-            "The data row behind a citable ID from the dossier evidence or a claim (e.g. 'sc:70270@2026Q3'). "
+            "The data row behind a citable ID from the dossier evidence or an argument (e.g. 'sc:70270@2026Q3'). "
             "Reading it is free; only IDs cited in an e-mail are checked by the supplier."
         ),
         "input_schema": {
@@ -92,23 +74,12 @@ def _c(value: float) -> float | None:
 
 
 class StrategistToolbox:
-    """Tools bound to one decision: this case, these threads. `plan_offers` and `supplier_of` are the
-    orchestrator's DataTools methods; without them preview_offer is absent and C leaves out the health charge."""
+    """Tools bound to one decision: this case, these threads. Without a data package look_up_data is absent and C
+    leaves out the supplier-health charge."""
 
-    def __init__(
-        self,
-        ctx: CaseContext,
-        threads: dict[str, list[dict]],
-        reads: dict[str, BehaviourRead],
-        plan_offers=None,
-        supplier_of=None,
-        package=None,
-    ):
-        self.ctx, self.threads, self.reads = ctx, threads, reads
-        self.plan_offers, self.supplier_of, self.package = plan_offers, supplier_of, package
-        names = {"price_terms", "read_thread"}
-        names |= {"preview_offer"} if plan_offers is not None else set()
-        names |= {"look_up_data"} if package is not None else set()
+    def __init__(self, ctx: CaseContext, threads: dict[str, list[dict]], package=None):
+        self.ctx, self.threads, self.package = ctx, threads, package
+        names = {"price_terms", "read_thread"} | ({"look_up_data"} if package is not None else set())
         self.schemas = [s for s in SCHEMAS if s["name"] in names]
         self.calls: list[str] = []  # tool names in call order, for the log
 
@@ -123,11 +94,6 @@ class StrategistToolbox:
             raise ValueError(f"no open thread {supplier_id!r}; threads: {sorted(self.threads)}")
         return self.threads[supplier_id]
 
-    def _supplier(self, supplier_id: str, events: list[dict]):
-        return self.supplier_of(self.ctx.case, supplier_id, events) if self.supplier_of else None
-
-    # ---- tools ---------------------------------------------------------------------------------
-
     def price_terms(self, supplier_id: str, changes: dict) -> dict:
         case, events = self.ctx.case, self._events(supplier_id)
         if not isinstance(changes, dict):
@@ -139,11 +105,11 @@ class StrategistToolbox:
         _, theirs = standing(events)
         stated = {f: std[f] for f in case["negotiable"] if f in std}
         sheet = complete_offer(case, {**stated, **theirs, **changes})
-        supplier = self._supplier(supplier_id, events)
+        supplier = estimates.supplier_estimate(self.package, case, supplier_id, std) if self.package else None
         c, c_standing = total_cost(case, sheet, std, supplier), math.inf
         if theirs.get("unit_price") is not None:
             c_standing = total_cost(case, complete_offer(case, {**stated, **theirs}), std, supplier)
-        band, alt = self.ctx.bands.get(supplier_id), self.ctx.c_alternative
+        alt = self.ctx.c_alternative
         return {
             "terms": sheet,
             "c": _c(c),
@@ -151,19 +117,6 @@ class StrategistToolbox:
             "saves_vs_standing_eur": None if math.isinf(c) or math.isinf(c_standing) else round(c_standing - c),
             "must_haves_ok": must_haves_ok(case, sheet, std),
             "beats_alternative": None if alt is None else c < alt,
-            "c_target": _c(band.c_target) if band else None,
-        }
-
-    def preview_offer(self, supplier_id: str, levers: list) -> dict:
-        events = self._events(supplier_id)
-        allowed = set(self.ctx.case["negotiable"])
-        chosen = tuple(dict.fromkeys(str(x) for x in (levers or ()) if str(x) in allowed)) or ("unit_price",)
-        read = self.reads.get(supplier_id) or BehaviourRead(supplier_id, 0.5, 0.2, (), ())
-        plan = self.plan_offers(self.ctx, supplier_id, events, Tactic(supplier_id, "send", chosen), read)
-        return {
-            "levers": list(chosen),
-            "sheets": [{"terms": s, "c": _c(c)} for s, c in zip(plan.term_sheets, plan.c_values, strict=False)],
-            "rationale": plan.rationale,
         }
 
     def read_thread(self, supplier_id: str) -> dict:

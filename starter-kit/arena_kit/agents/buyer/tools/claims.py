@@ -1,206 +1,351 @@
-"""Pre-verified claim sentences per supplier (owner: Amine).
+"""The arguments we may cite to a supplier, ready to paste (owner: Amine; provenance: docs/hybrid.md).
 
-Each `Claim` puts a figure next to its data IDs in one sentence, computed from facts.json (and the case's
-own `facts`) the way the arena checks it (brief/api.md "What counts"), so it comes back `verified` - at worst
-`irrelevant`, never `contradicted`. Only claims that favour us are returned, strongest first. `strength` only
-ranks claims for the strategist; it never decides a price.
-
-Kinds: index_change (the part's cost drivers and the series the supplier names itself), scorecard (on-time
-delivery below target), quality (ppm above what it commits to), po_history (cheaper past orders of the part),
-forecast (our demand rises: volume to trade), should_cost (estimate below its price), notice (a letter giving
-less notice than the contract requires). Never another supplier's quote or offer: the organisers ruled out
-inter-supplier comparison, so each supplier is argued with on its own data only.
+Each `Claim` puts its figure next to the data IDs the arena checks, computed from facts.json and the case's own
+facts. Built per supplier every round, then:
+  filtered   never an argument for the seller: an index that rose, a rival or a should-cost not under its price,
+             an order history not cheaper than its ask, an index claim on a series it says it has hedged
+  ordered    notice > rival > quality > index > volume > cost > delivery > history > news, then by this supplier's
+             own reactions ("took it into account" up, "does not change our calculation" down)
+`default_choice` is the rule's pick for a message: two arguments in our first message, three later, a falling index
+first when the supplier argues with costs, a live cheaper rival first when several suppliers bid.
 """
 
 import re
+from dataclasses import replace
 
-from ....play import standing
+from ....cost import closing_terms, must_haves_ok, total_cost
+from ....docs import standard_terms
+from ....play import latest, live_threads
 from ..contracts import Claim
-from . import estimates
+from . import message
 
-MAX_CLAIMS = 10
-OTD_TARGET_PCT = 95.0  # company.md: quality agreement, on-time delivery target 95 %
-PO_LINES_CITED = (2, 4)  # brief/api.md: 2-8 po lines of the same part; we cite a few recent ones
-NAMED_SERIES_BONUS = 0.3  # ranking only: a series the supplier names itself is about its costs
-SERIES_TOKEN = re.compile(r"\b[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+\b")
+PRIORITY = ("notice", "rival", "quality", "index", "volume", "cost", "delivery", "history", "news")
+WEAK_SELLER_NEWS = {
+    "free_capacity",
+    "credit_watch",
+    "credit_downgrade",
+    "short_time_work",
+    "restructuring",
+    "supply_normalises",
+    "customer_loss",
+}  # fmt: skip  (customer_loss: Sunday release, idle capacity)
+HISTORY_LINES = 4  # recent order lines cited (the arena checks 2-8 po lines of one part)
+FIRST_MESSAGE_CLAIMS, LATER_CLAIMS = 2, 3
+COST_OBJECTION = re.compile(r"\b(?:costs?|prices?|material|energy|wages|index|inflation)\b", re.I)
+HEDGE = re.compile(r"hedg|covered at fixed|fixed.price.{0,20}cover|secured at fixed", re.I)
+REACTION_KINDS = (  # first match wins: the words a supplier uses for what it checked
+    ("index", r"index|indices|series"), ("delivery", r"deliver|on-time|punctual"),
+    ("volume", r"forecast|demand|volume"), ("cost", r"should-?cost|cost estimate|estimate"),
+    ("notice", r"notice|contract"), ("quality", r"quality|ppm|defect|complaint"),
+    ("rival", r"quote|offer|rival|alternative"), ("history", r"order history|orders|purchase|price history"),
+    ("news", r"press|news|report"),
+)  # fmt: skip
+
+
+def month_number(month: str) -> int:
+    year, mon = map(int, month[:7].split("-"))
+    return year * 12 + mon
 
 
 class _Facts:
     """The values the arena checks against: the case's own facts first, then the package's facts.json."""
 
     def __init__(self, case: dict, package):
-        self.case_facts, self.package = case.get("facts") or {}, package
+        self.case_facts = case.get("facts") or {}
+        self.package_facts = package.facts if package is not None else {}
 
-    def get(self, ref: str) -> dict | None:
-        return self.case_facts.get(ref) or (self.package.facts.get(ref) if self.package else None)
+    def get(self, ref: str | None) -> dict:
+        if not ref:
+            return {}
+        return self.case_facts.get(ref) or self.package_facts.get(ref) or {}
 
-    def ids(self, prefix: str) -> list[str]:
-        own = [k for k in self.case_facts if k.startswith(prefix)]
-        known = [k for k in self.package.facts if k.startswith(prefix)] if self.package else []
-        return sorted(set(own) | set(known))
-
-
-def candidates(case: dict, package, supplier_id: str, threads: dict[str, list[dict]] | None = None) -> tuple:
-    facts = _Facts(case, package)
-    threads = threads or {}
-    ask, asked_pct = _position(case, facts, threads, supplier_id)
-    named = _named_series(package, threads.get(supplier_id, []))
-    found = list(_scorecard(facts, supplier_id, threads))
-    found += _notice(case, facts, supplier_id)
-    for part in case.get("parts", []):
-        found += _index_changes(package, facts, part, asked_pct, named)
-        found += _po_history(package, facts, part, supplier_id, ask)
-        found += _forecast(facts, part)
-        found += _should_cost(facts, part, ask)
-    return _strongest(found)
+    def items(self, prefix: str):
+        seen = set()
+        for source in (self.case_facts, self.package_facts):
+            for ref, fact in source.items():
+                if ref.startswith(prefix) and ref not in seen:
+                    seen.add(ref)
+                    yield ref, fact
 
 
-def _strongest(found: list[Claim]) -> tuple[Claim, ...]:
-    """Strongest first; an ID counts once per case, so no two claims share one."""
-    out, used = [], set()
-    for claim in sorted(found, key=lambda c: -c.strength):
-        if used & set(claim.refs):
+def _claim(sentence: str, refs, kind: str, figure: float | None = None) -> Claim:
+    return Claim(sentence, tuple(refs), kind, figure, True, 0.0)
+
+
+# ---- what the data offers ----------------------------------------------------------------------------------------
+
+
+def _index(case: dict, package, facts: _Facts) -> list[Claim]:
+    """Each cost driver's move over an explicit window ending at its newest month (3-12 months, the start at the
+    window's highest value: a recent decline can sit inside an annual rise)."""
+    series = set()
+    if package is not None:
+        for part in case.get("parts", []):
+            series |= {r["series_id"] for r in package.query("SELECT series_id FROM cost_drivers WHERE part_id = ?",
+                                                            (part,))}  # fmt: skip
+    series |= {facts.get(ref).get("series") for ref in case.get("refs", []) if ref.startswith("idx:")} - {None}
+    points = [(ref, f) for ref, f in facts.items("idx:") if f.get("month")]
+    newest = max((month_number(f["month"]) for _, f in points), default=0)
+    found = []
+    for name in sorted(s for s in series if s):
+        rows = sorted(((ref, f) for ref, f in points if f.get("series") == name), key=lambda rf: rf[1]["month"])
+        if len(rows) < 2:
             continue
-        used |= set(claim.refs)
-        out.append(claim)
-    return tuple(out[:MAX_CLAIMS])
-
-
-def _position(case: dict, facts: _Facts, threads: dict, sid: str) -> tuple[float | None, float]:
-    """(the price the supplier asks, its asked increase in %) from its standing sheet or its letter."""
-    letter = facts.get(case.get("trigger_doc") or "") or {}
-    letter = letter if letter.get("supplier") == sid else {}
-    ask = standing(threads[sid])[1].get("unit_price") if threads.get(sid) else None
-    ask = ask or letter.get("asked_price")
-    current = case.get("buyer", {}).get("current_unit_price")
-    if ask and current:
-        return ask, (ask / current - 1) * 100
-    return ask, letter.get("asked_pct") or 0.0
-
-
-def _named_series(package, events: list[dict]) -> list[str]:
-    """Index series the supplier names in its own e-mails, in order of appearance."""
-    if package is None:
-        return []
-    known = {r["id"] for r in package.query("SELECT id FROM index_series")}
-    text = " ".join(str(m.get("body", "")) for m in events if m.get("from") != "buyer")
-    return list(dict.fromkeys(t for t in SERIES_TOKEN.findall(text) if t in known))
-
-
-def _claim(sentence: str, refs, kind: str, figure: float | None, strength: float) -> Claim:
-    return Claim(sentence, tuple(refs), kind, figure, True, round(min(max(strength, 0.0), 1.0), 3))
-
-
-def _index_changes(package, facts: _Facts, part: str, asked_pct: float, named: list[str]) -> list[Claim]:
-    """The 12-month change of each driver that rose less than the supplier asks for (or fell)."""
-    if package is None:
-        return []
-    sql = "SELECT series_id, weight FROM cost_drivers WHERE part_id = ?"
-    weights = {r["series_id"]: r["weight"] for r in package.query(sql, (part,))}
-    names = {r["id"]: r["name"] for r in package.query("SELECT id, name FROM index_series")}
-    out = []
-    for series in dict.fromkeys([*named, *weights]):
-        change = estimates.index_change(package, series)
-        earlier, later = (facts.get(change.earlier_id), facts.get(change.later_id)) if change else (None, None)
-        if not (earlier and later):
+        end_id, end = rows[-1]
+        end_month = month_number(end["month"])
+        if newest - end_month > 12:
             continue
-        pct = round((later["value"] / earlier["value"] - 1) * 100, 1)
-        if pct >= asked_pct:
+        window = [
+            (ref, f) for ref, f in rows if 3 <= end_month - month_number(f["month"]) <= 12 and float(f["value"]) > 0
+        ]
+        if not window:
             continue
-        strength = min(1.0, (asked_pct - pct) / 10) * (0.5 + min(weights.get(series, 0.0), 0.5))
-        strength += NAMED_SERIES_BONUS if series in named else 0.0
+        start_id, start = max(window, key=lambda rf: float(rf[1]["value"]))
+        change = (float(end["value"]) / float(start["value"]) - 1) * 100
         sentence = (
-            f"{_short_name(names.get(series, series))} changed {pct:+.1f}% from {earlier['month']} to {later['month']} "
-            f"({change.earlier_id}, {change.later_id})."
+            f"The {name} index changed {change:+.1f}% from {start['month']} to {end['month']} ({start_id}, {end_id})."
         )
-        out.append(_claim(sentence, (change.earlier_id, change.later_id), "index_change", pct, strength))
-    return out
+        found.append(_claim(sentence, (start_id, end_id), "index", round(change, 1)))
+    return sorted(found, key=lambda c: c.figure)
 
 
-def _short_name(name: str, limit: int = 60) -> str:
-    """A series name short enough for an e-mail: no parenthetical, cut at a comma when long."""
-    short = name.split("(")[0].strip().rstrip(",")
-    while len(short) > limit and "," in short:
-        short = short.rsplit(",", 1)[0].strip()
-    return short
-
-
-def _scorecard(facts: _Facts, sid: str, threads: dict) -> list[Claim]:
-    """On-time delivery below our target (latest scorecard), defects above its commitment (another quarter)."""
-    rows = [r for r in reversed(facts.ids("sc:")) if (facts.get(r) or {}).get("supplier") == sid]
-    out = []
-    if rows and (otd := facts.get(rows[0]).get("otd_pct")) is not None and otd < OTD_TARGET_PCT:
-        quarter = facts.get(rows[0]).get("quarter", "")
-        sentence = (
-            f"Your on-time delivery was {otd:.1f}% in the 12 months to {quarter} ({rows[0]}), "
-            f"below our {OTD_TARGET_PCT:g}% target."
-        )
-        out.append(_claim(sentence, (rows[0],), "scorecard", otd, (OTD_TARGET_PCT - otd) / 20))
-    committed = standing(threads[sid])[1].get("ppm_commitment") if threads.get(sid) else None
-    spare = rows[1:] if out else rows
-    if committed and spare and (ppm := facts.get(spare[0]).get("ppm")) is not None and ppm > committed:
-        sentence = f"Your defect rate was {ppm:g} ppm on our quality record ({spare[0]}), above your {committed} ppm."
-        out.append(_claim(sentence, (spare[0],), "quality", ppm, (ppm - committed) / max(ppm, 1)))
-    return out
-
-
-def _po_history(package, facts: _Facts, part: str, sid: str, ask: float | None) -> list[Claim]:
-    """2-4 recent order lines of the part below the ask - this supplier's own first, else any supplier's."""
-    if package is None or not ask:
+def _scorecard(case: dict, facts: _Facts, sid: str) -> list[Claim]:
+    cards = [(ref, f) for ref, f in facts.items("sc:") if f.get("supplier") == sid]
+    if not cards:
         return []
-    sql = "SELECT id FROM po_lines WHERE part_id = ? {} ORDER BY order_date DESC"
-    for extra, params in (("AND supplier_id = ?", (part, sid)), ("", (part,))):
-        lines = [r["id"] for r in package.query(sql.format(extra), params, limit=40)]
-        prices = [(r, (facts.get(r) or {}).get("unit_price")) for r in lines]
-        cheaper = [(r, p) for r, p in prices if p is not None and p < ask]
-        if len(cheaper) >= PO_LINES_CITED[0]:
-            cited = cheaper[: PO_LINES_CITED[1]]
-            listed = ", ".join(f"EUR {p:.2f}" for p in sorted({p for _, p in cited}))
-            refs = [r for r, _ in cited]
-            sentence = f"Our recent orders for this part were placed at {listed} per unit ({', '.join(refs)})."
-            mean = sum(p for _, p in cited) / len(cited)
-            return [_claim(sentence, refs, "po_history", max(p for _, p in cited), (ask - mean) / ask * 10)]
+    ref, card = max(cards, key=lambda rf: rf[1].get("quarter", ""))
+    if case["buyer"].get("category_goal") == "quality_first" and card.get("ppm") is not None:
+        return [_claim(f"Recorded quality was {float(card['ppm']):g} ppm ({ref}).", (ref,), "quality", card["ppm"])]
+    if card.get("otd_pct") is not None:
+        return [
+            _claim(f"On-time delivery was {float(card['otd_pct']):g}% ({ref}).", (ref,), "delivery", card["otd_pct"])
+        ]
     return []
 
 
-def _forecast(facts: _Facts, part: str) -> list[Claim]:
-    """Our latest demand forecast change for the part, if demand rises: volume we can trade."""
-    rows = facts.ids(f"fc:{part.split(':', 1)[-1]}@")
-    latest = (facts.get(rows[-1]) or {}) if rows else {}
-    change = latest.get("change_pct")
-    if not change or change <= 0 or latest.get("part") != part:
-        return []
-    sentence = f"Our demand forecast for this part changed {change:+.1f}% ({rows[-1]})."
-    # ranked below price evidence: it is volume to trade, not a reason the price is wrong
-    return [_claim(sentence, (rows[-1],), "forecast", change, change / 40)]
+def _should_cost(case: dict, facts: _Facts) -> list[Claim]:
+    out = []
+    for part in case.get("parts", []):
+        ref = f"cost:{part.split(':', 1)[-1]}"
+        unit_cost = facts.get(ref).get("unit_cost")
+        if unit_cost is not None and facts.get(ref).get("part", part) == part:
+            sentence = (f"Our should-cost estimate is EUR {float(unit_cost):.2f} per price unit ({ref}); please help "
+                        "us reconcile this estimate with your cost breakdown.")  # fmt: skip
+            out.append(_claim(sentence, (ref,), "cost", float(unit_cost)))
+    return out
 
 
-def _should_cost(facts: _Facts, part: str, ask: float | None) -> list[Claim]:
-    ref = f"cost:{part.split(':', 1)[-1]}"
-    row = facts.get(ref) or {}
-    cost = row.get("unit_cost")
-    if not cost or not ask or cost >= ask or row.get("part") != part:
+def _forecast(case: dict, facts: _Facts) -> list[Claim]:
+    out = []
+    for part in case.get("parts", []):
+        rows = sorted(((r, f) for r, f in facts.items("fc:") if f.get("part") == part),
+                      key=lambda rf: rf[0].rsplit("@", 1)[-1], reverse=True)  # fmt: skip
+        if rows and rows[0][1].get("change_pct") is not None and float(rows[0][1]["change_pct"]) > 0:
+            ref, f = rows[0]
+            out.append(_claim(f"The demand forecast changed {float(f['change_pct']):+.1f}% ({ref}).", (ref,), "volume",
+                              float(f["change_pct"])))  # fmt: skip
+    return out
+
+
+def _alternative_quote(case: dict, facts: _Facts, sid: str) -> list[Claim]:
+    """The case's own alternative quote, when it is current leverage: a quote for this part from another supplier
+    whose complete terms meet our must-haves."""
+    alt = case["buyer"].get("alternative") or {}
+    ref = alt.get("ref")
+    if alt.get("kind") != "quote" or not ref or not must_haves_ok(case, alt.get("terms") or {}):
         return []
-    sentence = f"Our should-cost estimate for this part is EUR {cost:.2f} per unit ({ref})."
-    return [_claim(sentence, (ref,), "should_cost", cost, (ask - cost) / ask * 5)]
+    fields = set(alt.get("terms") or {}) | set(case.get("fixed_terms", {}))
+    if not all(rule["field"] in fields for rule in case["buyer"].get("must_haves", [])):
+        return []
+    fact = facts.get(ref)
+    if fact.get("part") not in case.get("parts", []) or fact.get("supplier") == sid or not fact.get("unit_price"):
+        return []
+    return [_claim(f"The alternative quote is EUR {float(fact['unit_price']):.2f} per price unit ({ref}).", (ref,),
+                   "rival", float(fact["unit_price"]))]  # fmt: skip
+
+
+def _history(case: dict, facts: _Facts, sid: str) -> list[Claim]:
+    """Our recent orders of the part with this supplier (no figure asserted: the data's own values are checked)."""
+    out = []
+    for part in case.get("parts", []):
+        lines = sorted(((r, f) for r, f in facts.items("po:")
+                        if f.get("supplier") == sid and f.get("part") == part and f.get("unit_price")),
+                       key=lambda rf: rf[1].get("date", ""), reverse=True)[:HISTORY_LINES]  # fmt: skip
+        if len(lines) >= 2:
+            refs = tuple(r for r, _ in lines)
+            mean = sum(float(f["unit_price"]) for _, f in lines) / len(lines)
+            out.append(_claim(f"Please compare our recent order history with you for this part ({', '.join(refs)}).",
+                              refs, "history", round(mean, 2)))  # fmt: skip
+    return out
+
+
+def _news(facts: _Facts, sid: str) -> list[Claim]:
+    """Press reports that weaken the seller's position (idle capacity, cash or credit pressure, easing supply)."""
+    return [
+        _claim(
+            f'We noted the report "{f.get("headline", "press report")}" ({ref}) and aim for a package that suits '
+            "your situation.",
+            (ref,),
+            "news",
+        )  # fmt: skip
+        for ref, f in sorted(facts.items("news:"))
+        if f.get("supplier") == sid and f.get("topic") in WEAK_SELLER_NEWS
+    ]
 
 
 def _notice(case: dict, facts: _Facts, sid: str) -> list[Claim]:
-    """A letter of the supplier that gives less notice than its framework contract requires."""
-
-    def own(ref: str | None) -> dict:
-        row = (facts.get(ref) if ref else None) or {}
-        return row if row.get("supplier") == sid and row.get("days") else {}
-
-    contract = next((r for r in facts.ids("ctr:") if "#" not in r and own(r)), None)
-    letter = next((r for r in [case.get("trigger_doc"), *facts.ids("doc:")] if own(r)), None)
-    if not (contract and letter):
+    """The trigger letter gives less notice than the supplier's framework contract requires."""
+    letter = case.get("trigger_doc")
+    notice = facts.get(letter)
+    if notice.get("days") is None or notice.get("supplier") != sid:
         return []
-    days, required = own(letter)["days"], own(contract)["days"]
-    if days >= required:
+    for ref, contract in facts.items("ctr:"):
+        if "#" in ref or contract.get("supplier") != sid or not contract.get("days"):
+            continue
+        if float(notice["days"]) < float(contract["days"]):
+            sentence = (f"The letter gives {float(notice['days']):g} days of notice against the agreed "
+                        f"{float(contract['days']):g} days ({letter}, {ref}).")  # fmt: skip
+            return [_claim(sentence, (letter, ref), "notice", float(notice["days"]))]
+    return []
+
+
+def _live_rival(case: dict, sid: str, threads: dict[str, list[dict]], estimates: dict) -> list[Claim]:
+    """The cheapest live, compliant sheet of another bidder that undercuts this supplier in price and in C."""
+    events = threads.get(sid) or []
+    own_sheets = (latest(events).get("term_sheets") or []) if events else []
+    std = closing_terms(case, {}, standard_terms(events))
+    own_c = min((total_cost(case, s["terms"], std, estimates.get(sid)) for s in own_sheets), default=float("inf"))
+    own_price = min((s["terms"]["unit_price"] for s in own_sheets if s["terms"].get("unit_price") is not None),
+                    default=float("inf"))  # fmt: skip
+    told = " ".join(str(m.get("body") or "") for m in events if m.get("from") == "buyer")
+    rivals = []
+    for rival in live_threads(threads):
+        if rival == sid:
+            continue
+        rival_std = closing_terms(case, {}, standard_terms(threads[rival]))
+        for sheet in latest(threads[rival]).get("term_sheets") or []:
+            ref, terms = sheet.get("term_sheet_id"), sheet.get("terms") or {}
+            price = terms.get("unit_price")
+            if not ref or price is None or price >= own_price or ref in told:
+                continue
+            if not must_haves_ok(case, terms, rival_std):
+                continue
+            c = total_cost(case, terms, rival_std, estimates.get(rival))
+            if c < own_c:
+                rivals.append((c, price, ref))
+    if not rivals:
         return []
-    sentence = (
-        f"Your letter of {own(letter).get('date', '')} gives {days} days' notice ({letter}), "
-        f"while our contract requires {required} days ({contract})."
-    )
-    return [_claim(sentence, (letter, contract), "notice", days, (required - days) / required + 0.3)]
+    _, price, ref = min(rivals)
+    return [
+        _claim(f"Another supplier currently quotes EUR {price:.2f} per price unit ({ref}).", (ref,), "rival", price)
+    ]
+
+
+# ---- filtered and ordered ----------------------------------------------------------------------------------------
+
+
+def candidates(case: dict, package, supplier_id: str, threads: dict | None = None, estimates: dict | None = None,
+               context: str = "") -> tuple[Claim, ...]:  # fmt: skip
+    """Every argument we may cite to this supplier this round, best first (`strength` is the rank, 1 = best).
+    `context`: its letters and contracts (message.supplier_documents) - read for a hedge on a named series."""
+    threads, estimates = threads or {}, estimates or {}
+    facts = _Facts(case, package)
+    found = [
+        *_notice(case, facts, supplier_id),
+        *_alternative_quote(case, facts, supplier_id),
+        *_index(case, package, facts),
+        *_scorecard(case, facts, supplier_id),
+        *_should_cost(case, facts),
+        *_forecast(case, facts),
+        *_history(case, facts, supplier_id),
+        *_news(facts, supplier_id),
+    ]
+    if len(case.get("suppliers", [])) > 1:
+        found = [*_live_rival(case, supplier_id, threads, estimates), *found]
+    events = threads.get(supplier_id) or []
+    ordered = _ordered(_relevant(found, events, context), events)
+    n = len(ordered)
+    return tuple(replace(c, strength=round((n - i) / n, 3)) for i, c in enumerate(ordered))
+
+
+def _asking(events: list[dict]) -> float:
+    prices = [s["terms"]["unit_price"] for s in latest(events).get("term_sheets") or []
+              if (s.get("terms") or {}).get("unit_price") is not None] if events else []  # fmt: skip
+    return min(prices, default=float("inf"))
+
+
+def _relevant(found: list[Claim], events: list[dict], context: str) -> list[Claim]:
+    """Drop what argues for the seller or what it already ruled out."""
+    asking = _asking(events)
+    replies = [m for m in events if m.get("from") != "buyer"]
+    reply = str(replies[-1].get("body") or "") if replies else ""
+    sentences = re.split(r"[.!?\n]", f"{context}\n{reply}")
+    hedged = {s.lower() for s in sentences if HEDGE.search(s)}
+    out = []
+    seen_refs: set[str] = set()
+    for c in found:
+        if seen_refs & set(c.refs):  # each data ID counts once
+            continue
+        if c.kind == "index" and (c.figure is None or c.figure >= 0):
+            continue  # a driver that rose argues for the seller
+        if c.kind in ("rival", "cost") and c.figure is not None and c.figure >= asking:
+            continue
+        if c.kind == "history" and (c.figure is None or c.figure >= asking):
+            continue
+        if c.kind == "index":
+            name = c.sentence.split(" index ", 1)[0].removeprefix("The ").lower()
+            if any(name in s for s in hedged):
+                continue
+        seen_refs |= set(c.refs)
+        out.append(c)
+    return out
+
+
+def reactions(events: list[dict]) -> dict[str, int]:
+    """How this supplier treated each kind of argument: +1 'took it into account', -1 'does not change our
+    calculation' - from its own sentences, so it adapts to any supplier."""
+    score: dict[str, int] = {}
+    for m in events:
+        if m.get("from") == "buyer":
+            continue
+        for sentence in re.split(r"(?<=[.!?])\s+|\n", str(m.get("body") or "")):
+            low = sentence.lower()
+            if "holds" not in low and "checked" not in low and "verified" not in low:
+                continue
+            kind = next((k for k, pattern in REACTION_KINDS if re.search(pattern, low)), None)
+            if kind is None:
+                continue
+            if re.search(r"does not change|doesn.t change|not change our", low):
+                score[kind] = score.get(kind, 0) - 1
+            elif re.search(r"took it into account|taken into account|fair point", low):
+                score[kind] = score.get(kind, 0) + 1
+    return score
+
+
+def _ordered(found: list[Claim], events: list[dict]) -> list[Claim]:
+    rank = {kind: i for i, kind in enumerate(PRIORITY)}
+    by_kind = sorted(found, key=lambda c: rank.get(c.kind, len(PRIORITY)))
+    seen = reactions(events)
+    return sorted(by_kind, key=lambda c: (0 if c.kind in ("notice", "rival") else 1, -seen.get(c.kind, 0)))
+
+
+def default_choice(case: dict, claims: tuple[Claim, ...], events: list[dict], documents: str = "") -> tuple[int, ...]:
+    """The rule's arguments for this message (indices into `claims`); `documents`: its letters and contracts."""
+    if not claims:
+        return ()
+    ours = sum(m.get("from") == "buyer" for m in events)
+    limit = LATER_CLAIMS if ours else FIRST_MESSAGE_CLAIMS
+    chosen = list(range(min(limit, len(claims))))
+    replies = [m for m in events if m.get("from") != "buyer"]
+    reply = str(replies[-1].get("body") or "") if replies else ""
+    goal = case["buyer"].get("category_goal")
+    locked = message.signals(documents, events)["price_locked"]
+    if COST_OBJECTION.search(reply) and goal not in ("quality_first", "secure_supply") and not locked:
+        falling = next((i for i, c in enumerate(claims) if c.kind == "index"), None)  # a counterpoint on its costs
+        if falling is not None and falling not in chosen:
+            chosen = [falling, *chosen][:limit]
+    if len(case.get("suppliers", [])) > 1:
+        rival = next((i for i, c in enumerate(claims) if c.kind == "rival"), None)
+        if rival is not None:
+            chosen = [rival, *(i for i in chosen if i != rival)][:limit]
+    return tuple(dict.fromkeys(chosen))

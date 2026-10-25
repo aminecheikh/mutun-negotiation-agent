@@ -42,6 +42,7 @@ TOPIC_SIGNALS = {
     "restructuring": ("cash_short", 2),
     "short_time_work": ("price_fighter", 3),
     "free_capacity": ("price_fighter", 3),
+    "customer_loss": ("price_fighter", 3),  # Sunday release: a lost customer leaves capacity idle
     "new_plant": ("price_fighter", 1),
     "full_order_book": ("full_order_book", 3),
     "allocation": ("full_order_book", 3),

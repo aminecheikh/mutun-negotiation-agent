@@ -72,20 +72,7 @@ def rebuild(session: CaseSession, th: ThreadState) -> None:
         session.cost(th.supplier_id, t) if t.get("unit_price") is not None else math.inf
         for t in supplier_sheets(events)
     )
-    th.keepalives = sum(m.get("from") == "buyer" and not m.get("term_sheets") for m in events)
-    th.final_countered = _countered_a_final_offer(events)
     th.cited_offers = {r for m in events if m.get("from") == "buyer" for r in ids_in(m) if r.startswith("offer:")}
-
-
-def _countered_a_final_offer(events: list[dict]) -> bool:
-    seen_final = False
-    for m in events:
-        if m.get("from") == "buyer":
-            if seen_final and m.get("term_sheets"):
-                return True
-        elif m.get("status") == "final_offer":
-            seen_final = True
-    return False
 
 
 def rebuild_case(session: CaseSession) -> None:

@@ -1,33 +1,34 @@
 """The role pipeline (owner: Jeddou): the one place the orchestrator calls tools and roles in a round.
 
-  fit       tools.fit_concessions          numbers: where the supplier's prices converge     (Amine)
-  read      analyst.read                   words + fit: is it still open, what it wants     (Saed)
-  choose    strategist.choose              send / accept / walk, levers, claims, question   (Saed, one LLM call)
-  clamp     policy.coerce_tactic           within this round's permissions                  (Jeddou)
-  plan      tools.plan_offers              1-3 term sheets and their C                      (Amine)
-  pre-guard guard.check_sheets             only sheets we would be content to see accepted   (Jeddou)
-  write     writer.write                   the e-mail around the claims and sheets           (Saed, one LLM call)
+  fit       tools.fit_concessions     where the supplier's prices converge (numbers)
+  read      analyst.read              is it still open, what it wants (words + fit)
+  plan      tools.plan_offers         the deterministic planner's 1-3 term sheets: the follow step, and the push
+                                      step where the policy allows a push
+  choose    strategist.choose         the decision agent, knowing both plans: accept / send, follow the planner or
+                                      push for price, which arguments, one question (one LLM call)
+  clamp     policy.coerce_tactic      within this round's permissions
+  pre-guard guard.check_sheets        only sheets we would be content to see accepted
+  write     writer.write              the deterministic e-mail (tools.message); a pushed message's paragraph is
+                                      the one LLM-written part
 
-Every stage has a time slice and a rule twin: a slow, broken or absent model never costs the 60-second limit,
-it costs that stage's quality for one round. The strategist sees one thread (the one this worker answers) and a
-claims list already filtered for IDs cited earlier in the case, so its claim indices stay valid and every ID is
-cited once per case across all threads.
+Every stage has a time slice and a rule twin: a slow, broken or absent model never costs the 60-second limit, it
+costs that stage's quality for one round - and the rule twins together are exactly the deterministic layer. The
+decision agent sees one thread and an argument list already filtered for IDs cited earlier in the case, so its
+indices stay valid and every ID is cited once per case.
 """
 
 import logging
-import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field, replace
 
 from ...cost import complete_offer
-from ...play import latest
 from . import guard, policy
 from .contracts import BehaviourRead, CaseContext, ConcessionFit, Email, OfferPlan, Tactic
-from .observe import detect_language
 from .roles import LLMWriter, RuleAnalyst, RuleStrategist
 from .state import CaseSession, ThreadState
+from .tools import message, planner
 
 log = logging.getLogger("arena")
 # Role calls run here so the orchestrator can bound them; a call that overruns keeps its worker until it ends.
@@ -35,45 +36,8 @@ log = logging.getLogger("arena")
 _POOL = ThreadPoolExecutor(max_workers=48, thread_name_prefix="buyer-role")
 ANALYST_SLICE_S = 5.0
 SAFETY_S = 2.0  # never start a stage that would end closer than this to the move budget
-
-# Questions for keep-alive e-mails, per case type: open, no figures, answerable by the role in charge.
-QUESTIONS = {
-    "en": {
-        "price_increase": "Which later start date for the new price could you accept?",
-        "renewal": "Which volume commitment would improve your terms for the coming period?",
-        "rfq": "What is your earliest confirmed lead time for the start of production?",
-        "bundling": "Could you confirm your price per complete kit?",
-        "raw_material": "Could you state your base price without the surcharge clause?",
-        "capacity": "What lead time can you confirm against a firm commitment from our side?",
-        "quality": "Which defect level will your improvement plan commit to?",
-        "default": "Which payment term or contract length would let you improve your price?",
-    },
-    "de": {
-        "price_increase": "Welchen späteren Beginn des neuen Preises könnten Sie akzeptieren?",
-        "renewal": "Welche Mengenzusage würde Ihre Konditionen für die kommende Periode verbessern?",
-        "rfq": "Welche Lieferzeit können Sie uns für den Serienanlauf verbindlich bestätigen?",
-        "bundling": "Könnten Sie uns Ihren Preis pro vollständigem Set bestätigen?",
-        "raw_material": "Könnten Sie uns Ihren Basispreis ohne die Zuschlagsklausel nennen?",
-        "capacity": "Welche Lieferzeit können Sie gegen eine feste Abnahmezusage bestätigen?",
-        "quality": "Auf welche Fehlerquote wird sich Ihr Verbesserungsplan festlegen?",
-        "default": "Welches Zahlungsziel oder welche Vertragslaufzeit würde Ihnen bessere Konditionen ermöglichen?",
-    },
-}
-KEEPALIVE = {
-    "en": "Dear Sir or Madam,\n\nthank you for your message. We are reviewing your offer internally and "
-    "will come back to you with our position. {question}\n\nKind regards\nHollerau Pumpenwerke, Purchasing",
-    "de": "Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihre Nachricht. Wir prüfen Ihr Angebot intern und "
-    "melden uns mit unserer Position bei Ihnen. {question}\n\nMit freundlichen Grüßen\n"
-    "Hollerau Pumpenwerke, Einkauf",
-}
-
-# The same answer when our last offer still stands: it travels with the e-mail, so the supplier always has a package.
-KEEPALIVE_OFFER = {
-    "en": "Dear Sir or Madam,\n\nthank you for your message. Our proposal attached still stands. {question}\n\n"
-    "Kind regards\nHollerau Pumpenwerke, Purchasing",
-    "de": "Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihre Nachricht. Unser beigefügter Vorschlag gilt "
-    "weiterhin. {question}\n\nMit freundlichen Grüßen\nHollerau Pumpenwerke, Einkauf",
-}
+TURN_WAIT_S = 8.0  # at most this long for a thread ahead in the claiming order to choose its arguments
+MIN_ROUND_S = 30.0  # the wait never eats into the time a full round with the model needs
 
 
 @dataclass(frozen=True)
@@ -88,72 +52,57 @@ class RoleOutput:
     sheet_problems: tuple[str, ...] = ()
 
 
-def keepalive_email(session: CaseSession, th: ThreadState, question: str | None = None, with_offer=False) -> Email:
-    """A short answer without a term sheet: keeps a parked thread inside its 60 s without conceding anything.
-    The strategist's question when it is plain (no figures: a keep-alive skips the writer's number checks) and in
-    the supplier's language, else the case type's, else another one: never a body this thread already got."""
-    language = "de" if detect_language(str(latest(th.events).get("body") or "")) == "de" else "en"
-    questions = QUESTIONS[language]
-    own = [question.strip()] if question and language == "en" and not re.search(r"\d", question) else []
-    first = questions.get(str(session.case.get("type")), questions["default"])
-    template = (KEEPALIVE_OFFER if with_offer else KEEPALIVE)[language]
-    bodies = [template.format(question=q) for q in dict.fromkeys([*own, first, *questions.values()])]
-    sent = {str(m.get("body") or "") for m in th.events if m.get("from") == "buyer"}
-    body = next((b for b in bodies if b not in sent), bodies[0])
-    subject = str(latest(th.events).get("subject") or "").strip() or session.case.get("title", "")
-    subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
-    return Email(subject=subject[:300], body=body)
-
-
-def keepalive_message(session: CaseSession, th: ThreadState, question: str | None = None) -> dict:
-    """A keep-alive that still carries an offer - the organisers' rule is an offer to every supplier: our last
-    sheets again where the guard still lets them go out, or the sheet it agreed to. Not after its final offer
-    (pushing then makes it walk). A message without a package gets "without movement from your side"."""
-    sheets: list[dict] = []
-    ours = [m for m in th.events if m.get("from") == "buyer" and m.get("term_sheets")]
-    if th.status in ("open", "agreed") and ours:
-        sheets, _ = guard.check_sheets(session, th, [ts.get("terms", ts) for ts in ours[-1]["term_sheets"]])
-    if not sheets and th.status == "agreed" and policy.standing_ok(session, th):
-        # it agreed to our sheet: every supplier gets an offer (organisers), so that sheet stands, unchanged
-        sheets = [complete_offer(session.case, th.standing_terms)]
-    email = keepalive_email(session, th, question, with_offer=bool(sheets))
-    return {"subject": email.subject, "body": email.body, "term_sheets": [{"terms": t} for t in sheets], "refs": []}
-
-
 class RolePipeline:
     def __init__(self, tools, analyst, strategist, writer):
         self.tools = tools
         self.analyst, self.strategist, self.writer = analyst, strategist, writer or LLMWriter(None)
         self.rule_analyst, self.rule_strategist = RuleAnalyst(), RuleStrategist()
-        self.rule_writer = LLMWriter(None)  # no model: Saed's persona template, same checks
+        self.rule_writer = LLMWriter(None)  # no model: the persona template, same checks
 
     # ---- context ------------------------------------------------------------------------------------
 
-    def sync(self, session: CaseSession, th: ThreadState) -> CaseContext:
-        """Claims and bands refreshed from the threads (series the supplier named, rival offers, a cost breakdown);
-        re-priced bands go back to the session at once, because the policy's verdict uses them too."""
+    @staticmethod
+    def threads(session: CaseSession) -> dict[str, list[dict]]:
+        return {sid: list(t.events) for sid, t in session.threads.items()}
+
+    def round_context(self, session: CaseSession, th: ThreadState) -> CaseContext:
+        """The arguments refreshed from every thread (its asked price, rival offers, its reactions), filtered to
+        what may still be cited to this supplier."""
         ctx = session.ctx
         if hasattr(self.tools, "refresh"):
             try:
-                ctx = self.tools.refresh(ctx, {s: t.events for s, t in session.threads.items()})
+                ctx = self.tools.refresh(ctx, self.threads(session))
             except Exception:
-                log.exception("%s: tools.refresh failed - using the prepared claims", th.supplier_id)
-            if ctx.bands is not session.ctx.bands:
-                keep = {"bands": ctx.bands, **({"trades": ctx.trades} if hasattr(ctx, "trades") else {})}
-                with session.lock:
-                    session.ctx = replace(session.ctx, **keep)
-        return ctx
-
-    def round_context(self, session: CaseSession, th: ThreadState) -> CaseContext:
-        """`sync`, then the claims filtered to what may still be cited to this supplier."""
-        ctx = self.sync(session, th)
+                log.exception("%s: tools.refresh failed - using the prepared arguments", th.supplier_id)
         sid = th.supplier_id
+        with session.lock:
+            taken = {r for r, owner in session.reserved.items() if owner != sid}
         usable = tuple(
             c
             for c in ctx.claims.get(sid, ())
-            if c.favours_buyer and all(guard.cite_problem(session, th, r) is None for r in c.refs)
+            if all(guard.cite_problem(session, th, r) is None and r not in taken for r in c.refs)
         )
         return replace(ctx, claims={**ctx.claims, sid: usable})
+
+    @staticmethod
+    def reserve_arguments(session: CaseSession, th: ThreadState, ctx: CaseContext, tactic: Tactic) -> Tactic:
+        """Claim this message's arguments for this supplier at decision time, under the case lock: threads decide in
+        parallel, and an argument another bidder's message already chose is replaced by the next free one in the
+        rules' order (one at a time, the way a sequential buyer would choose)."""
+        sid, claims = th.supplier_id, ctx.claims.get(th.supplier_id, ())
+        with session.lock:
+
+            def free(i: int) -> bool:
+                return all(r.startswith("offer:") or session.reserved.get(r, sid) == sid for r in claims[i].refs)
+
+            kept = [i for i in tactic.claims if free(i)]
+            spare = (i for i in range(len(claims)) if i not in kept and i not in tactic.claims and free(i))
+            kept += [i for _, i in zip(range(len(tactic.claims) - len(kept)), spare, strict=False)]
+            for i in kept:
+                session.reserved.update({r: sid for r in claims[i].refs if not r.startswith("offer:")})
+            session.choosing.pop(sid, None)  # claimed: the threads behind it need not wait for its e-mail
+        session.notify()
+        return replace(tactic, claims=tuple(kept))
 
     # ---- stages -------------------------------------------------------------------------------------
 
@@ -180,9 +129,21 @@ class RolePipeline:
 
     def run(self, session: CaseSession, th: ThreadState, v: policy.Verdict, deadline: float, rule_only=False):
         """One round for one thread. `deadline` is time.monotonic() by which the message must be ready."""
+        with session.lock:  # the claiming order: fewest of our messages, then the cheapest standing sheet
+            session.choosing[th.supplier_id] = (th.our_rounds, th.c, th.supplier_id)
+        try:
+            return self._run(session, th, v, deadline, rule_only)
+        finally:
+            with session.lock:
+                session.choosing.pop(th.supplier_id, None)
+            session.notify()
+
+    def _run(self, session: CaseSession, th: ThreadState, v: policy.Verdict, deadline: float, rule_only: bool):
         used: dict[str, str] = {}
         timings: dict[str, int] = {}
         sid, events = th.supplier_id, list(th.events)
+        # the threads ahead in the claiming order choose first: this one's arguments then exclude theirs
+        session.wait_turn(sid, max(0.0, min(TURN_WAIT_S, deadline - time.monotonic() - MIN_ROUND_S)))
         ctx = self.round_context(session, th)
 
         def left() -> float:
@@ -195,7 +156,7 @@ class RolePipeline:
         fit = self._fit(ctx, sid, events, used)
         timings["fit"] = int((time.monotonic() - t_fit) * 1000)
         th.fit = fit
-        ctx = replace(ctx, fits={**ctx.fits, sid: fit})  # the strategist sees where its prices converge
+        ctx = replace(ctx, fits={**ctx.fits, sid: fit})
         rule_read = self._safe(lambda: self.rule_analyst.read(ctx, sid, events, fit), None, "rule_read")
         rule_read = rule_read or BehaviourRead(sid, 0.5, 0.2, (), ())
         read = self._stage(
@@ -204,6 +165,13 @@ class RolePipeline:
         )  # fmt: skip
         reads = {sid: read}
         view = {sid: events}
+        t0 = time.monotonic()
+        offers = {"follow": self._plan(ctx, session, th, Tactic(sid, "send"), used)}
+        for price in ("trim", "push"):
+            if policy.margin_allowed(session, th, price):
+                offers[price] = self._plan(ctx, session, th, Tactic(sid, "send", price=price), {})
+        timings["plan"] = int((time.monotonic() - t0) * 1000)
+        ctx = replace(ctx, offers={**ctx.offers, sid: offers})
         rule_tactic = self._safe(
             lambda: self.rule_strategist.choose(ctx, view, dict(reads)), Tactic(sid, "send"), "rule_choose"
         )
@@ -215,15 +183,20 @@ class RolePipeline:
             tactic, used["choose"] = rule_tactic, "error"
         read = reads.get(sid, read)  # the LLM strategist writes its refined read back into this dict
         th.read = read
-        n_claims = len(ctx.claims.get(sid, ()))
-        tactic = policy.coerce_tactic(session, th, tactic, v, n_claims)
+        # the agent's accept only where it dominates the deterministic layer's own next offer
+        v = replace(v, accept_permitted=v.accept_permitted and policy.dominates(session, th, offers["follow"]))
+        tactic = policy.coerce_tactic(session, th, tactic, v, len(ctx.claims.get(sid, ())))
         if tactic.action == "accept":
             return RoleOutput(tactic, None, None, fit, read, used, timings)
+        tactic = self.reserve_arguments(session, th, ctx, tactic)
 
-        t0 = time.monotonic()
-        plan = self._plan(ctx, session, th, events, tactic, read, used)
+        plan = offers.get(tactic.price, offers["follow"])
+        if tactic.package and hasattr(self.tools, "add_package"):
+            try:
+                plan = self.tools.add_package(ctx, sid, self.threads(session), plan, tactic.package)
+            except Exception:
+                log.exception("%s: the agent's package could not be priced - the planner's sheets", sid)
         sheets, sheet_problems = guard.check_sheets(session, th, plan.term_sheets)
-        timings["plan"] = int((time.monotonic() - t0) * 1000)
         if not sheets:
             return RoleOutput(tactic, None, None, fit, read, used, timings, tuple(sheet_problems))
         plan = OfferPlan(sid, tuple(sheets), tuple(session.cost(sid, s) for s in sheets), plan.rationale)
@@ -238,7 +211,7 @@ class RolePipeline:
         return RoleOutput(tactic, plan, email, fit, read, used, timings, tuple(sheet_problems))
 
     def rule_email(self, session: CaseSession, th: ThreadState, tactic: Tactic, plan: OfferPlan) -> Email:
-        """The template e-mail for a plan, with the same claims list the roles saw (used after a guard reject)."""
+        """The deterministic e-mail for a plan, with the same arguments the roles saw (used after a guard reject)."""
         return self.rule_writer.write(self.round_context(session, th), tactic, plan, list(th.events))
 
     # ---- helpers ------------------------------------------------------------------------------------
@@ -253,9 +226,9 @@ class RolePipeline:
             used["fit"] = "error"
             return ConcessionFit(sid, (), None, None, False)
 
-    def _plan(self, ctx, session, th, events, tactic, read, used) -> OfferPlan:
+    def _plan(self, ctx, session, th, tactic, used) -> OfferPlan:
         try:
-            plan = self.tools.plan_offers(ctx, th.supplier_id, events, tactic, read)
+            plan = self.tools.plan_offers(ctx, th.supplier_id, self.threads(session), tactic)
             if isinstance(plan, OfferPlan) and plan.term_sheets:
                 used["plan"] = "main"
                 return plan
@@ -263,7 +236,7 @@ class RolePipeline:
         except Exception:
             log.exception("%s: plan_offers failed - repeating our last offer", th.supplier_id)
             used["plan"] = "error"
-        return fallback_plan(session, th)
+        return last_offer(session, th)
 
     @staticmethod
     def _safe(fn, default, name):
@@ -274,16 +247,29 @@ class RolePipeline:
             return default
 
 
-def fallback_plan(session: CaseSession, th: ThreadState) -> OfferPlan:
-    """Without the offer engine: our last sheets again (no concession without tools), else the supplier's
-    standing terms at our band target. The guard decides whether any of them may go out."""
+def last_offer(session: CaseSession, th: ThreadState) -> OfferPlan:
+    """Without the planner: our last sheets again (never a concession without it); before our first offer, its own
+    terms at the planner's anchor share of its price. The guard decides whether any of them may still go out."""
     ours = [m for m in th.events if m.get("from") == "buyer" and m.get("term_sheets")]
     if ours:
         sheets = tuple(ts.get("terms", ts) for ts in ours[-1]["term_sheets"])
+    elif (price := th.standing_terms.get("unit_price")) is not None:
+        strategic = session.case["buyer"].get("category_goal") in planner.STRATEGIC
+        share = planner.STRATEGIC_ANCHOR_SHARE if strategic else planner.ANCHOR_SHARE
+        sheets = (complete_offer(session.case, {**th.standing_terms, "unit_price": round(price * share, 2)}),)
     else:
-        band = session.band(th.supplier_id)
-        theirs = th.standing_terms.get("unit_price")
-        price = band.target if band else (theirs * 0.95 if theirs else None)
-        sheets = (complete_offer(session.case, {**th.standing_terms, "unit_price": price}),) if price else ()
-    costs = tuple(session.cost(th.supplier_id, s) for s in sheets)
-    return OfferPlan(th.supplier_id, sheets, costs, "fallback: offer engine unavailable")
+        sheets = ()
+    return OfferPlan(th.supplier_id, sheets, tuple(session.cost(th.supplier_id, s) for s in sheets), "our last offer")
+
+
+REPEAT_BODY = "\n".join([message.INTRO, "Our proposal attached stands.", message.SIGN_OFF])
+
+
+def repeat_message(session: CaseSession, th: ThreadState) -> dict | None:
+    """Our last sheets again where the guard still lets them go out, or None: an answer within 60 s that concedes
+    nothing (only when no new sheet of the planner may go out)."""
+    sheets, _ = guard.check_sheets(session, th, last_offer(session, th).term_sheets)
+    if not sheets:
+        return None
+    sheets = [{"terms": t} for t in sheets]
+    return {"subject": message.subject(session.case), "body": REPEAT_BODY, "term_sheets": sheets, "refs": []}
