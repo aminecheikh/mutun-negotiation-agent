@@ -196,6 +196,7 @@ def _packages(case: dict, opening: dict):
         if f != "unit_price" and f not in HOLD_AT_STANDARD and case.get("term_options", {}).get(f)
     ]
     options = [case["term_options"][f] for f in fields]
+    opening = held_at_standard(case, opening)
     if math.prod(len(o) for o in options) <= MAX_PACKAGES:
         combos = list(itertools.product(*options))
     else:
@@ -205,6 +206,26 @@ def _packages(case: dict, opening: dict):
         combos += [tuple(rng.choice(o) for o in options) for _ in range(MAX_PACKAGES - width)]
     for combo in combos:
         yield complete_offer(case, {**opening, **dict(zip(fields, combo, strict=True))})
+
+
+def held_at_standard(case: dict, opening: dict) -> dict:
+    """Lead time and ppm stay at the supplier's standard - but a standard that breaks one of our must-haves moves
+    to the allowed option closest to it, never further: a faster delivery than our must-have needs is the
+    supplier's cost and comes back as price (P05: its 52 days broke our <= 42, our sheets asked 28-35 days and its
+    price rose 31.50 -> 33.50; at 42 days it agreed to 31.50)."""
+    out = dict(opening)
+    # lead time only: suppliers charge for speed (practice: P05, full order books). A tighter ppm is worth money to
+    # us in quality cases, so it stays with the C search (moving it re-priced P11's target under its cost floor).
+    for field in ("lead_time_days",):
+        options, value = case.get("term_options", {}).get(field), out.get(field)
+        if not options or value is None or field not in case.get("negotiable", ()):
+            continue
+        if must_haves_ok(case, {**complete_offer(case, out), field: value}):
+            continue
+        allowed = [o for o in options if must_haves_ok(case, {**complete_offer(case, out), field: o})]
+        if allowed and all(isinstance(o, int | float) for o in allowed) and isinstance(value, int | float):
+            out[field] = min(allowed, key=lambda o: abs(o - value))
+    return out
 
 
 def _best_package(case: dict, opening: dict, std: dict, supplier: dict, floor: float, ceiling: float) -> dict | None:

@@ -113,3 +113,16 @@ def test_supplier_band_when_supplier_leaves_lead_time_out_keeps_its_standard_not
     case["fixed_terms"].pop("lead_time_days", None)
     band = bands.supplier_band(case, package, "sup:70110", P01_OPENING, {"lead_time_days": 42})
     assert band.target_terms["lead_time_days"] == 42  # its cost of faster delivery is unknown to us: ask, don't impose
+
+
+def test_held_at_standard_when_its_lead_time_breaks_a_must_have_moves_to_the_closest_allowed_option():
+    # P05: its 52 days broke our <= 42; asking 28-35 days raised its price, 42 days got its own price agreed
+    import json
+    from pathlib import Path
+
+    from arena_kit.agents.buyer.tools.bands import held_at_standard
+
+    cases = json.loads((Path(__file__).parent / "fixtures/practice_cases.json").read_text(encoding="utf-8"))
+    case = next(c for c in cases if c["case_id"] == "case:P05")  # must-have lead_time_days <= 42
+    assert held_at_standard(case, {"unit_price": 31.5, "lead_time_days": 52})["lead_time_days"] == 42
+    assert held_at_standard(case, {"unit_price": 31.5, "lead_time_days": 35})["lead_time_days"] == 35  # kept
