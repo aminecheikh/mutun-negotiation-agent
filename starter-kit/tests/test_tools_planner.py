@@ -92,10 +92,11 @@ def test_credible_floor_is_the_low_edge_of_the_estimate_or_of_the_suppliers_pric
     assert planner.credible_floor(None, 80.0) == 0.0
 
 
-def test_anchor_share_when_leverage_has_no_cost_estimate_keeps_the_default_depth():
+def test_anchor_share_when_leverage_opens_deeper_unless_switched_off(monkeypatch):
     case = next(c for c in CASES if c["buyer"].get("category_goal") == "leverage")
-    assert planner.anchor_share(case, None) == planner.ANCHOR_SHARE
-    assert planner.anchor_share(case, {"full_cost": 1.0}) == planner.LEVERAGE_ANCHOR_SHARE
+    assert planner.anchor_share(case) == planner.LEVERAGE_ANCHOR_SHARE
+    monkeypatch.setenv("BUYER_LEVERAGE_ANCHOR", "0")
+    assert planner.anchor_share(case) == planner.ANCHOR_SHARE
 
 
 def test_concession_step_follows_the_suppliers_movement_in_c(package):

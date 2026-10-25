@@ -30,8 +30,8 @@ STRATEGIC = {"stabilise", "secure_supply"}
 ANCHOR_SHARE, STRATEGIC_ANCHOR_SHARE = 0.86, 0.90
 LEVERAGE_ANCHOR_SHARE = 0.80  # leverage cases ("competition and data should bring the price down"): measured in
 # practice 2026-10-25 against 0.86 - P05 .742 -> .820, P18 .532 -> .598 (its first move off .532 in 27 runs), P08
-# .570 -> .538; net +0.11. Only with a full-cost estimate to floor it (credible_floor): without one, nothing says a
-# deeper opening is still credible. BUYER_LEVERAGE_ANCHOR=0 switches it off.
+# .570 -> .538; net +0.11; sandbox D02 (no estimate) .618 at 0.86 vs .702 at 0.80 (2026-10-25). Floored at the
+# credible floor where a full-cost estimate exists. BUYER_LEVERAGE_ANCHOR=0 switches it off.
 DEFAULT_SUSTAINABLE_MARGIN_PCT = 5
 CANDIDATE_SHARES = (0.98, 1.0)  # strategic cases: prices near its quote where the squeeze charge may be lower; never
 # above its own price - a squeeze saving there rests on a point estimate inside its own error band
@@ -47,13 +47,13 @@ SURPLUS_SHARE = 0.5  # of what an exchange is worth to the supplier beyond its c
 # ---- valuation -------------------------------------------------------------------------------------------------
 
 
-def anchor_share(case: dict, supplier: dict | None = None) -> float:
+def anchor_share(case: dict) -> float:
     """The first offer's share of the supplier's price: 0.90 in stabilise / secure_supply, 0.80 in leverage cases
-    with a full-cost estimate to floor it (unless BUYER_LEVERAGE_ANCHOR=0), 0.86 otherwise."""
+    (unless BUYER_LEVERAGE_ANCHOR=0), 0.86 otherwise."""
     goal = case["buyer"].get("category_goal")
     if goal in STRATEGIC:
         return STRATEGIC_ANCHOR_SHARE
-    if goal == "leverage" and supplier and os.environ.get("BUYER_LEVERAGE_ANCHOR", "1") != "0":
+    if goal == "leverage" and os.environ.get("BUYER_LEVERAGE_ANCHOR", "1") != "0":
         return LEVERAGE_ANCHOR_SHARE
     return ANCHOR_SHARE
 
@@ -344,7 +344,7 @@ def packages(
         previous = (equivalent or prior)["unit_price"]
     goal = b.get("category_goal")
     strategic = goal in STRATEGIC
-    share = anchor_share(case, supplier)
+    share = anchor_share(case)
     anchor = theirs * share
     if supplier and goal == "leverage" and share < ANCHOR_SHARE:  # deeper, but never under its cost
         anchor = max(anchor, min(theirs * ANCHOR_SHARE, credible_floor(supplier, theirs)))
@@ -566,7 +566,7 @@ def rival_anchor(case: dict, sid: str, threads: dict[str, list[dict]], sheets: l
     if not rival_costs:
         return sheets
     std, supplier = standard(case, events), estimates.get(sid)
-    budget = min(min(rival_costs) * anchor_share(case, supplier), min(cost(case, t, std, supplier) for t in sheets))
+    budget = min(min(rival_costs) * anchor_share(case), min(cost(case, t, std, supplier) for t in sheets))
     floor = credible_floor(supplier, own if math.isfinite(own) else math.inf)
     competitive = []
     for sheet in sheets:  # the market anchor, but never under what is credible for this supplier

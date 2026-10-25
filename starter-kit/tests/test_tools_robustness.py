@@ -188,5 +188,5 @@ def test_leverage_anchor_is_deeper_by_default_and_never_under_the_supplier_cost(
     deeper = planner.packages(case, events, supplier)
     theirs = events[0]["term_sheets"][0]["terms"]["unit_price"]
     assert planner.cost(case, deeper[0], std, supplier) <= planner.cost(case, default[0], std, supplier) + 0.01
-    if not supplier or planner.credible_floor(supplier, theirs) >= theirs * planner.ANCHOR_SHARE:
-        assert deeper == default  # no estimate, or its cost floor binds: no deeper opening than the default
+    if supplier and planner.credible_floor(supplier, theirs) >= theirs * planner.ANCHOR_SHARE:
+        assert deeper == default  # its cost floor binds: no deeper opening than the default
