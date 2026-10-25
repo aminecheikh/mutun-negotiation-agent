@@ -82,7 +82,8 @@ def test_candidates_when_any_case_every_claim_checks_out(case, mutate, package):
         found = claims.candidates(case, package, sid, threads)
         seen: set[str] = set()
         for claim in found:
-            assert claim.favours_buyer and 0 < claim.strength <= 1 and claim.kind in claims.PRIORITY
+            # strength 0: held back for a round with no fresh argument (claims._reserve), after every ranked one
+            assert claim.favours_buyer and 0 <= claim.strength <= 1 and claim.kind in claims.PRIORITY
             assert not seen & set(claim.refs), "an ID counts once per case"
             seen |= set(claim.refs)
             for ref in claim.refs:
@@ -184,3 +185,29 @@ def test_live_rival_cites_a_lower_quote_even_with_other_terms_but_not_an_implaus
     assert found and f"offer:{first[4:]}-0" in found[0].refs and found[0].figure == other["unit_price"]
     threads[first][0]["term_sheets"][0]["terms"] = {**other, "unit_price": round(terms["unit_price"] * 0.5, 2)}
     assert claims._live_rival(case, second, threads, {}) == []
+
+
+def test_default_choice_when_no_fresh_argument_is_left_sends_one_held_back_fact():
+    # a round without any argument draws a hold and soon a final offer; a held-back fact keeps the supplier moving
+    held = (Claim("q", ("qn:1",), "quality", 2376.0, True, 0.0), Claim("d", ("sc:2",), "delivery", 80.0, True, 0.0))
+    case = {"suppliers": ["sup:1"], "buyer": {"category_goal": "leverage"}}
+    later = [{"from": "s", "body": "Offer."}, {"from": "buyer"}, {"from": "s", "body": "Offer."}]
+    assert claims.default_choice(case, held, later) == (0,)
+    assert claims.default_choice(case, held, later[:1]) == ()  # never in place of the first message's arguments
+    fresh = (Claim("i", ("idx:a", "idx:b"), "index", -2.0, True, 1.0), *held)
+    assert claims.default_choice(case, fresh, later) == (0,)  # a fresh argument first, the held-back ones stay back
+
+
+def test_reserve_writes_integer_figures_without_a_separator(package):
+    case = CASES["case:P11"]
+    sid = case["suppliers"][0]
+    held = [c for c in claims.candidates(case, package, sid, threads_for(case)) if c.strength == 0]
+    assert held and all("," not in c.sentence.split("(")[0] for c in held)  # "2,376 ppm" reads as another number
+
+
+def test_material_cover_drops_the_material_index_only():
+    case = {"buyer": {"index_paths": {"AS-14404": 0.06}}, "term_options": {}}
+    material = Claim("The AS-14404 index changed -5.5% (idx:a, idx:b).", ("idx:a", "idx:b"), "index", -5.5, True, 0.0)
+    energy = Claim("The PPI-C2431 index changed -2.1% (idx:c, idx:d).", ("idx:c", "idx:d"), "index", -2.1, True, 0.0)
+    kept = claims._relevant([material, energy], [], "Quote remark: Material covered until March 2027.", case)
+    assert kept == [energy]

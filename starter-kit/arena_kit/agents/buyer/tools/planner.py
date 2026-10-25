@@ -579,6 +579,11 @@ def with_agent_package(case: dict, sheets: list[dict], changes: dict, events: li
 FIRM = " This is the firm quantity available; please price it without assuming additional volume."
 
 
+def _plain(x) -> str:
+    """A figure as the supplier reads it: whole numbers without exponent or separator, others as written."""
+    return f"{x:.0f}" if float(x).is_integer() else f"{x:g}"
+
+
 def commercial_brief(case: dict, sheets: list[dict], events: list[dict], unit: str = "units") -> str:
     """The binding commitment of our lead package in plain words: the answer to "which volume can you commit to?",
     with the figures of the sheet itself (the model never writes a number)."""
@@ -586,14 +591,14 @@ def commercial_brief(case: dict, sheets: list[dict], events: list[dict], unit: s
         return ""
     first = closing_terms(case, sheets[0], standard_terms(events))
     months = first["contract_months"]
-    text = f"Our lead package commits {first['volume_per_year']:g} {unit} per year"
-    text += f" for {months:g} months" if months else " as the stated order"
+    text = f"Our lead package commits {_plain(first['volume_per_year'])} {unit} per year"
+    text += f" for {_plain(months)} months" if months else " as the stated order"
     text += "; the alternatives are separate complete offers, not cumulative commitments."
     if message.objections(events)["volume"] and "volume_per_year" not in case["negotiable"]:
         text += FIRM
     text += (
         f" For that commitment we offer EUR {first['unit_price']:.2f} per price unit, "
-        f"payment in {first['payment_days']:g} days and delivery in {first['lead_time_days']:g} days."
+        f"payment in {_plain(first['payment_days'])} days and delivery in {_plain(first['lead_time_days'])} days."
     )
     if index := first.get("index_clause"):
         text += (

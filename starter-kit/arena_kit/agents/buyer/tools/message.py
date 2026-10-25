@@ -29,16 +29,19 @@ PRICE_LOCKED_LETTER = re.compile(  # a letter announcing a binding list price: s
     r"\b(?:ruled out|no longer grant|cannot grant|not grant)\b.{0,30}\bprice reductions?\b"
     r"|\bprice list\b.{0,60}\b(?:all customers|without exception)\b"
     r"|\bprices (?:are|will be) set centrally\b"
+    r"|\bdiscounts? (?:are )?not possible\b"  # a quote remark: "discounts not possible this year (head-office ...)"
 )
 CASH = re.compile(
     r"\b(?:liquidity|cash[ -]?flow|working capital|early payment|payment delay|"
     r"overdue invoice|cash discount|bank is watching|short-time work|prepayment)\b"
     r"|\bpay (?:our|the) invoices within\b"
+    r"|\bpayment within \d+ days requested\b"  # a quote remark
 )
 APPROVAL = re.compile(r"\b(?:committee|management|head office|approval)\b")
 HEDGED = re.compile(
     r"\b(?:hedged|fixed[ -]?price cover)\b"
     r"|\b(?:bought|purchased|covered|secured)\b.{0,60}\bat fixed prices\b"
+    r"|\bmaterial (?:is )?covered until\b"  # a quote remark: "Material covered until March 2027"
 )
 # its latest reply only: an objection it already resolved does not count
 VOLUME_ASKED = re.compile(r"(?:which|what|binding|commit\w*|higher).{0,35}volume|volume.{0,35}commit", re.I)
@@ -178,16 +181,19 @@ def _newest(rows: list[dict]) -> list[dict]:
 
 
 def supplier_documents(case: dict, package, supplier_id: str) -> str:
-    """The text of its newest letters and contracts with us, the case's trigger letter and any letter of the
-    release about it, each cut to DOCUMENT_CHARS."""
+    """The text of its newest letters and contracts with us, the remarks on its quotes, the case's trigger letter
+    when it wrote it (in an RFQ one bidder's letter says what that bidder needs, not the others), and any letter of
+    the release about it, each cut to DOCUMENT_CHARS."""
     if package is None:
         return ""
     documents = [r for r in _rows(package, "documents") if r.get("supplier_id") == supplier_id]
     contracts = [r for r in _rows(package, "contracts") if r.get("supplier_id") == supplier_id]
     refs = [r["id"] for r in _newest(documents)[:MAX_DOCUMENTS] + _newest(contracts)[:MAX_DOCUMENTS]]
-    if trigger := case.get("trigger_doc"):
-        refs.insert(0, trigger)
     facts = getattr(package, "facts", {}) or {}
+    trigger = case.get("trigger_doc")
+    writer = (facts.get(trigger) or {}).get("supplier") if trigger else None
+    if trigger and writer in (None, supplier_id):
+        refs.insert(0, trigger)
     refs += [ref for ref, f in facts.items() if ref.startswith("doc:") and f.get("supplier") == supplier_id]
     known = {r["id"] for r in _rows(package, "documents") + _rows(package, "contracts")}
     known |= {ref for ref in facts if ref.startswith(("doc:", "ctr:"))}
@@ -199,6 +205,8 @@ def supplier_documents(case: dict, package, supplier_id: str) -> str:
             texts.append(package.document(ref)[:DOCUMENT_CHARS])
         except (FileNotFoundError, ValueError):
             continue
+    remarks = {r.get("remarks") for r in _rows(package, "quotes") if r.get("supplier_id") == supplier_id}
+    texts += sorted(f"Quote remark: {r}" for r in remarks if r)
     return "\n".join(texts)
 
 
