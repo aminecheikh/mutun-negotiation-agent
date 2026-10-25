@@ -50,6 +50,10 @@ class Arbiter:
                 log.info("%s: accept of %s deferred - %s is cheaper", s.case["case_id"], th.supplier_id,
                          best.supplier_id)  # fmt: skip
                 return False
+            if not s.in_close_window() and policy.alternative_pending(s, th):
+                log.info("%s: accept of %s deferred - a cheaper alternative is being sent back", s.case["case_id"],
+                         th.supplier_id)  # fmt: skip
+                return False
             message = {"action": {"type": "accept", "term_sheet_id": th.standing_id}}
             return self._close(th, message, f"accept: {reason}")
 

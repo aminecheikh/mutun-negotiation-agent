@@ -14,7 +14,7 @@ import functools
 import logging
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 
 from ...client import ArenaError
 from ...play import fetch_documents, quota_used_up
@@ -25,6 +25,8 @@ from .state import CaseSession, ThreadState
 
 log = logging.getLogger("arena")
 _DOCS = ThreadPoolExecutor(max_workers=8, thread_name_prefix="buyer-docs")  # attachment downloads, never on a move
+# the opening waits this long for its documents: a quarter of the 60 s clock (one GET once took 76 s, run 4)
+OPENING_DOCS_BUDGET_S = 15.0
 
 
 class ThreadWorker:
@@ -84,11 +86,15 @@ class ThreadWorker:
                 checked = guard.build_message(s, th, out.plan.term_sheets, email)
         if checked is None or not checked.message.get("term_sheets"):
             # nothing new we would be content to offer: its standing sheet beats any step of ours - take it; else our
-            # last offer again; else this thread cannot give a deal we accept - stop working it (the arbiter closes)
-            if policy.acceptable(s, th) and self.arbiter.try_accept(th, "no counter beats its standing sheet"):
+            # last offer again; else this thread cannot give a deal we accept - stop working it (the arbiter closes).
+            # The plan only repeating our last e-mail is not "its sheet beats ours": ask a new question first.
+            repeated = out.plan is not None and out.email is not None
+            if not repeated and policy.acceptable(s, th) and self.arbiter.try_accept(th, "no counter beats its sheet"):
                 return
             if (message := repeat_message(s, th)) is not None:
                 self.send(th, message, "repeat", verdict=v, out=out, problems=("no new sheet: our last offer again",))
+                return
+            if repeated and policy.acceptable(s, th) and self.arbiter.try_accept(th, "nothing new left to offer"):
                 return
             with s.lock:
                 th.alive = False
@@ -131,8 +137,9 @@ class ThreadWorker:
                 with s.gate(asked_at):
                     reply = s.table.send(th.supplier_id, message)
             except ArenaError as e:
-                if e.status == 422 and "round limit" in str(e.detail).lower():
-                    # "accept the standing term sheet or walk away": no message can go out - the policy decides
+                if e.status in (409, 422) and "round limit" in str(e.detail).lower():
+                    # "accept the standing term sheet or walk away" (api.md lists it under 409): no message can go
+                    # out - the policy decides
                     log.warning("%s/%s: round limit reached - no more messages", s.case["case_id"], th.supplier_id)
                     th.exhausted = True
                     return
@@ -224,12 +231,35 @@ class ThreadWorker:
 # ---- entry points ---------------------------------------------------------------------------------------
 
 
-def _fetch_all(table, threads: dict[str, list[dict]]) -> None:
-    messages = [m for events in threads.values() for m in events if m.get("attachments")]
-    if not messages:
-        return
-    with ThreadPoolExecutor(max_workers=min(8, len(messages))) as pool:
-        list(pool.map(lambda m: fetch_documents(table, m), messages))
+def _fetch_all(table, threads: dict[str, list[dict]], budget_s: float = OPENING_DOCS_BUDGET_S) -> list[tuple]:
+    """The opening documents, waited for at most `budget_s` (the 60 s clocks already run); the downloads still
+    going on are returned as (future, supplier_id) and finish in the background."""
+    jobs = [
+        (_DOCS.submit(fetch_documents, table, m), sid)
+        for sid, events in threads.items()
+        for m in events
+        if m.get("attachments")
+    ]
+    if not jobs:
+        return []
+    wait([f for f, _ in jobs], timeout=budget_s)
+    return [(f, sid) for f, sid in jobs if not f.done()]
+
+
+def _rebuild_when_fetched(session: CaseSession, pending: list[tuple]) -> None:
+    """A late opening document (e.g. the quote PDF with the standard terms) re-observes its thread once it is in."""
+
+    def done(future, sid: str) -> None:
+        if future.exception() is not None:
+            log.warning("%s/%s: attachment read failed: %s", session.case.get("case_id"), sid, future.exception())
+            return
+        with session.lock:
+            observe.rebuild(session, session.threads[sid])
+        session.notify()
+
+    for future, sid in pending:
+        if sid in session.threads:
+            future.add_done_callback(functools.partial(done, sid=sid))
 
 
 def play_case(table, case_id: str, agent, deadline=None) -> dict:
@@ -240,8 +270,9 @@ def play_case(table, case_id: str, agent, deadline=None) -> dict:
         return table.done
     opened = time.monotonic()
     resumed = any(m.get("from") == "buyer" for events in threads.values() for m in events)
-    _fetch_all(table, threads)
+    pending = _fetch_all(table, threads)
     session = agent.open_case(case, threads, table, deadline, received_at=opened, resumed=resumed)
+    _rebuild_when_fetched(session, pending)
     arbiter = Arbiter(session, agent.telemetry)
     worker = ThreadWorker(agent, session, arbiter)
     pool = ThreadPoolExecutor(max_workers=max(1, len(session.threads)), thread_name_prefix="buyer-thread")

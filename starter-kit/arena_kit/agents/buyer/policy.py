@@ -50,6 +50,7 @@ class Verdict:
     accept_permitted: bool = False  # on a counter: its sheet is acceptable; the agent's accept needs `dominates` too
     note: str = ""  # one line for the logs and the decision agent's rationale
     challenge: tuple[str, str] | None = None  # (best last word's sheet ID, this supplier): its one final challenge
+    send_back: dict | None = None  # its own cheaper alternative sheet: our message is exactly that sheet
 
 
 # ---- the acceptability invariant ---------------------------------------------------------------------------------
@@ -156,6 +157,10 @@ def verdict(session: CaseSession, th: ThreadState, now: float | None = None) -> 
     others = [t for t in session.alive() if t is not th]
     if session.in_close_window():
         return Verdict("accept", "case cap is near") if ok else Verdict("park", "case cap is near, not acceptable")
+    if last_word(session, th) and th.moves_left(session.case) > 0 and (alt := cheaper_alternative(session, th)):
+        # only its standing (first) sheet can be accepted (api.md): send its cheaper proposal back, it will agree
+        return Verdict("counter", "its alternative sheet is cheaper for us: send exactly that alternative back",
+                       send_back=alt)  # fmt: skip
     if last_word(session, th):
         if not ok:
             return Verdict("dead", "its last word is not acceptable: a final offer is never countered")
@@ -200,6 +205,42 @@ def _wait_for_bidders(session: CaseSession, th: ThreadState, others: list[Thread
     if age >= guard:
         return ""  # a last word can be withdrawn after the next timeout: never sacrifice it to a slow bidder
     return f"waiting for the other bidders' best offers ({age:.0f}/{guard:.0f} s)"
+
+
+def cheaper_alternative(session: CaseSession, th: ThreadState) -> dict | None:
+    """The cheapest alternative sheet of the supplier's latest e-mail that costs us less than its standing sheet,
+    keeps the must-haves, beats the best opening and our alternative, and that we have not sent back already - its
+    negotiable fields, ready to send. None otherwise (practice P18: the main sheet was accepted at C 294k next to
+    its own alternative at C 274k)."""
+    last = th.events[-1] if th.events and th.events[-1].get("from") != "buyer" else {}
+    negotiable = list(session.case.get("negotiable") or ())
+    sent = [
+        complete_offer(session.case, ts.get("terms", ts))
+        for m in th.events
+        if m.get("from") == "buyer"
+        for ts in m.get("term_sheets") or []
+    ]
+    best, best_c = None, th.c
+    for ts in (last.get("term_sheets") or [])[1:]:
+        terms = complete_offer(session.case, ts.get("terms") or {})
+        if terms.get("unit_price") is None or not must_haves_ok(session.case, terms, th.std) or terms in sent:
+            continue
+        c = session.cost(th.supplier_id, terms)
+        if c < best_c and c < session.c_open and (session.c_alt is None or c <= session.c_alt):
+            best, best_c = {f: terms.get(f) for f in negotiable}, c
+    return best
+
+
+def alternative_pending(session: CaseSession, th: ThreadState) -> bool:
+    """Another live thread is about to send back its supplier's alternative that is cheaper than this standing sheet:
+    an accept here waits for that answer (outside the close window)."""
+    for other in session.alive():
+        if other is th or other.in_flight or not last_word(session, other) or other.moves_left(session.case) <= 0:
+            continue
+        alt = cheaper_alternative(session, other)
+        if alt is not None and session.cost(other.supplier_id, alt) < th.c:
+            return True
+    return False
 
 
 # ---- the case-level walk -----------------------------------------------------------------------------------------

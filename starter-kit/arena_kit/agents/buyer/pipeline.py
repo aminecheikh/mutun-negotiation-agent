@@ -112,7 +112,11 @@ class RolePipeline:
             if timeout <= 0:
                 used[name] = "skipped"
                 return fallback()
-            future = _POOL.submit(main)
+            try:
+                future = _POOL.submit(main)
+            except RuntimeError:  # the pool is shut down (interpreter exit, case over): no model, the rule twin
+                used[name] = "skipped"
+                return fallback()
             try:
                 out = future.result(timeout=timeout)
                 used[name] = "main"
@@ -166,10 +170,15 @@ class RolePipeline:
         reads = {sid: read}
         view = {sid: events}
         t0 = time.monotonic()
-        offers = {"follow": self._plan(ctx, session, th, Tactic(sid, "send"), used)}
-        for price in ("trim", "push"):
-            if policy.margin_allowed(session, th, price):
-                offers[price] = self._plan(ctx, session, th, Tactic(sid, "send", price=price), {})
+        if v.send_back is not None:  # its own cheaper alternative, unchanged: the one sheet of this message
+            alt = v.send_back
+            offers = {"follow": OfferPlan(sid, (alt,), (session.cost(sid, alt),), "its own alternative sent back")}
+            used["plan"] = "send_back"
+        else:
+            offers = {"follow": self._plan(ctx, session, th, Tactic(sid, "send"), used)}
+            for price in ("trim", "push"):
+                if policy.margin_allowed(session, th, price):
+                    offers[price] = self._plan(ctx, session, th, Tactic(sid, "send", price=price), {})
         timings["plan"] = int((time.monotonic() - t0) * 1000)
         ctx = replace(ctx, offers={**ctx.offers, sid: offers})
         rule_tactic = self._safe(
@@ -191,7 +200,7 @@ class RolePipeline:
         tactic = self.reserve_arguments(session, th, ctx, tactic)
 
         plan = offers.get(tactic.price, offers["follow"])
-        if tactic.package and hasattr(self.tools, "add_package"):
+        if tactic.package and v.send_back is None and hasattr(self.tools, "add_package"):
             try:
                 plan = self.tools.add_package(ctx, sid, self.threads(session), plan, tactic.package)
             except Exception:
@@ -262,14 +271,29 @@ def last_offer(session: CaseSession, th: ThreadState) -> OfferPlan:
     return OfferPlan(th.supplier_id, sheets, tuple(session.cost(th.supplier_id, s) for s in sheets), "our last offer")
 
 
-REPEAT_BODY = "\n".join([message.INTRO, "Our proposal attached stands.", message.SIGN_OFF])
+REPEAT_LINE = "Our proposal attached stands."
+# a round with nothing new to offer still asks something new (sandbox D02, 18:22: the same keep-alive 3x)
+REPEAT_QUESTIONS = (
+    "Which of our terms - payment, contract length, volume or start date - would let you move on price?",
+    "What would you need from us to come closer to our proposal?",
+    "Which cost element keeps your price where it is, so that we can look at it together?",
+)
 
 
 def repeat_message(session: CaseSession, th: ThreadState) -> dict | None:
-    """Our last sheets again where the guard still lets them go out, or None: an answer within 60 s that concedes
-    nothing (only when no new sheet of the planner may go out)."""
-    sheets, _ = guard.check_sheets(session, th, last_offer(session, th).term_sheets)
-    if not sheets:
+    """Our last sheets again where the guard still lets them go out, with a question we have not asked yet - or None:
+    an answer within 60 s that concedes nothing (only when no new sheet of the planner may go out). After one such
+    repeat the supplier must have moved for another; standing still on both sides, the thread has nothing left."""
+    ours = [[ts.get("terms", ts) for ts in m["term_sheets"]] for m in th.events
+            if m.get("from") == "buyer" and m.get("term_sheets")]  # fmt: skip
+    moved = len(th.c_history) >= 2 and th.c_history[-1] < th.c_history[-2] * planner.STILL_SHARE
+    if len(ours) >= 2 and ours[-1] == ours[-2] and not moved:
         return None
+    asked = " ".join(str(m.get("body") or "") for m in th.events if m.get("from") == "buyer")
+    question = next((q for q in REPEAT_QUESTIONS if q not in asked), None)
+    sheets, _ = guard.check_sheets(session, th, last_offer(session, th).term_sheets)
+    if not sheets or question is None:
+        return None
+    body = "\n".join([message.INTRO, f"{REPEAT_LINE} {question}", message.SIGN_OFF])
     sheets = [{"terms": t} for t in sheets]
-    return {"subject": message.subject(session.case), "body": REPEAT_BODY, "term_sheets": sheets, "refs": []}
+    return {"subject": message.subject(session.case), "body": body, "term_sheets": sheets, "refs": []}
