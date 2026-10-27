@@ -34,6 +34,7 @@ How it works: the module docstrings (start with `runner.py`, then `policy.py`). 
 - integration run with the real data package + Saed's roles (local merge): found two RFQ bidders sent the same index pair in the same second (`duplicate`); fixed by reserving IDs atomically before each POST - 0046f39; 3 reruns: 80 claims, all verified
 - LLMProfiler wired, dossiers refined in parallel - ee09a3e; `p_room` in the rival logic - d5ed30a
 - merged main with Saed's roles (98f9013): kept his factory wiring inside the orchestrator; full suite 413 passed, ruff clean; real-data sim run 27/27 claims verified
+- Sat late - **buyer v2** on `feat/Agents-v2` (user-requested): a team of agents (reader, deal, counterpart, market in parallel with their own read-only tools over all data; a negotiator that decides accept / counter / walk_away and writes; hard rules in code), new prompts, its own runner and coordinator. Selected by `AGENTIC_STRUCTURE` (1 = v2, the default; 0 = v1 unchanged); `--agent buyer_v1/buyer_v2` explicit. Shared deterministic tools are imported, not copied. Design and limits: `docs/agents-v2.md`. Not yet run with a live model or on the hosted arena.
 
 ## Runs
 
