@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass, replace
 from typing import Literal
 
-from ...cost import complete_offer, must_haves_ok
+from ...cost import closing_terms, complete_offer, must_haves_ok
 from ...play import latest
 from .contracts import OfferPlan, Tactic
 from .state import CaseSession, ThreadState
@@ -203,6 +203,32 @@ def _wait_for_bidders(session: CaseSession, th: ThreadState, others: list[Thread
 
 
 # ---- the case-level walk -----------------------------------------------------------------------------------------
+
+
+CHEAPER_ALTERNATIVE_SHARE = 0.998  # cheaper beyond rounding (0.2 %, the planner's equal-C tolerance)
+
+
+def final_alternative(session: CaseSession, th: ThreadState) -> dict | None:
+    """Its final offer carries a cheaper alternative sheet than the standing one (which is all we may accept): that
+    alternative, complete, to send back once - it proposed it, so it agrees and we accept (P18: the main sheet 0.44
+    accepted over its own alternative 0.47). None if we already sent it back or have no message left."""
+    if th.status != "final_offer" or th.moves_left(session.case) < 1:
+        return None
+    case = session.case
+    best, best_c = None, th.c * CHEAPER_ALTERNATIVE_SHARE
+    for sheet in (latest(th.events).get("term_sheets") or [])[1:]:
+        full = closing_terms(case, sheet.get("terms") or {}, th.std)
+        terms = {f: full[f] for f in case["negotiable"] if f in full}
+        if terms.get("unit_price") is None or not must_haves_ok(case, terms, th.std):
+            continue
+        c = session.cost(th.supplier_id, terms)
+        if c < best_c:
+            best, best_c = terms, c
+    if best is None:
+        return None
+    ours = [m for m in th.events if m.get("from") == "buyer" and m.get("term_sheets")]
+    sent = [ts.get("terms", ts) for ts in ours[-1]["term_sheets"]] if ours else []
+    return None if any(all(s.get(f) == v for f, v in best.items()) for s in sent) else best
 
 
 def walk_reason(session: CaseSession) -> str | None:

@@ -48,3 +48,7 @@ decision - why`. Changing `contracts.py` always needs an entry here.
 - 2026-10-24 20:10 - team (user, organisers' rule) - No inter-supplier comparison: each supplier is negotiated on its
   own. No rival claims, no rival anchors, no offer IDs in messages, no thread parked for a rival; the close still
   never signs a dearer acceptable sheet over a cheaper one.
+- 2026-10-25 09:30 - team (Saeb) - **Replaces 2026-10-24 20:10.** Rival arguments are allowed: api.md "What counts"
+  lists another supplier's quote or offer as a checked claim ("in an RFQ you may cite it to every other bidder").
+  The hybrid buyer cites the lowest compliant rival quote, anchors to it and may park a thread for a rival. Each
+  supplier is still negotiated in its own thread; nothing false is stated about a rival.

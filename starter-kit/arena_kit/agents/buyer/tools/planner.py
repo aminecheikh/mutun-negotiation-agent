@@ -330,7 +330,8 @@ def packages(
     if supplier and goal == "leverage" and anchor_share(case) < ANCHOR_SHARE:  # deeper, but never under its cost
         anchor = max(anchor, min(theirs * ANCHOR_SHARE, supplier["full_cost"]))
     if supplier and strategic:  # never under what keeps the supplier at its sustainable margin
-        margin = b.get("sustainable_margin_pct", DEFAULT_SUSTAINABLE_MARGIN_PCT) / 100
+        stated = b.get("sustainable_margin_pct")  # may be present as null: then the documented default
+        margin = (DEFAULT_SUSTAINABLE_MARGIN_PCT if stated is None else stated) / 100
         anchor = max(anchor, min(theirs, supplier["full_cost"] / max(0.5, 1 - margin)))
     step = min(1.0, concession_step(case, events, supplier))
     price = previous + max(0.0, theirs - previous) * step if previous is not None else anchor
